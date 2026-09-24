@@ -1,0 +1,46 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+main {
+  box-sizing: border-box;
+  padding: 2rem 1rem;
+}
+
+.skip-link {
+  position: fixed;
+  left: 1rem;
+  top: -4rem;
+  z-index: 10;
+  padding: 0.75rem 1rem;
+  background: white;
+  color: #132f4c;
+}
+
+.skip-link:focus {
+  top: 1rem;
+}
+
+.brand {
+  font-weight: 600;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.section-label {
+  font-size: 0.9rem;
+}
+
+@media (max-width: 36rem) {
+  main {
+    padding: 1rem 0.75rem;
+  }
+
+  .section-label {
+    display: none;
+  }
+}

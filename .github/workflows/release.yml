@@ -1,0 +1,100 @@
+name: Release images
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate semantic version tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag inválida: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+      - name: Ensure tagged commit belongs to main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Backend full quality gates
+        working-directory: backend
+        run: |
+          chmod +x mvnw
+          ./mvnw --batch-mode verify
+          ./mvnw --batch-mode -Pmutation verify -DskipITs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend full suite
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --audit-level=moderate
+          npm run test:ci
+          npm run build
+          npx playwright install --with-deps chromium
+          npm run e2e
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Compute immutable version
+        id: version
+        shell: bash
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Build and push backend
+        id: backend
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: ${{ secrets.DOCKERHUB_BACKEND_REPOSITORY }}:${{ steps.version.outputs.value }}
+      - name: Build and push frontend
+        id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: ${{ secrets.DOCKERHUB_FRONTEND_REPOSITORY }}:${{ steps.version.outputs.value }}
+      - name: Write release manifest
+        shell: bash
+        run: |
+          mkdir -p release
+          printf '%s\n' \
+            "version=${{ steps.version.outputs.value }}" \
+            "commit=${GITHUB_SHA}" \
+            "backend=${{ secrets.DOCKERHUB_BACKEND_REPOSITORY }}@${{ steps.backend.outputs.digest }}" \
+            "frontend=${{ secrets.DOCKERHUB_FRONTEND_REPOSITORY }}@${{ steps.frontend.outputs.digest }}" \
+            > release/manifest.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.version.outputs.value }}
+          path: release/manifest.txt

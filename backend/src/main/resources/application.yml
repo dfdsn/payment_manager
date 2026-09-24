@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: account-manager
+  flyway:
+    enabled: false
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  session:
+    jdbc:
+      initialize-schema: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+server:
+  servlet:
+    context-path: /api/v1
+    session:
+      timeout: 7d
+      cookie:
+        http-only: true
+        same-site: lax
+  shutdown: graceful

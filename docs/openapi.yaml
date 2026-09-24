@@ -1,0 +1,206 @@
+openapi: 3.1.0
+info:
+  title: account_Manager API
+  version: 0.1.0
+  description: Contrato versionado dos endpoints implementados até H01.1.
+servers:
+  - url: /api/v1
+paths:
+  /setup/status:
+    get:
+      operationId: getInitialSetupStatus
+      summary: Consulta se a configuração inicial está disponível
+      responses:
+        "200":
+          description: Estado consultado; também emite o cookie XSRF-TOKEN.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupStatus"
+  /setup:
+    post:
+      operationId: configureInitialAdministratorAndSpace
+      summary: Cria o primeiro administrador e seu espaço uma única vez
+      description: >-
+        Requer que X-XSRF-TOKEN corresponda ao cookie XSRF-TOKEN e que
+        X-Setup-Secret contenha o segredo temporário configurado no servidor.
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+          setupSecret: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitialSetupRequest"
+      responses:
+        "201":
+          description: Administrador, espaço e associação criados atomicamente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitialSetupResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: >-
+            CSRF ausente/inválido (o filtro pode responder sem corpo) ou segredo
+            temporário incorreto (ApiError com code SETUP_SECRET_INVALID).
+        "409":
+          description: A configuração inicial já foi concluída.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: O segredo temporário não está configurado no servidor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /identity/me:
+    get:
+      operationId: getAuthenticatedUserContext
+      summary: Retorna identidade, papel e espaço do principal autenticado
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Associação ativa do usuário autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticatedUserContext"
+        "403":
+          description: >-
+            Sem sessão autenticada (o filtro pode responder sem corpo) ou sem
+            associação ativa (ApiError com code ACTIVE_SPACE_ACCESS_NOT_FOUND).
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: SESSION
+    xsrfCookie:
+      type: apiKey
+      in: cookie
+      name: XSRF-TOKEN
+    xsrfHeader:
+      type: apiKey
+      in: header
+      name: X-XSRF-TOKEN
+    setupSecret:
+      type: apiKey
+      in: header
+      name: X-Setup-Secret
+  responses:
+    BadRequest:
+      description: Campos ou invariantes inválidos.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+  schemas:
+    SetupStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, SECRET_NOT_CONFIGURED, COMPLETED]
+    InitialSetupRequest:
+      type: object
+      additionalProperties: false
+      required: [administratorName, email, password, spaceName]
+      properties:
+        administratorName:
+          type: string
+          minLength: 2
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 72
+          description: Até 72 bytes UTF-8, contendo ao menos uma letra e um número.
+        spaceName:
+          type: string
+          minLength: 2
+          maxLength: 100
+    InitialSetupResult:
+      type: object
+      required: [administratorId, administratorName, email, spaceId, spaceName, currency, locale, timeZone]
+      properties:
+        administratorId:
+          type: string
+          format: uuid
+        administratorName:
+          type: string
+        email:
+          type: string
+          format: email
+        spaceId:
+          type: string
+          format: uuid
+        spaceName:
+          type: string
+        currency:
+          const: BRL
+        locale:
+          const: pt-BR
+        timeZone:
+          const: America/Sao_Paulo
+    AuthenticatedUserContext:
+      type: object
+      required: [userId, displayName, email, spaceId, spaceName, role, currency, locale, timeZone]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        email:
+          type: string
+          format: email
+        spaceId:
+          type: string
+          format: uuid
+        spaceName:
+          type: string
+        role:
+          type: string
+          enum: [ADMINISTRATOR, GUEST]
+        currency:
+          const: BRL
+        locale:
+          const: pt-BR
+        timeZone:
+          const: America/Sao_Paulo
+    ApiError:
+      type: object
+      required: [code, message, fieldErrors, operationId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        fieldErrors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+        operationId:
+          type: string
+          format: uuid
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string

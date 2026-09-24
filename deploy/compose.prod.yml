@@ -1,0 +1,84 @@
+name: account-manager
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:?Defina POSTGRES_IMAGE com tag/digest aprovado}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+      - setup_secret
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    image: ${BACKEND_IMAGE:?Defina BACKEND_IMAGE com tag imutável}
+    environment: &backend-environment
+      APP_MODE: migrate
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD_FILE: /run/secrets/postgres_password
+      APP_ENVIRONMENT: production
+      APP_INTEGRATIONS_MODE: real
+      APP_SETUP_SECRET_FILE: /run/secrets/setup_secret
+      SERVER_SERVLET_SESSION_COOKIE_SECURE: "true"
+    secrets:
+      - postgres_password
+      - setup_secret
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    profiles: ["migration"]
+
+  backend:
+    image: ${BACKEND_IMAGE:?Defina BACKEND_IMAGE com tag imutável}
+    environment:
+      <<: *backend-environment
+      APP_MODE: runtime
+      SPRING_FLYWAY_ENABLED: "false"
+    secrets:
+      - postgres_password
+    volumes:
+      - private-files:/var/lib/account-manager/files
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8080/api/v1/actuator/health | grep -q UP"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?Defina FRONTEND_IMAGE com tag imutável}
+    ports:
+      - "80:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/healthz | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  private-files:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  setup_secret:
+    file: ./secrets/setup_secret.txt

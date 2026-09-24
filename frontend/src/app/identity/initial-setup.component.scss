@@ -1,0 +1,15 @@
+.setup-container { display: grid; place-items: start center; }
+mat-card { width: min(100%, 42rem); }
+mat-card-content { padding-top: 1.5rem; }
+form { display: grid; gap: 0.75rem; }
+.intro { margin-top: 0; }
+.state { display: grid; justify-items: start; gap: 0.75rem; }
+.warning, .error-summary { border-left: 0.25rem solid #b25e09; padding: 0.75rem 1rem; background: #fff5e8; }
+.error-summary { margin-bottom: 1rem; border-color: #ba1a1a; background: #ffdad6; }
+.success h2, .state h2 { margin-bottom: 0; }
+dl { display: grid; gap: 0.5rem; }
+dl div { display: grid; grid-template-columns: 6rem 1fr; }
+dt { font-weight: 600; }
+dd { margin: 0; }
+button[type='submit'] { justify-self: start; margin-top: 0.5rem; }
+@media (max-width: 36rem) { dl div { grid-template-columns: 1fr; } }
