@@ -29,6 +29,14 @@ services:
       APP_ENVIRONMENT: production
       APP_INTEGRATIONS_MODE: real
       APP_SETUP_SECRET_FILE: /run/secrets/setup_secret
+      APP_BASE_URL: ${APP_BASE_URL:?Defina APP_BASE_URL com HTTPS}
+      SMTP_HOST: ${SMTP_HOST:?Defina SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:?Defina SMTP_USERNAME}
+      SMTP_FROM: ${SMTP_FROM:?Defina SMTP_FROM}
+      SMTP_AUTH: "true"
+      SMTP_STARTTLS: "true"
+      SMTP_STARTTLS_REQUIRED: "true"
       SERVER_SERVLET_SESSION_COOKIE_SECURE: "true"
     secrets:
       - postgres_password
@@ -45,8 +53,11 @@ services:
       <<: *backend-environment
       APP_MODE: runtime
       SPRING_FLYWAY_ENABLED: "false"
+      SMTP_PASSWORD_FILE: /run/secrets/smtp_password
     secrets:
       - postgres_password
+      - setup_secret
+      - smtp_password
     volumes:
       - private-files:/var/lib/account-manager/files
     depends_on:
@@ -67,7 +78,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/healthz | grep -q ok"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz | grep -q ok"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -82,3 +93,5 @@ secrets:
     file: ./secrets/postgres_password.txt
   setup_secret:
     file: ./secrets/setup_secret.txt
+  smtp_password:
+    file: ./secrets/smtp_password.txt

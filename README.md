@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica PREP-01 a PREP-04 está implementada, com as validações externas identificadas em `docs/progresso.md`. A história H01.1 adiciona a configuração protegida e atômica do primeiro administrador e de seu espaço. Login, confirmação de email e recuperação pertencem à H01.2; despesas ainda não foram iniciadas.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica PREP-01 a PREP-04 e as histórias H01.1–H01.2 estão validadas. A confirmação e a recuperação da H01.2 também foram entregues por Gmail real; o convite externo permanece para H01.3. Despesas ainda não foram iniciadas.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. A migration V1 contém a baseline e a V2 cria usuário, espaço, associação, bloqueio persistente do setup e tabelas JDBC da sessão.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. A V1 contém a baseline, a V2 cria usuário, espaço, associação, bloqueio persistente e tabelas JDBC da sessão, e a V3 adiciona tokens de acesso de uso único.
 
 ## Pré-requisitos
 
@@ -98,7 +98,7 @@ APP_SETUP_SECRET=substitua-por-um-segredo-temporario-aleatorio \
 cd ..
 ```
 
-Resultado esperado: Flyway aplica `V1__technical_baseline.sql` e `V2__initial_administrator_and_space.sql` (ou informa que ambas já estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
+Resultado esperado: Flyway aplica V1, V2 e `V3__account_access.sql` (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
 
 ### 3. Backend
 
@@ -110,7 +110,7 @@ Set-Location backend
 .\mvnw.cmd spring-boot:run
 ```
 
-Saúde: `http://localhost:8080/api/v1/actuator/health`. Mantenha `APP_SETUP_SECRET` somente até concluir a configuração inicial. Não existe senha automática do Spring; o login com a conta criada será implementado em H01.2.
+Saúde: `http://localhost:8080/api/v1/actuator/health`. Mantenha `APP_SETUP_SECRET` somente até concluir a configuração inicial. A autenticação usa exclusivamente a conta criada; a auto-configuração de usuário/senha do Spring está desabilitada.
 
 ### 4. Frontend
 
@@ -137,14 +137,21 @@ Acesse `http://localhost:8080`. Essa composição é apenas local, usa build e c
 ### Administração inicial
 
 1. Gere um segredo temporário aleatório e informe-o ao backend em `APP_SETUP_SECRET`. Não o reutilize como senha do administrador.
-2. Execute a migration V2 antes do runtime, conforme os passos anteriores.
+2. Execute as migrações V1–V3 antes do runtime, conforme os passos anteriores.
 3. Abra o frontend, preencha nome, email, senha, nome do espaço e o segredo temporário. A senha deve ter de 12 caracteres a 72 bytes UTF-8 e conter ao menos uma letra e um número.
 4. A criação de usuário, espaço, papel `ADMINISTRATOR` e fechamento do setup ocorre em uma única transação. O espaço começa com moeda `BRL`, idioma `pt-BR` e fuso `America/Sao_Paulo`.
 5. Ao receber sucesso, remova `APP_SETUP_SECRET` e reinicie o backend. A linha de controle no PostgreSQL mantém o setup fechado mesmo após reinício ou troca do segredo. Uma nova tentativa retorna conflito e não cria registros extras.
 
-O segredo é enviado apenas no header `X-Setup-Secret`, nunca no corpo ou armazenamento do navegador. O endpoint público de estado emite o cookie CSRF e o POST exige o par `XSRF-TOKEN`/`X-XSRF-TOKEN`; o frontend trata isso automaticamente. Sem segredo configurado, o estado informa indisponibilidade e o POST é recusado. O fluxo não autentica o usuário: confirmação e entrada são H01.2.
+O segredo é enviado apenas no header `X-Setup-Secret`, nunca no corpo ou armazenamento do navegador. O endpoint público de estado emite o cookie CSRF e o POST exige o par `XSRF-TOKEN`/`X-XSRF-TOKEN`; o frontend trata isso automaticamente. Sem segredo configurado, o estado informa indisponibilidade e o POST é recusado. O setup não autentica automaticamente: confirme o email e entre pelo fluxo abaixo.
 
-O contrato protegido `GET /api/v1/identity/me` já retorna identidade, papel e espaço da associação ativa correspondente ao email do principal autenticado. Ele responde somente após autenticação do Spring Security; H01.2 implementará a criação da sessão e ligará a navegação a esse contexto. Não existe bypass público para consultar usuário ou espaço.
+### Confirmar email, entrar e recuperar acesso
+
+1. Em `/confirmar-email`, informe o email do administrador. A resposta é sempre genérica para não revelar contas. No ambiente local, abra Mailpit em `http://localhost:8025` e siga o link recebido; ele expira em 24 horas e deixa de funcionar após uso ou reenvio.
+2. Entre em `/entrar`. Somente email confirmado e credenciais válidas criam o cookie `SESSION`, HttpOnly e SameSite=Lax. O contexto protegido `GET /api/v1/identity/me` retorna identidade, papel e espaço; chamadas sem sessão recebem 401.
+3. Em `/recuperar-acesso`, solicite o link e abra-o pelo Mailpit. O token expira em 30 minutos, é de uso único e um reenvio invalida o anterior. A nova senha segue a mesma política do setup e o sucesso revoga todas as sessões existentes.
+4. “Sair” invalida a sessão atual; “Encerrar todas as sessões” remove todas as sessões JDBC da conta.
+
+As sessões expiram após sete dias sem atividade humana e sempre após 30 dias desde sua criação. Requisições GET só renovam a inatividade quando enviam `X-User-Activity: true`; mutações autenticadas contam como atividade. Nenhuma credencial ou token é armazenado no frontend. Mailpit comprova apenas captura local, não entrega externa.
 
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
@@ -160,18 +167,18 @@ Da raiz, para toda a suíte de integração configurada:
 & .\backend\scripts\run-integration-tests.ps1
 ```
 
-Somente para os dois testes de identidade/migração:
+Somente para os testes de setup, migração e acesso da H01.2:
 
 ```powershell
 & .\backend\scripts\run-integration-tests.ps1 `
-  -Tests InitialSetupPostgresIT,FlywayPostgresIT
+  -Tests InitialSetupPostgresIT,FlywayPostgresIT,AccountAccessPostgresIT
 ```
 
 De outro diretório, use o caminho absoluto do checkout:
 
 ```powershell
 & 'C:\CAMINHO\account_Manager\backend\scripts\run-integration-tests.ps1' `
-  -Tests InitialSetupPostgresIT,FlywayPostgresIT
+  -Tests InitialSetupPostgresIT,FlywayPostgresIT,AccountAccessPostgresIT
 ```
 
 O script não solicita elevação nem modifica configuração persistente. Se o sandbox do Codex negar acesso a `.docker/config.json` ou ao named pipe, a execução deve ser solicitada pelo mecanismo oficial de permissões do ambiente. Se isso não for autorizado, execute manualmente um dos comandos acima no PowerShell do usuário. Não exponha Docker por TCP, não altere suas permissões e não desabilite o sandbox globalmente.
@@ -195,7 +202,7 @@ cd backend
 ```
 
 - `test`: JUnit/Spring e ArchUnit; não executa classes `*IT`.
-- `verify`: inclui `FlywayPostgresIT` e `InitialSetupPostgresIT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. O segundo prova atomicidade concorrente, defaults e bloqueio após nova instância da aplicação.
+- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V3, atomicidade concorrente do setup e tokens/revogação persistidos.
 - `-Pmutation`: PIT sobre domínio/aplicação. `-DskipITs` evita criar PostgreSQL novamente; não elimina unitários nem gates.
 - JaCoCo: linhas ≥80% e branches ≥70% em domínio/aplicação.
 - PIT: mutação ≥70% e cobertura de linhas ≥80% no código mutado.
@@ -219,14 +226,16 @@ npm audit --audit-level=moderate
 npm run test:ci
 npm run build
 npm run e2e:smoke
+npm run e2e:full-stack
 npm run e2e
 ```
 
-O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada por esse teste e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele cria o administrador pela UI, lê os links no Mailpit, confirma, testa credencial inválida/válida, redefine a senha, comprova revogação e rejeita reutilização do token. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
-- Email local: Mailpit, identificável e sem entrega externa.
+- Email local: Mailpit, identificável e sem entrega externa. O backend usa SMTP em `SMTP_HOST`/`SMTP_PORT` e `SMTP_FROM`.
+- Email real: configure `SMTP_HOST=smtp.gmail.com`, porta 587, autenticação e STARTTLS; injete usuário por variável e senha de app pelo secret `smtp_password`. Não use a senha normal da conta nem registre o valor. Só considere validado após P04 comprovar entrega real de confirmação e recuperação.
 - WhatsApp e IA: nenhum adapter falso foi criado nesta preparação; ficam indisponíveis até suas histórias.
 - Produção: `APP_ENVIRONMENT=production` rejeita `APP_INTEGRATIONS_MODE` diferente de `real`.
 - Gmail, Meta e Groq reais dependem de P03/P04/P05 e de credenciais fornecidas fora do Git.
@@ -241,7 +250,7 @@ Nunca versione `.env`, arquivos em `deploy/secrets/`, banco, backups, anexos, to
 2. Node 24.18, `npm ci`, audit, Vitest, build e smoke Playwright.
 3. Upload dos relatórios mesmo em falha.
 
-No GitHub, configure `main` protegida, exija PR e os jobs `backend` e `frontend`, proíba force-push e merge sem checks. O diretório entregue nesta execução não continha `.git`, portanto workflow e proteção ainda não foram executados/confirmados num repositório remoto.
+No GitHub, configure `main` protegida, exija PR e os jobs `backend` e `frontend`, proíba force-push e merge sem checks. A execução CI do commit `737f46a` passou em Java 21/Node 24.18; proteção de branch continua sendo configuração externa a conferir no repositório.
 
 ## Docker Hub e release
 
@@ -305,4 +314,4 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. A persistência/concorrência da H01.1 foi aprovada com PostgreSQL 17.6/Testcontainers. Restam o smoke full-stack e os gates em JDK 21/CI antes de concluir a história; depois, a próxima recomendada é **H01.2 — Entrar, confirmar email e recuperar acesso**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H01.1 e H01.2 estão concluídas: além dos gates locais, confirmação e recuperação foram entregues e consumidas por Gmail real. P04 continua aberta apenas para o convite externo, que pertence à próxima história recomendada: **H01.3 — Convidar e aceitar o segundo membro**.

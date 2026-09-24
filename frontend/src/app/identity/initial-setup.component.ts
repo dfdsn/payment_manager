@@ -7,11 +7,12 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { finalize } from 'rxjs';
+import { RouterLink } from '@angular/router';
 import { ApiError, InitialSetupResult, InitialSetupService, InitialSetupStatus } from './initial-setup.service';
 
 @Component({
   selector: 'app-initial-setup',
-  imports: [ReactiveFormsModule, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule, MatProgressSpinnerModule],
+  imports: [ReactiveFormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule, MatProgressSpinnerModule],
   templateUrl: './initial-setup.component.html',
   styleUrl: './initial-setup.component.scss',
 })

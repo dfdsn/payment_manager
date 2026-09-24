@@ -13,9 +13,13 @@ import com.malyah.accountmanager.identity.application.InvalidSetupSecretExceptio
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException;
 import com.malyah.accountmanager.identity.application.SetupAlreadyCompletedException;
 import com.malyah.accountmanager.identity.application.SetupSecretUnavailableException;
+import com.malyah.accountmanager.identity.application.InvalidCredentialsException;
+import com.malyah.accountmanager.identity.application.InvalidOrExpiredAccessTokenException;
 import com.malyah.accountmanager.identity.domain.IdentityValidationException;
 
-@RestControllerAdvice(assignableTypes = { InitialSetupController.class, AuthenticatedUserContextController.class })
+@RestControllerAdvice(assignableTypes = {
+        InitialSetupController.class, AuthenticatedUserContextController.class, AuthenticationController.class
+})
 class IdentityApiExceptionHandler {
 
     @ExceptionHandler(IdentityValidationException.class)
@@ -50,6 +54,16 @@ class IdentityApiExceptionHandler {
     @ExceptionHandler(AuthenticatedUserContextNotFoundException.class)
     ResponseEntity<ApiError> contextNotFound(AuthenticatedUserContextNotFoundException exception) {
         return response(HttpStatus.FORBIDDEN, "ACTIVE_SPACE_ACCESS_NOT_FOUND", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    ResponseEntity<ApiError> invalidCredentials(InvalidCredentialsException exception) {
+        return response(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(InvalidOrExpiredAccessTokenException.class)
+    ResponseEntity<ApiError> invalidToken(InvalidOrExpiredAccessTokenException exception) {
+        return response(HttpStatus.BAD_REQUEST, "ACCESS_TOKEN_INVALID", exception.getMessage(), List.of());
     }
 
     private ResponseEntity<ApiError> response(

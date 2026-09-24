@@ -9,6 +9,7 @@
     "test": "ng test",
     "test:ci": "ng test --watch=false",
     "e2e:smoke": "playwright test e2e/smoke.spec.ts",
+    "e2e:full-stack": "playwright test --config playwright.full-stack.config.ts",
     "e2e": "playwright test"
   },
   "private": true,

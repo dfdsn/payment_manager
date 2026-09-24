@@ -1,0 +1,10 @@
+.access-container { display: grid; place-items: start center; }
+mat-card { width: min(100%, 36rem); }
+mat-card-content { padding-top: 1.5rem; }
+form { display: grid; gap: 0.75rem; }
+.error-summary, .success-summary { padding: 0.75rem 1rem; margin-bottom: 1rem; border-left: 0.25rem solid; }
+.error-summary { border-color: #ba1a1a; background: #ffdad6; }
+.success-summary { border-color: #247238; background: #d8f7df; }
+.links { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; margin-top: 1.25rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+button[type='submit'] { justify-self: start; }

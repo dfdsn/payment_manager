@@ -45,15 +45,14 @@ Este registro acompanha o PRD v2.0, os épicos e a especificação técnica. **A
 
 ## Pendências reais e critérios para encerramento
 
-Estão **abertas**. P00 foi parcialmente exercitada nesta entrega; as demais não foram tentadas. Uma pendência bloqueia apenas a etapa indicada, não todo o projeto. Responsável técnico pode escolher parâmetros internos reversíveis; decisões de custo, acesso a contas e alteração funcional pertencem a Diego.
+P01–P09 estão **abertas**. P00 foi encerrada pelas evidências locais e de CI descritas abaixo. Uma pendência bloqueia apenas a etapa indicada, não todo o projeto. Responsável técnico pode escolher parâmetros internos reversíveis; decisões de custo, acesso a contas e alteração funcional pertencem a Diego.
 
 | ID | Pendência / responsável | Evidência para encerrar | Etapa afetada |
 |---|---|---|---|
-| P00 | Compatibilidade e patches da stack — desenvolvimento. | PREP-01 executado: Java/Spring/JUnit, PostgreSQL/Flyway/Testcontainers, JaCoCo/PIT e Angular/Material passam juntos, versões fixadas e relatório anexado. Especial atenção a JUnit efetivo do BOM e plugin PIT. | Fundação técnica e gates da CI. |
 | P01 | Plano Docker Hub para dois repositórios privados — Diego + desenvolvimento. | Verificar plano/limites da conta, criar os dois repositórios e testar publicação/leitura com credenciais de menor privilégio. Se houver custo adicional, aprovação antes de contratar. | Publicação de imagens privadas; não bloqueia desenvolvimento local. |
 | P02 | DNS, certificado e renovação HTTPS — desenvolvimento + acesso de Diego. | Escolher cliente ACME; validar DNS, cadeia TLS, renovação e reload; somente portas necessárias expostas. | PWA/câmera e produção real. |
 | P03 | Meta WhatsApp — Diego + desenvolvimento. | Habilitação da conta/número, versão suportada da API, token, webhook autenticado, template aprovado e custo conhecido; envio entregue ao administrador sem mensagem ao convidado; teste de falha/repetição. | Aceite do WhatsApp real. |
-| P04 | Gmail dedicado — Diego + desenvolvimento. | Conta criada, 2FA/senha de app elegível, SMTP autenticado; confirmação, convite e recuperação entregues de verdade; documentar limites e falhas. | Aceite de email real. |
+| P04 | Gmail dedicado — Diego + desenvolvimento. Confirmação e recuperação reais verificadas na H01.2; convite ainda pendente. | Conta criada, 2FA/senha de app elegível, SMTP autenticado; confirmação, convite e recuperação entregues de verdade; documentar limites e falhas. | Aceite de email real; resta validar o convite na H01.3. |
 | P05 | Groq multimodal — desenvolvimento + conta de Diego. | Modelo ativo que aceite imagem, qualidade em etiquetas/serviços, cota real, tamanho de entrada, retenção/ZDR verificados na conta e fallback manual exercitado. Não fixar modelo descontinuado. | Aceite da análise real por IA. |
 | P06 | Ferramentas e agenda do backup Windows — desenvolvimento + Diego. | Escolher criptografia, horário/fuso e pasta local; agendamento e SSH restrito; testar PC desligado, retomada, integridade, retenção e restauração completa com chave externa. | Aceite de backup externo e recuperação. |
 | P07 | Recursos e configuração da VPS — desenvolvimento. | Inventário de CPU/RAM/disco/arquitetura/serviços; limites dos containers, heap, pool, logs e alertas ajustados por medição. | Dimensionamento e aceite operacional. |
@@ -62,14 +61,21 @@ Estão **abertas**. P00 foi parcialmente exercitada nesta entrega; as demais nã
 
 A tabela não solicita senhas, tokens, chaves ou documentos pessoais no chat. Configurar segredos nos locais apropriados durante a implementação.
 
+### Pendência encerrada
+
+| ID | Encerramento | Evidência |
+|---|---|---|
+| P00 | Compatibilidade e patches da stack. | GitHub Actions `36038781176` no commit `737f46a` aprovou Java 21, Spring/JUnit, Testcontainers PostgreSQL 17.6, JaCoCo, PIT, ArchUnit, Node/Angular/Material/Vitest/Playwright. A repetição local da H01.2 aprovou 41 unitários, 4 ITs, V1–V3, JaCoCo, PIT 90%, 11 testes frontend, build e E2E full-stack. |
+
 ## Registros técnicos da preparação
 
 | ID | Escolha reversível | Estado e evidência |
 |---|---|---|
-| T01 | Java 21, Boot 4.1.1, Maven 3.9.16, JaCoCo 0.8.15, PIT 1.20.5/plugin JUnit 1.2.3, ArchUnit 1.4.2 e Testcontainers 2.0.5. Dependências Boot permanecem no BOM. | Parcialmente verificada em `docs/evidencias/PREP-01.md`: unitários, Spring, ArchUnit, JaCoCo, PIT e Testcontainers/PostgreSQL 17.6 aprovados no JDK 23 com `release 21`. JDK 21 e CI real ainda aguardam ambiente; P00 continua aberta. |
-| T02 | Angular/Core/CLI 21.2.24, Material/CDK 21.2.14, Node 24.18.0, TypeScript 5.9.3, Vitest 4.1.11 e Playwright 1.63.0. | Build, 2 componentes, audit sem vulnerabilidades e asserção smoke aprovados. Encerramento limpo do servidor E2E no Windows e CI Linux ainda aguardam confirmação. |
+| T01 | Java 21, Boot 4.1.1, Maven 3.9.16, JaCoCo 0.8.15, PIT 1.20.5/plugin JUnit 1.2.3, ArchUnit 1.4.2 e Testcontainers 2.0.5. Dependências Boot permanecem no BOM; módulos Flyway e Session JDBC usam os starters do Boot 4 para incluir auto-configuração. | Verificada localmente e na CI Temurin 21. PostgreSQL 17.6/V1–V3, 41 unitários, 4 ITs, JaCoCo e PIT 90% aprovados. P00 encerrada. |
+| T02 | Angular/Core/CLI 21.2.24, Material/CDK 21.2.14, Node 24.18.0, TypeScript 5.9.3, Vitest 4.1.11 e Playwright 1.63.0. | CI Linux e execução Windows aprovaram audit, testes, build e smoke. O E2E full-stack H01.2 passou em Chrome; o webServer do smoke interceptado ainda exige interrupção manual depois da asserção verde no Windows. |
 | T03 | Release por tag SemVer publica dois artefatos privados sem `latest`; produção usa `image:` e migration separada. | Configuração preparada, não publicada nem implantada. P01, P02 e P07 permanecem abertas. |
 | T04 | H01.1 usa segredo temporário em `X-Setup-Secret`, comparação por digest em tempo constante, BCrypt com custo 12 e senha de 12 caracteres a 72 bytes UTF-8 contendo letra e número. Uma linha singleton é bloqueada com `SELECT ... FOR UPDATE`; usuário, espaço, papel e fechamento são gravados na mesma transação. O contexto protegido `/identity/me` resolve a associação ativa pelo email normalizado do principal. | Escolha implementada e verificada por unitários/HTTP/PIT e `InitialSetupPostgresIT` real com PostgreSQL 17.6: concorrência, defaults, contexto persistido e reinício aprovados. O endpoint de contexto permanece inacessível sem autenticação; criação/rotação da sessão é H01.2. Em produção o segredo é montado como Docker secret; após o setup, seu arquivo-fonte fica vazio para manter o contrato do Compose sem disponibilizar segredo ao novo processo. |
+| T05 | H01.2 usa sessão Spring JDBC; inatividade de 7 dias e duração absoluta de 30 dias em metadados persistidos; tokens aleatórios de 32 bytes armazenados como SHA-256; confirmação 24h e reset 30min; reenvio revoga o anterior. O SMTP é executado depois da transação para não manter lock externo, e respostas de solicitação são genéricas. | Verificada por unitários/HTTP, `AccountAccessPostgresIT`, E2E full-stack e Gmail real. Confirmação e recuperação foram entregues e consumidas; reset consumiu o token, alterou BCrypt e removeu sessões na mesma transação. P04 permanece aberta somente para o convite de H01.3. P08 segue aberto para rate limiting, sem default silencioso. |
 
 ## Como registrar nova decisão
 
@@ -84,3 +90,6 @@ Adicionar ID, data, contexto, opções, escolha, responsável, status, requisito
 | 23/09/2026 | H01.1 registrou T04. A escolha foi verificada nas camadas de domínio, aplicação e HTTP; naquele momento o sandbox não acessou o daemon. Em 24/09 a execução autorizada comprovou PostgreSQL/concorrência e atribuiu corretamente o bloqueio ao isolamento. |
 | 24/09/2026 | Revisão de H01.1 completou o contrato protegido de contexto autenticado. Os gates foram reexecutados sem reduzir limites: 25 testes, JaCoCo 100% linhas/94,23% branches e PIT 90,32%. |
 | 24/09/2026 | Testcontainers/PostgreSQL 17.6 aprovados fora do sandbox: 2 ITs, sem skip/falha/erro. O bloqueio anterior foi atribuído corretamente ao isolamento do Codex; T01/T04 atualizadas sem encerrar P00, que ainda depende de JDK 21/CI. |
+| 24/09/2026 | A CI `36038781176` aprovou a stack no JDK 21/Node 24.18 e a repetição local full-stack aprovou Flyway/Spring Session JDBC. P00 encerrada; T01/T02 atualizadas. |
+| 24/09/2026 | H01.2 registrou T05. Tokens, sessão JDBC, expiração e revogação foram validados localmente; P04 continua aberta porque Mailpit não comprova entrega Gmail. |
+| 24/09/2026 | Gmail real validado com SMTP autenticado e STARTTLS: confirmação e recuperação chegaram à caixa externa, os links foram consumidos e o reset encerrou sem sessão residual. H01.2 concluída; P04 continua parcialmente aberta somente para o convite de H01.3. A inspeção TLS local do Avast exigiu importar sua CA pública apenas na imagem descartável de teste, sem desabilitar validação. |

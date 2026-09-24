@@ -3,6 +3,7 @@ import { By } from '@angular/platform-browser';
 import { of } from 'rxjs';
 import { InitialSetupComponent } from './initial-setup.component';
 import { InitialSetupService } from './initial-setup.service';
+import { provideRouter } from '@angular/router';
 
 describe('InitialSetupComponent', () => {
   let fixture: ComponentFixture<InitialSetupComponent>;
@@ -20,7 +21,7 @@ describe('InitialSetupComponent', () => {
     service.configure.mockClear();
     await TestBed.configureTestingModule({
       imports: [InitialSetupComponent],
-      providers: [{ provide: InitialSetupService, useValue: service }],
+      providers: [{ provide: InitialSetupService, useValue: service }, provideRouter([])],
     }).compileComponents();
     fixture = TestBed.createComponent(InitialSetupComponent);
     fixture.detectChanges();

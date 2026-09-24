@@ -16,12 +16,14 @@
             <div><dt>Idioma</dt><dd>{{ configured.locale }}</dd></div>
             <div><dt>Fuso</dt><dd>{{ configured.timeZone }}</dd></div>
           </dl>
-          <p>O cadastro inicial está fechado. Login e confirmação de email serão habilitados em H01.2.</p>
+          <p>O cadastro inicial está fechado. Solicite a confirmação do email para ativar o acesso.</p>
+          <p><a routerLink="/confirmar-email">Confirmar email</a></p>
         </div>
       } @else if (status() === 'COMPLETED') {
         <div class="state" role="status">
           <h2>Configuração inicial encerrada</h2>
           <p>O administrador e o espaço já existem. Reiniciar o servidor ou remover a variável não reabre este cadastro.</p>
+          <p><a routerLink="/entrar">Ir para o login</a></p>
         </div>
       } @else if (status() === 'SECRET_NOT_CONFIGURED') {
         <div class="state warning" role="alert">

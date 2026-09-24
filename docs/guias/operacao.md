@@ -7,10 +7,10 @@ Este roteiro prepara PREP-04. Ele não comprova uma implantação: VPS, DNS, TLS
 1. Clone o repositório e instale JDK 21, Docker/Compose v2 e Node 24.18.x.
 2. Copie `deploy/.env.example` para um `.env` não versionado somente quando precisar validar a composição de produção; substitua placeholders localmente.
 3. Inicie `docker compose -f deploy/compose.dev.yml up -d` e confirme `docker compose -f deploy/compose.dev.yml ps`.
-4. Execute a migration com `APP_MODE=migrate` conforme o README. O resultado esperado é V1 e V2 aplicadas e encerramento com código zero.
+4. Execute a migration com `APP_MODE=migrate` conforme o README. O resultado esperado é V1, V2 e V3 aplicadas e encerramento com código zero.
 5. Inicie backend e frontend. Valide `/api/v1/actuator/health` e a tela de fundação.
 
-O administrador inicial é criado uma única vez pelo fluxo protegido descrito no README. Defina um segredo temporário fora do Git e remova-o após o sucesso; o bloqueio persistente impede reabertura. Login e confirmação do email pertencem a H01.2. Mailpit é um capturador local, não um envio real. WhatsApp e IA não têm adapters falsos nesta fundação.
+O administrador inicial é criado uma única vez pelo fluxo protegido descrito no README. Defina um segredo temporário fora do Git e remova-o após o sucesso; o bloqueio persistente impede reabertura. Depois do setup, confirme o email e autentique-se conforme o fluxo da H01.2. Mailpit é um capturador local, não um envio real. WhatsApp e IA não têm adapters falsos nesta fundação.
 
 ## 2. Testes, relatórios e falhas comuns
 
@@ -94,6 +94,8 @@ Em ambiente isolado e vazio, instale a versão documentada do Docker, recupere a
 ## 9. Segredos, logs e provedores
 
 Rotacione um segredo por vez: crie o novo, configure fora do Git, reinicie o consumidor, teste, revogue o antigo e registre sem copiar o valor. Logs devem excluir senhas, tokens, conteúdo financeiro completo, documentos e URLs assinadas.
+
+Para email real, configure `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_AUTH=true`, `SMTP_STARTTLS=true`, `SMTP_USERNAME` e `SMTP_FROM` fora da imagem. Grave somente a senha de app no arquivo Docker secret `smtp_password` e monte-o em `/run/secrets/smtp_password`; nunca use a senha normal da conta nem registre seu conteúdo. A validação operacional deve enviar confirmação e recuperação para uma caixa real, abrir ambos os links e registrar apenas horários e resultados, nunca os tokens. Até P04 ser executada, Mailpit comprova somente o protocolo SMTP e a captura local.
 
 Gmail indisponível: mantenha cadastros manuais e sinalize entregas pendentes sem revelar token. Meta indisponível: não envie ao convidado nem acumule disparos obsoletos. Groq indisponível/incerto: não consuma nova cota nem crie despesa automaticamente; permita entrada manual e reconcilie a reserva. P03–P05 exigem testes reais próprios.
 

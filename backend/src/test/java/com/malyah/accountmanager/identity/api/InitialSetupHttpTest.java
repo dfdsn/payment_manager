@@ -20,6 +20,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import jakarta.servlet.http.Cookie;
+import org.springframework.mock.web.MockHttpSession;
+import com.malyah.accountmanager.identity.infrastructure.security.SessionLifetimeFilter;
 
 import com.malyah.accountmanager.identity.application.InitialSetupResult;
 import com.malyah.accountmanager.identity.application.InitialSetupStatus;
@@ -28,6 +30,9 @@ import com.malyah.accountmanager.identity.application.SetupAlreadyCompletedExcep
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContext;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.identity.domain.SpaceRole;
+import com.malyah.accountmanager.identity.application.AccountAccessUseCase;
+import com.malyah.accountmanager.identity.application.LoginUseCase;
+import com.malyah.accountmanager.identity.application.port.SessionRevoker;
 @SpringBootTest(properties = {
         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration"
 })
@@ -42,6 +47,15 @@ class InitialSetupHttpTest {
 
     @MockitoBean
     private AuthenticatedUserContextQuery contextQuery;
+
+    @MockitoBean
+    private AccountAccessUseCase accountAccessUseCase;
+
+    @MockitoBean
+    private LoginUseCase loginUseCase;
+
+    @MockitoBean
+    private SessionRevoker sessionRevoker;
 
     @Test
     void exposesStatusAndCsrfCookieWithoutAuthentication() throws Exception {
@@ -102,14 +116,17 @@ class InitialSetupHttpTest {
     @Test
     void protectsEveryOtherEndpoint() throws Exception {
         mockMvc.perform(get("/identity/me"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
     void exposesSpaceContextOnlyToAuthenticatedPrincipal() throws Exception {
         given(contextQuery.findByEmail("ADMIN@EXAMPLE.COM")).willReturn(context());
 
-        mockMvc.perform(get("/identity/me").with(user("ADMIN@EXAMPLE.COM")))
+        mockMvc.perform(get("/identity/me")
+                        .session(authenticatedSession())
+                        .header("X-User-Activity", "true")
+                        .with(user("ADMIN@EXAMPLE.COM")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.displayName").value("Administrador"))
                 .andExpect(jsonPath("$.role").value("ADMINISTRATOR"))
@@ -162,5 +179,11 @@ class InitialSetupHttpTest {
                 "BRL",
                 "pt-BR",
                 "America/Sao_Paulo");
+    }
+
+    private MockHttpSession authenticatedSession() {
+        var session = new MockHttpSession();
+        SessionLifetimeFilter.initialize(session, java.time.Instant.now());
+        return session;
     }
 }

@@ -2,10 +2,144 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H01.1.
+  description: Contrato versionado dos endpoints implementados até H01.2.
 servers:
   - url: /api/v1
 paths:
+  /auth/csrf:
+    get:
+      operationId: issueCsrfToken
+      summary: Emite o cookie CSRF para uma operação mutável subsequente
+      responses:
+        "200":
+          description: Cookie XSRF-TOKEN emitido e nome do header retornado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [headerName]
+                properties:
+                  headerName:
+                    const: X-XSRF-TOKEN
+  /auth/login:
+    post:
+      operationId: login
+      summary: Autentica uma conta confirmada e cria uma sessão JDBC
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "204":
+          description: Sessão criada; o cookie SESSION é HttpOnly e SameSite=Lax.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Encerra a sessão atual
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "204":
+          description: Sessão atual invalidada.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/sessions:
+    delete:
+      operationId: revokeAllSessions
+      summary: Revoga todas as sessões JDBC da conta autenticada
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "204":
+          description: Todas as sessões da conta foram revogadas.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/email-confirmations:
+    post:
+      operationId: requestEmailConfirmation
+      summary: Solicita confirmação de email sem revelar se a conta existe
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailAccessRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/GenericEmailAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /auth/email-confirmations/confirm:
+    post:
+      operationId: confirmEmail
+      summary: Confirma o email com token de uso único válido por 24 horas
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccessTokenRequest"
+      responses:
+        "204":
+          description: Email confirmado e token consumido.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /auth/password-resets:
+    post:
+      operationId: requestPasswordReset
+      summary: Solicita recuperação sem revelar se a conta existe
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailAccessRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/GenericEmailAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /auth/password-resets/complete:
+    post:
+      operationId: completePasswordReset
+      summary: Redefine a senha com token de uso único válido por 30 minutos
+      description: O sucesso consome o token e revoga todas as sessões JDBC da conta.
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "204":
+          description: Senha redefinida, token consumido e sessões revogadas.
+        "400":
+          $ref: "#/components/responses/BadRequest"
   /setup/status:
     get:
       operationId: getInitialSetupStatus
@@ -65,6 +199,15 @@ paths:
       summary: Retorna identidade, papel e espaço do principal autenticado
       security:
         - sessionCookie: []
+      parameters:
+        - name: X-User-Activity
+          in: header
+          required: false
+          schema:
+            type: boolean
+          description: >-
+            Em GET, true registra atividade humana e renova somente a janela de
+            inatividade. A duração absoluta de 30 dias nunca é renovada.
       responses:
         "200":
           description: Associação ativa do usuário autenticado.
@@ -72,10 +215,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthenticatedUserContext"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: >-
-            Sem sessão autenticada (o filtro pode responder sem corpo) ou sem
-            associação ativa (ApiError com code ACTIVE_SPACE_ACCESS_NOT_FOUND).
+            Sessão válida, porém sem associação ativa (ApiError com code
+            ACTIVE_SPACE_ACCESS_NOT_FOUND).
 components:
   securitySchemes:
     sessionCookie:
@@ -101,7 +246,66 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ApiError"
+    Unauthorized:
+      description: Sessão ausente/expirada ou credenciais inválidas, conforme o endpoint.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    GenericEmailAccepted:
+      description: Resposta genérica; não confirma existência nem estado da conta.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GenericEmailResponse"
   schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    EmailAccessRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    AccessTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: Token opaco; somente o hash SHA-256 é persistido.
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 72
+          description: Até 72 bytes UTF-8, contendo ao menos uma letra e um número.
+    GenericEmailResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: Texto deliberadamente genérico contra enumeração de contas.
     SetupStatus:
       type: object
       required: [status]
