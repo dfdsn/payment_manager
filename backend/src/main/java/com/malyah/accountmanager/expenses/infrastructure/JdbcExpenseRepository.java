@@ -4,6 +4,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,7 +48,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
             if (existing == null || !requestHash.equals(existing.requestHash()) || existing.expenseId() == null) {
                 throw new ExpenseIdempotencyConflictException();
             }
-            return new StoredExpenseCreation(find(expense.spaceId(), existing.expenseId()), true);
+            return new StoredExpenseCreation(findById(expense.spaceId(), existing.expenseId()), true);
         }
 
         insert(expense);
@@ -56,7 +58,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                    set expense_id = ?, completed_at = ?
                  where space_id = ? and actor_user_id = ? and operation = ? and idempotency_key = ?
                 """, expense.id(), Timestamp.from(expense.createdAt()), expense.spaceId(), actorUserId, OPERATION, key);
-        return new StoredExpenseCreation(find(expense.spaceId(), expense.id()), false);
+        return new StoredExpenseCreation(findById(expense.spaceId(), expense.id()), false);
     }
 
     @Override
@@ -73,6 +75,62 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                         + ", e.created_at " + direction + ", e.id " + direction + " limit ? offset ?",
                 this::map, spaceId, query.size(), (long) query.page() * query.size());
         return new StoredExpensePage(items, total == null ? 0 : total);
+    }
+
+    @Override
+    public StoredExpense findById(UUID spaceId, UUID expenseId) {
+        var results = jdbc.query(selectBase() + " where e.space_id = ? and e.id = ?", this::map, spaceId, expenseId);
+        if (results.isEmpty()) throw new com.malyah.accountmanager.expenses.application.ExpenseNotFoundException();
+        return results.getFirst();
+    }
+
+    @Override
+    public StoredExpenseCreation correct(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command,
+            OneOffExpense corrected, Instant at) {
+        var hash = hashCorrection(command, corrected);
+        int claimed = jdbc.update("""
+                insert into expense_idempotency_requests(space_id, actor_user_id, operation, idempotency_key, request_hash, created_at)
+                values (?, ?, 'CORRECT_EXPENSE', ?, ?, ?) on conflict do nothing
+                """, spaceId, actorId, command.idempotencyKey(), hash, Timestamp.from(at));
+        if (claimed == 0) {
+            var previous = jdbc.queryForObject("""
+                    select request_hash, expense_id from expense_idempotency_requests
+                    where space_id=? and actor_user_id=? and operation='CORRECT_EXPENSE' and idempotency_key=? for update
+                    """, (rs, row) -> new IdempotencyRecord(rs.getString(1), rs.getObject(2, UUID.class)),
+                    spaceId, actorId, command.idempotencyKey());
+            if (previous == null || previous.expenseId() == null || !hash.equals(previous.requestHash()))
+                throw new ExpenseIdempotencyConflictException();
+            return new StoredExpenseCreation(findById(spaceId, previous.expenseId()), true);
+        }
+
+        var locked = jdbc.query("select id from expense_entries where id=? and space_id=? for update",
+                (rs, row) -> rs.getObject(1, UUID.class), command.expenseId(), spaceId);
+        if (locked.isEmpty()) throw new com.malyah.accountmanager.expenses.application.ExpenseNotFoundException();
+        var current = findById(spaceId, command.expenseId());
+        if (!com.malyah.accountmanager.expenses.domain.CorrectionEligibility.eligible(
+                current.status(), command.status(), current.version(), command.version()))
+            throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
+        var changedFields = changedFields(current, corrected);
+        if (changedFields.isEmpty())
+            throw new com.malyah.accountmanager.expenses.application.ExpenseQueryValidationException(
+                    "correction", "Informe ao menos uma alteração.");
+
+        var payment = corrected.payment();
+        jdbc.update("""
+                update expense_entries set description=?, charge_amount=?, due_date=?, reference_date=?, notes=?,
+                    paid_amount=?, payment_date=?, paid_by_user_id=?, payment_notes=?, version=version+1
+                where id=? and space_id=? and version=? and status=?
+                """, corrected.description(), corrected.amount().value(), corrected.dueDate(), corrected.referenceDate(),
+                corrected.notes(), payment == null ? null : payment.amount().value(), corrected.paymentDate(),
+                payment == null ? null : payment.payerId(), payment == null ? null : payment.notes(),
+                command.expenseId(), spaceId, command.version(), command.status().name());
+        recordCorrection(current, corrected, actorId, at, String.join(",", changedFields));
+        jdbc.update("""
+                update expense_idempotency_requests set expense_id=?, completed_at=?
+                where space_id=? and actor_user_id=? and operation='CORRECT_EXPENSE' and idempotency_key=?
+                """, command.expenseId(), Timestamp.from(at), spaceId, actorId, command.idempotencyKey());
+        return new StoredExpenseCreation(findById(spaceId, command.expenseId()), false);
     }
 
     @Override
@@ -97,12 +155,12 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                     """, (rs, row) -> new IdempotencyRecord(rs.getString(1), rs.getObject(2, UUID.class)),
                     spaceId, actorId, command.idempotencyKey());
             if (previous == null || !hash.equals(previous.requestHash())) throw new ExpenseIdempotencyConflictException();
-            return new StoredExpenseCreation(find(spaceId, previous.expenseId()), true);
+            return new StoredExpenseCreation(findById(spaceId, previous.expenseId()), true);
         }
         var locked = jdbc.query("select id from expense_entries where id=? and space_id=? for update",
                 (rs, row) -> rs.getObject(1, UUID.class), command.expenseId(), spaceId);
         if (locked.isEmpty()) throw new com.malyah.accountmanager.expenses.application.ExpenseNotFoundException();
-        var current = find(spaceId, command.expenseId());
+        var current = findById(spaceId, command.expenseId());
         if (!com.malyah.accountmanager.expenses.domain.PaymentEligibility.eligible(current.status(), current.version(), command.version()))
             throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
         jdbc.update("""
@@ -116,7 +174,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 update expense_idempotency_requests set expense_id=?, completed_at=?
                 where space_id=? and actor_user_id=? and operation='SETTLE_EXPENSE' and idempotency_key=?
                 """, command.expenseId(), Timestamp.from(at), spaceId, actorId, command.idempotencyKey());
-        return new StoredExpenseCreation(find(spaceId, command.expenseId()), false);
+        return new StoredExpenseCreation(findById(spaceId, command.expenseId()), false);
     }
 
     private void recordPayment(UUID expenseId, UUID spaceId, UUID actorId,
@@ -147,10 +205,59 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 expense.createdByUserId(), Timestamp.from(expense.createdAt()));
     }
 
-    private StoredExpense find(UUID spaceId, UUID expenseId) {
-        var results = jdbc.query(selectBase() + " where e.space_id = ? and e.id = ?", this::map, spaceId, expenseId);
-        if (results.isEmpty()) throw new IllegalStateException("Despesa idempotente não encontrada.");
-        return results.getFirst();
+    private String hashCorrection(
+            com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command, OneOffExpense corrected) {
+        var payment = corrected.payment();
+        var canonical = command.expenseId() + ":" + command.version() + ":" + command.status() + ":"
+                + encoded(corrected.description()) + corrected.amount().canonical() + ":"
+                + corrected.dueDate() + ":" + encoded(corrected.notes())
+                + (payment == null ? "NO_PAYMENT" : payment.canonical());
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
+    }
+
+    private String encoded(String value) {
+        return value == null ? "-1:" : value.length() + ":" + value;
+    }
+
+    private java.util.List<String> changedFields(StoredExpense current, OneOffExpense corrected) {
+        var changed = new ArrayList<String>();
+        if (!current.description().equals(corrected.description())) changed.add("description");
+        if (current.amount().compareTo(corrected.amount().value()) != 0) changed.add("amount");
+        if (!Objects.equals(current.dueDate(), corrected.dueDate())) changed.add("dueDate");
+        if (!Objects.equals(current.notes(), corrected.notes())) changed.add("notes");
+        if (corrected.payment() != null) {
+            if (current.paidAmount().compareTo(corrected.payment().amount().value()) != 0) changed.add("paidAmount");
+            if (!Objects.equals(current.paymentDate(), corrected.payment().date())) changed.add("paymentDate");
+            if (!Objects.equals(current.paidByUserId(), corrected.payment().payerId())) changed.add("paidByUserId");
+            if (!Objects.equals(current.paymentAudit() == null ? null : current.paymentAudit().notes(),
+                    corrected.payment().notes())) changed.add("paymentNotes");
+        }
+        return changed;
+    }
+
+    private void recordCorrection(StoredExpense current, OneOffExpense corrected, UUID actorId, Instant at,
+            String changedFields) {
+        var payment = corrected.payment();
+        jdbc.update("""
+                insert into expense_correction_events(
+                    id, expense_id, space_id, actor_user_id, corrected_at, from_version, to_version, changed_fields,
+                    old_description, new_description, old_charge_amount, new_charge_amount,
+                    old_due_date, new_due_date, old_notes, new_notes,
+                    old_paid_amount, new_paid_amount, old_payment_date, new_payment_date,
+                    old_payer_user_id, new_payer_user_id, old_payment_notes, new_payment_notes)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, UUID.randomUUID(), current.id(), current.spaceId(), actorId, Timestamp.from(at),
+                current.version(), current.version() + 1, changedFields,
+                current.description(), corrected.description(), current.amount(), corrected.amount().value(),
+                current.dueDate(), corrected.dueDate(), current.notes(), corrected.notes(),
+                current.paidAmount(), payment == null ? null : payment.amount().value(),
+                current.paymentDate(), payment == null ? null : payment.date(),
+                current.paidByUserId(), payment == null ? null : payment.payerId(),
+                current.paymentAudit() == null ? null : current.paymentAudit().notes(),
+                payment == null ? null : payment.notes());
     }
 
     private String selectBase() {

@@ -59,4 +59,23 @@ describe('ExpenseService', () => {
     });
     request.flush({});
   });
+
+  it('loads one expense and corrects it with CSRF, version and idempotency key', () => {
+    service.get('expense-id').subscribe();
+    const get = http.expectOne('/api/v1/expenses/expense-id');
+    expect(get.request.method).toBe('GET');
+    get.flush({ id: 'expense-id' });
+
+    const correction = {
+      version: 3, status: 'PENDING' as const, description: 'Energia corrigida',
+      amount: '151.00', dueDate: '2026-10-02', notes: null,
+    };
+    service.correct('expense-id', correction, 'correction-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    const put = http.expectOne('/api/v1/expenses/expense-id');
+    expect(put.request.method).toBe('PUT');
+    expect(put.request.headers.get('Idempotency-Key')).toBe('correction-key');
+    expect(put.request.body).toEqual(correction);
+    put.flush({});
+  });
 });

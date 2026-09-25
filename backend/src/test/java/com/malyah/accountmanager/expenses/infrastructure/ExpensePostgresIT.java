@@ -26,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.malyah.accountmanager.expenses.application.CreateOneOffExpenseCommand;
+import com.malyah.accountmanager.expenses.application.CorrectExpenseCommand;
 import com.malyah.accountmanager.expenses.application.ExpenseIdempotencyConflictException;
 import com.malyah.accountmanager.expenses.application.ExpenseListQuery;
 import com.malyah.accountmanager.expenses.application.ExpenseService;
@@ -61,7 +62,7 @@ class ExpensePostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(7);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(8);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var context = new AuthenticatedUserContextService(contextRepository());
@@ -270,6 +271,128 @@ class ExpensePostgresIT {
         assertThat(jdbc.queryForObject("select count(*) from expense_idempotency_requests where operation='SETTLE_EXPENSE'", Integer.class)).isZero();
         jdbc.execute("alter table expense_payment_events drop constraint test_audit_failure");
         assertThat(useCase.settle("admin@example.com", command).expense().status()).isEqualTo(ExpenseStatus.PAID);
+    }
+
+    @Test void correctsPendingAndPaidFieldsAndPreservesBeforeAfterHistory() {
+        var pendingId = pending();
+        var pendingCorrection = correction(pendingId, 0, ExpenseStatus.PENDING, "Conta corrigida", "160",
+                LocalDate.of(2026, 10, 2), "Nova observação", null, null, null, null, UUID.randomUUID());
+        var pendingResult = useCase.correct("guest@example.com", pendingCorrection);
+        assertThat(pendingResult.expense().description()).isEqualTo("Conta corrigida");
+        assertThat(pendingResult.expense().amount()).isEqualTo("160.00");
+        assertThat(pendingResult.expense().dueDate()).isEqualTo(LocalDate.of(2026, 10, 2));
+        assertThat(pendingResult.expense().version()).isOne();
+        assertThat(useCase.correct("guest@example.com", pendingCorrection).replayed()).isTrue();
+        assertThatThrownBy(() -> useCase.correct("guest@example.com", correction(pendingId, 0,
+                ExpenseStatus.PENDING, "Outro conteúdo", "160", LocalDate.of(2026, 10, 2),
+                "Nova observação", null, null, null, null, pendingCorrection.idempotencyKey())))
+                .isInstanceOf(ExpenseIdempotencyConflictException.class);
+        assertThat(jdbc.queryForMap("select * from expense_correction_events where expense_id=?", pendingId))
+                .containsEntry("old_description", "Conta")
+                .containsEntry("new_description", "Conta corrigida")
+                .containsEntry("actor_user_id", GUEST)
+                .containsEntry("changed_fields", "description,amount,dueDate,notes");
+
+        var paid = useCase.create("admin@example.com", new CreateOneOffExpenseCommand(
+                "Mercado", "150", ExpenseStatus.PAID, LocalDate.of(2026, 9, 30), LocalDate.of(2026, 10, 1), null,
+                UUID.randomUUID(), "155", GUEST, "Juros"));
+        var paidCorrection = correction(paid.expense().id(), 0, ExpenseStatus.PAID, "Mercado ajustado", "149",
+                LocalDate.of(2026, 10, 3), "Nota", "145", LocalDate.of(2026, 10, 2), ADMIN,
+                "Desconto confirmado", UUID.randomUUID());
+        var corrected = useCase.correct("guest@example.com", paidCorrection).expense();
+        assertThat(corrected.status()).isEqualTo(ExpenseStatus.PAID);
+        assertThat(corrected.amount()).isEqualTo("149.00");
+        assertThat(corrected.paidAmount()).isEqualTo("145.00");
+        assertThat(corrected.paidByUserId()).isEqualTo(ADMIN);
+        assertThat(corrected.paymentDate()).isEqualTo(LocalDate.of(2026, 10, 2));
+        assertThat(corrected.paymentAudit().recordedByUserId()).isEqualTo(ADMIN);
+        assertThat(jdbc.queryForObject("select count(*) from expense_payment_events where expense_id=?", Integer.class,
+                paid.expense().id())).isOne();
+        assertThat(jdbc.queryForMap("select * from expense_correction_events where expense_id=?", paid.expense().id()))
+                .containsEntry("old_paid_amount", new java.math.BigDecimal("155.00"))
+                .containsEntry("new_paid_amount", new java.math.BigDecimal("145.00"))
+                .containsEntry("old_payer_user_id", GUEST)
+                .containsEntry("new_payer_user_id", ADMIN);
+    }
+
+    @Test void correctionRejectsForeignInactiveInvalidPayerStateChangeAndNoOp() {
+        var id = pending();
+        var valid = correction(id, 0, ExpenseStatus.PENDING, "Corrigida", "150",
+                LocalDate.of(2026, 9, 30), null, null, null, null, null, UUID.randomUUID());
+        assertThatThrownBy(() -> useCase.correct("other@example.com", valid))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseNotFoundException.class);
+        assertThatThrownBy(() -> useCase.correct("admin@example.com", correction(id, 0, ExpenseStatus.PAID,
+                "Corrigida", "150", null, null, "150", LocalDate.now(), GUEST, null, UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class);
+        assertThatThrownBy(() -> useCase.correct("admin@example.com", correction(id, 0, ExpenseStatus.PENDING,
+                "Conta", "150", LocalDate.of(2026, 9, 30), null, null, null, null, null, UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseQueryValidationException.class);
+        var paid = useCase.settle("admin@example.com", payment(id, "150", UUID.randomUUID())).expense();
+        assertThatThrownBy(() -> useCase.correct("admin@example.com", correction(id, paid.version(), ExpenseStatus.PAID,
+                paid.description(), paid.amount(), paid.dueDate(), paid.notes(), paid.paidAmount(), paid.paymentDate(),
+                UUID.randomUUID(), null, UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException.class);
+        jdbc.update("update space_memberships set active=false, ended_at=?, ended_by_user_id=?, end_reason='VOLUNTARY_EXIT' where user_id=?",
+                Timestamp.from(NOW), GUEST, GUEST);
+        assertThatThrownBy(() -> useCase.correct("guest@example.com", valid))
+                .isInstanceOf(com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException.class);
+    }
+
+    @Test void concurrentCorrectionsAndCorrectionVersusPaymentPreserveTheFirstCommit() throws Exception {
+        var id = pending();
+        Callable<String> first = () -> correctionOutcome("admin@example.com", correction(id, 0, ExpenseStatus.PENDING,
+                "Primeira", "151", LocalDate.of(2026, 10, 1), null, null, null, null, null, UUID.randomUUID()));
+        Callable<String> second = () -> correctionOutcome("guest@example.com", correction(id, 0, ExpenseStatus.PENDING,
+                "Segunda", "152", LocalDate.of(2026, 10, 2), null, null, null, null, null, UUID.randomUUID()));
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var outcomes = executor.invokeAll(List.of(first, second));
+            assertThat(List.of(outcomes.get(0).get(), outcomes.get(1).get()))
+                    .containsExactlyInAnyOrder("corrected", "conflict");
+        }
+        assertThat(jdbc.queryForObject("select count(*) from expense_correction_events where expense_id=?", Integer.class, id)).isOne();
+        assertThat(useCase.get("admin@example.com", id).version()).isOne();
+
+        var raceId = pending();
+        Callable<String> edit = () -> correctionOutcome("guest@example.com", correction(raceId, 0, ExpenseStatus.PENDING,
+                "Editada", "160", LocalDate.of(2026, 10, 4), null, null, null, null, null, UUID.randomUUID()));
+        Callable<String> pay = () -> {
+            try { useCase.settle("admin@example.com", payment(raceId, "155", UUID.randomUUID())); return "paid"; }
+            catch (com.malyah.accountmanager.expenses.application.ExpenseStateConflictException conflict) { return "conflict"; }
+        };
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var outcomes = executor.invokeAll(List.of(edit, pay));
+            var values = List.of(outcomes.get(0).get(), outcomes.get(1).get());
+            assertThat(values).contains("conflict");
+            assertThat(values).anyMatch(value -> value.equals("corrected") || value.equals("paid"));
+        }
+        assertThat(jdbc.queryForObject("select count(*) from expense_correction_events where expense_id=?", Integer.class, raceId)
+                + jdbc.queryForObject("select count(*) from expense_payment_events where expense_id=?", Integer.class, raceId)).isOne();
+    }
+
+    @Test void correctionAuditFailureRollsBackDataVersionAndIdempotencyThenRetryWorks() {
+        var id = pending();
+        var command = correction(id, 0, ExpenseStatus.PENDING, "Corrigida", "150",
+                LocalDate.of(2026, 9, 30), null, null, null, null, null, UUID.randomUUID());
+        jdbc.execute("alter table expense_correction_events add constraint test_correction_audit_failure check (changed_fields <> 'description')");
+        assertThatThrownBy(() -> useCase.correct("admin@example.com", command))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(useCase.get("admin@example.com", id).description()).isEqualTo("Conta");
+        assertThat(useCase.get("admin@example.com", id).version()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from expense_idempotency_requests where operation='CORRECT_EXPENSE'", Integer.class)).isZero();
+        jdbc.execute("alter table expense_correction_events drop constraint test_correction_audit_failure");
+        assertThat(useCase.correct("admin@example.com", command).expense().description()).isEqualTo("Corrigida");
+    }
+
+    private CorrectExpenseCommand correction(UUID id, long version, ExpenseStatus status, String description,
+            String amount, LocalDate dueDate, String notes, String paidAmount, LocalDate paymentDate,
+            UUID payer, String paymentNotes, UUID key) {
+        return new CorrectExpenseCommand(id, version, status, description, amount, dueDate, notes,
+                paidAmount, paymentDate, payer, paymentNotes, key);
+    }
+
+    private String correctionOutcome(String email, CorrectExpenseCommand command) {
+        try { useCase.correct(email, command); return "corrected"; }
+        catch (com.malyah.accountmanager.expenses.application.ExpenseStateConflictException conflict) { return "conflict"; }
     }
 
     private AuthenticatedUserContextRepository contextRepository() {

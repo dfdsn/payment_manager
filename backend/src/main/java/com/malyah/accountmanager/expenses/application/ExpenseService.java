@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.HexFormat;
 import java.util.Objects;
+import java.util.UUID;
 
 import com.malyah.accountmanager.expenses.application.port.ExpenseIdentifierGenerator;
 import com.malyah.accountmanager.expenses.application.port.ExpenseRepository;
@@ -68,6 +69,39 @@ public final class ExpenseService {
                 ExpenseAmount.parse(command.paidAmount()), command.paymentDate(), command.paidByUserId(), command.paymentNotes());
         memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment.payerId());
         var result = repository.settle(actor.spaceId(), actor.userId(), command, payment, clock.instant());
+        return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
+    }
+
+    public ExpenseView get(String email, UUID expenseId) {
+        if (expenseId == null)
+            throw new ExpenseQueryValidationException("expenseId", "Informe a despesa.");
+        var actor = contextQuery.findByEmail(email);
+        return view(repository.findById(actor.spaceId(), expenseId), actor.timeZone());
+    }
+
+    public ExpenseCreationResult correct(String email, CorrectExpenseCommand command) {
+        if (command.expenseId() == null || command.idempotencyKey() == null || command.status() == null
+                || command.version() < 0)
+            throw new ExpenseQueryValidationException("correction", "Informe despesa, situação, versão e chave válidas.");
+        var actor = contextQuery.findByEmail(email);
+        var current = repository.findById(actor.spaceId(), command.expenseId());
+        com.malyah.accountmanager.expenses.domain.PaymentDetails payment = null;
+        java.time.LocalDate paymentDate = null;
+        if (command.status() == com.malyah.accountmanager.expenses.domain.ExpenseStatus.PAID) {
+            payment = new com.malyah.accountmanager.expenses.domain.PaymentDetails(
+                    ExpenseAmount.parse(command.paidAmount()), command.paymentDate(),
+                    command.paidByUserId(), command.paymentNotes());
+            paymentDate = command.paymentDate();
+        } else if (command.paidAmount() != null || command.paymentDate() != null
+                || command.paidByUserId() != null || command.paymentNotes() != null) {
+            throw new com.malyah.accountmanager.expenses.domain.ExpenseValidationException(
+                    "payment", "Despesa pendente não possui pagamento.");
+        }
+        memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment == null ? null : payment.payerId());
+        var corrected = new OneOffExpense(current.id(), current.spaceId(), command.description(),
+                ExpenseAmount.parse(command.amount()), command.status(), command.dueDate(), paymentDate, null,
+                command.notes(), current.createdByUserId(), current.createdAt(), payment);
+        var result = repository.correct(actor.spaceId(), actor.userId(), command, corrected, clock.instant());
         return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
     }
 

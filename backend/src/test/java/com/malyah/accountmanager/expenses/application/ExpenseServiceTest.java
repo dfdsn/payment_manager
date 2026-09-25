@@ -122,6 +122,43 @@ class ExpenseServiceTest {
             assertThatThrownBy(() -> service.settle("guest@example.com", invalid)).isInstanceOf(ExpenseQueryValidationException.class);
     }
 
+    @Test void correctsPendingAndPaidFieldsWithoutChangingState() {
+        var pending = stored(ExpenseStatus.PENDING, LocalDate.of(2026, 9, 24), null);
+        given(repository.findById(SPACE, EXPENSE)).willReturn(pending);
+        given(repository.correct(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(pending, false));
+        var pendingCommand = new CorrectExpenseCommand(EXPENSE, 0, ExpenseStatus.PENDING,
+                "Energia corrigida", "151", LocalDate.of(2026, 9, 26), "Ajuste", null, null, null, null, KEY);
+        assertThat(service.correct("guest@example.com", pendingCommand).expense().status()).isEqualTo(ExpenseStatus.PENDING);
+        org.mockito.Mockito.verify(repository).correct(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(pendingCommand),
+                org.mockito.ArgumentMatchers.argThat(expense -> expense.description().equals("Energia corrigida")
+                        && expense.amount().canonical().equals("151.00") && expense.payment() == null),
+                org.mockito.ArgumentMatchers.eq(NOW));
+
+        var paid = stored(ExpenseStatus.PAID, null, LocalDate.of(2026, 9, 25));
+        given(repository.findById(SPACE, EXPENSE)).willReturn(paid);
+        given(repository.correct(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(paid, true));
+        var paidCommand = new CorrectExpenseCommand(EXPENSE, 0, ExpenseStatus.PAID,
+                "Mercado", "150", null, null, "145", LocalDate.of(2026, 9, 26), USER, "Desconto", KEY);
+        assertThat(service.correct("guest@example.com", paidCommand).replayed()).isTrue();
+    }
+
+    @Test void validatesCorrectionMetadataAndStateSpecificPaymentFields() {
+        assertThatThrownBy(() -> service.correct("guest@example.com", new CorrectExpenseCommand(
+                EXPENSE, -1, ExpenseStatus.PENDING, "Conta", "1", LocalDate.now(), null,
+                null, null, null, null, KEY))).isInstanceOf(ExpenseQueryValidationException.class);
+        given(repository.findById(SPACE, EXPENSE)).willReturn(stored(ExpenseStatus.PENDING, LocalDate.now(), null));
+        assertThatThrownBy(() -> service.correct("guest@example.com", new CorrectExpenseCommand(
+                EXPENSE, 0, ExpenseStatus.PENDING, "Conta", "1", LocalDate.now(), null,
+                "1", LocalDate.now(), USER, null, KEY)))
+                .isInstanceOf(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class);
+        assertThat(service.get("guest@example.com", EXPENSE).id()).isEqualTo(EXPENSE);
+        assertThatThrownBy(() -> service.get("guest@example.com", null))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
     private StoredExpense stored(ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate) {
         return new StoredExpense(EXPENSE, SPACE, status == ExpenseStatus.PAID ? "Mercado" : "Energia",
                 new BigDecimal("150.00"), status, dueDate, paymentDate,

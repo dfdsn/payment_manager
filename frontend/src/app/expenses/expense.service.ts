@@ -18,6 +18,19 @@ export interface CreateExpenseData {
   paymentNotes?: string | null;
 }
 
+export interface CorrectExpenseData {
+  version: number;
+  status: ExpenseStatus;
+  description: string;
+  amount: string;
+  dueDate: string | null;
+  notes: string | null;
+  paidAmount?: string;
+  paymentDate?: string;
+  paidByUserId?: string;
+  paymentNotes?: string | null;
+}
+
 export interface Expense {
   id: string;
   origin: 'ONE_OFF';
@@ -28,6 +41,7 @@ export interface Expense {
   dueDate: string | null;
   paymentDate: string | null;
   paidAmount: string | null;
+  paidByUserId: string | null;
   referenceDate: string;
   overdue: boolean;
   categoryName: string | null;
@@ -74,6 +88,18 @@ export class ExpenseService {
       .set('sort', sort)
       .set('direction', direction);
     return this.http.get<ExpensePage>(this.endpoint, { params });
+  }
+
+  get(id: string) {
+    return this.http.get<Expense>(`${this.endpoint}/${id}`);
+  }
+
+  correct(id: string, data: CorrectExpenseData, idempotencyKey: string) {
+    return this.http.get<{ headerName: string }>('/api/v1/auth/csrf').pipe(
+      switchMap(() => this.http.put<Expense>(`${this.endpoint}/${id}`, data, {
+        headers: new HttpHeaders({ 'Idempotency-Key': idempotencyKey }),
+      })),
+    );
   }
 
   settle(id: string, data: { version: number; paidAmount: string; paymentDate: string; paidByUserId: string; paymentNotes: string | null }, key: string) {

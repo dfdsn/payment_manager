@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, a H02.1 e a H02.2 estão validados. Ambos os papéis podem cadastrar, listar e quitar despesas avulsas, distinguindo a pessoa pagadora do usuário que registrou a operação.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e as histórias H02.1–H02.3 estão validados. Ambos os papéis podem cadastrar, listar, quitar e corrigir despesas avulsas, com auditoria e proteção contra conflito.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites, V5 registra o ciclo da associação, V6 adiciona despesas avulsas/idempotência e V7 registra pagamentos e sua auditoria.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites, V5 registra o ciclo da associação, V6 adiciona despesas avulsas/idempotência, V7 registra pagamentos e V8 registra correções auditáveis.
 
 ## Pré-requisitos
 
@@ -98,7 +98,7 @@ APP_SETUP_SECRET=substitua-por-um-segredo-temporario-aleatorio \
 cd ..
 ```
 
-Resultado esperado: Flyway aplica V1–V7 (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
+Resultado esperado: Flyway aplica V1–V8 (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
 
 ### 3. Backend
 
@@ -137,7 +137,7 @@ Acesse `http://localhost:8080`. Essa composição é apenas local, usa build e c
 ### Administração inicial
 
 1. Gere um segredo temporário aleatório e informe-o ao backend em `APP_SETUP_SECRET`. Não o reutilize como senha do administrador.
-2. Execute as migrações V1–V7 antes do runtime, conforme os passos anteriores.
+2. Execute as migrações V1–V8 antes do runtime, conforme os passos anteriores.
 3. Abra o frontend, preencha nome, email, senha, nome do espaço e o segredo temporário. A senha deve ter de 12 caracteres a 72 bytes UTF-8 e conter ao menos uma letra e um número.
 4. A criação de usuário, espaço, papel `ADMINISTRATOR` e fechamento do setup ocorre em uma única transação. O espaço começa com moeda `BRL`, idioma `pt-BR` e fuso `America/Sao_Paulo`.
 5. Ao receber sucesso, remova `APP_SETUP_SECRET` e reinicie o backend. A linha de controle no PostgreSQL mantém o setup fechado mesmo após reinício ou troca do segredo. Uma nova tentativa retorna conflito e não cria registros extras.
@@ -189,6 +189,15 @@ O frontend cria um `Idempotency-Key` UUID para cada nova intenção e preserva a
 
 Administrador e convidado ativos podem quitar despesas do próprio espaço. A API não aceita `spaceId`, valida o pagador contra as associações ativas e usa a versão retornada na listagem. Pagamento, mudança de situação, auditoria e resultado idempotente são gravados na mesma transação. Não há pagamento parcial, múltiplos pagadores, estorno, cancelamento ou lote nesta história.
 
+### Corrigir com proteção contra conflito
+
+1. Em `/despesas`, use **Corrigir despesa** no lançamento desejado. A tela mostra a versão e a situação carregadas e preenche os valores atuais.
+2. Em uma pendente, podem ser corrigidos descrição, valor cobrado, vencimento e observação. Em uma paga, esses campos continuam editáveis e também podem ser corrigidos valor pago, data do pagamento, pagador ativo e observação do pagamento. A situação não pode ser alterada por este fluxo.
+3. Salve a correção. O backend deriva o espaço e o autor da sessão, valida a versão e grava despesa, idempotência e auditoria antes/depois na mesma transação. Não é exigido motivo em H02.3; motivo pertence às futuras reversão e cancelamento.
+4. Para testar conflito, abra a mesma despesa em duas abas, edite e salve na primeira e tente salvar na segunda. A segunda recebe conflito, mantém seus campos e mostra os dados atuais. Use **Revisei: usar versão atual mantendo meus campos**, revise novamente e só então salve manualmente; a aplicação nunca força nem reenvia a sobrescrita.
+
+Criador, origem, situação, instante de criação e autoria/data do pagamento original são históricos protegidos. Cada correção grava autor, instante, versões anterior/nova, lista de campos e valores antes/depois em `expense_correction_events`. Reflexos futuros em relatórios, fechamentos e notificações serão validados nos respectivos épicos.
+
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
 ## Testes e gates
@@ -222,7 +231,7 @@ Somente para papéis, saída, revogação e concorrência da H01.4:
 & .\backend\scripts\run-integration-tests.ps1 -Tests MembershipPostgresIT,FlywayPostgresIT
 ```
 
-Somente para persistência, isolamento, paginação, idempotência e quitação das H02.1/H02.2:
+Somente para persistência, isolamento, paginação, idempotência, quitação e correção das H02.1–H02.3:
 
 ```powershell
 & .\backend\scripts\run-integration-tests.ps1 -Tests ExpensePostgresIT,FlywayPostgresIT
@@ -256,7 +265,7 @@ cd backend
 ```
 
 - `test`: JUnit/Spring e ArchUnit; não executa classes `*IT`.
-- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V7, identidade e despesas, incluindo quitação/auditoria atômicas, idempotência concorrente, isolamento por espaço e constraints monetárias.
+- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V8, identidade e despesas, incluindo quitação/correção/auditoria atômicas, conflitos otimistas, idempotência concorrente, isolamento por espaço e constraints monetárias.
 - `-Pmutation`: PIT sobre domínio/aplicação. `-DskipITs` evita criar PostgreSQL novamente; não elimina unitários nem gates.
 - JaCoCo: linhas ≥80% e branches ≥70% em domínio/aplicação.
 - PIT: mutação ≥70% e cobertura de linhas ≥80% no código mutado.
@@ -284,7 +293,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar uma pendente pelo administrador, compartilhá-la com o convidado e cadastrar uma já paga pelo convidado. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar/quitar despesas e simular duas edições concorrentes com revisão manual do conflito. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -368,4 +377,4 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01, H02.1 e H02.2 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.3 — Corrigir com proteção contra conflito**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01 e H02.1–H02.3 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.4 — Reverter quitação e cancelar**.

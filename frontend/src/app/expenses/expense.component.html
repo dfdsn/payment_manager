@@ -123,6 +123,64 @@
     </mat-card>
   }
 
+  @if (editing(); as expense) {
+    <mat-card appearance="outlined" class="expense-form-card correction-card">
+      <mat-card-header>
+        <mat-card-title>Corrigir {{ expense.description }}</mat-card-title>
+        <mat-card-subtitle>Versão carregada: {{ expense.version }} · situação preservada: {{ expense.status === 'PAID' ? 'Paga' : 'Pendente' }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        @if (conflictCurrent(); as current) {
+          <div class="conflict-summary" role="alert">
+            <strong>Os dados mudaram enquanto você editava.</strong>
+            <p>Versão atual {{ current.version }}: {{ current.description }}, {{ formatCurrency(current.amount) }}, referência {{ formatDate(current.referenceDate) }}.</p>
+            <p>O que você digitou continua no formulário. Revise os dados atuais e confirme abaixo para reaplicar manualmente; nada será reenviado automaticamente.</p>
+            <button matButton="outlined" type="button" (click)="useCurrentVersion()">Revisei: usar versão atual mantendo meus campos</button>
+          </div>
+        }
+        <form [formGroup]="editForm" (ngSubmit)="confirmCorrection()" novalidate>
+          <mat-form-field appearance="outline" class="wide-field"><mat-label>Descrição da correção</mat-label>
+            <input matInput formControlName="description" maxlength="200" />
+            <mat-error>Informe uma descrição com até 200 caracteres.</mat-error>
+          </mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Valor da cobrança corrigido</mat-label>
+            <input matInput formControlName="amount" inputmode="decimal" />
+            <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error>
+          </mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Vencimento corrigido{{ expense.status === 'PAID' ? ' (opcional)' : '' }}</mat-label>
+            <input matInput type="date" formControlName="dueDate" />
+            <mat-error>Informe o vencimento.</mat-error>
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="wide-field"><mat-label>Observação corrigida</mat-label>
+            <textarea matInput formControlName="notes" maxlength="2000"></textarea>
+          </mat-form-field>
+          @if (expense.status === 'PAID') {
+            <mat-form-field appearance="outline"><mat-label>Valor pago corrigido</mat-label>
+              <input matInput formControlName="paidAmount" inputmode="decimal" />
+              <mat-error>Informe o valor pago positivo com até duas casas.</mat-error>
+            </mat-form-field>
+            <mat-form-field appearance="outline"><mat-label>Data do pagamento corrigida</mat-label>
+              <input matInput type="date" formControlName="paymentDate" />
+              <mat-error>Informe a data do pagamento.</mat-error>
+            </mat-form-field>
+            <label class="select-field">Pagador corrigido
+              <select formControlName="paidByUserId">
+                @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+              </select>
+            </label>
+            <mat-form-field appearance="outline"><mat-label>Observação do pagamento corrigida</mat-label>
+              <textarea matInput formControlName="paymentNotes" maxlength="2000"></textarea>
+            </mat-form-field>
+          }
+          <div class="form-actions wide-field">
+            <button matButton="filled" type="submit" [disabled]="submitting() || !!conflictCurrent()">{{ submitting() ? 'Salvando…' : 'Salvar correção' }}</button>
+            <button matButton="outlined" type="button" [disabled]="submitting()" (click)="editing.set(null); conflictCurrent.set(null)">Fechar correção</button>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  }
+
   <section aria-labelledby="expense-list-title" class="expense-list-section">
     <div class="list-header">
       <div>
@@ -171,6 +229,7 @@
               } @else {
                 <button matButton="outlined" type="button" (click)="openPayment(expense)" [disabled]="submitting()">Quitar despesa</button>
               }
+              <button matButton="outlined" type="button" (click)="openCorrection(expense)" [disabled]="submitting()">Corrigir despesa</button>
             </mat-card-content>
           </mat-card>
         }

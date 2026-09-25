@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H02.2.
+  description: Contrato versionado dos endpoints implementados até H02.3.
 servers:
   - url: /api/v1
 paths:
@@ -497,6 +497,62 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /expenses/{id}:
+    get:
+      operationId: getExpense
+      summary: Consulta uma despesa do espaço ativo para edição
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Despesa atual, incluindo sua versão otimista.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Despesa não encontrada no espaço ativo.
+    put:
+      operationId: correctExpense
+      summary: Corrige os campos editáveis sem alterar a situação da despesa
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID preservado ao repetir a mesma correção após falha de resposta.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CorrectExpenseRequest" }
+      responses:
+        "200":
+          description: Correção aplicada ou repetição idempotente do mesmo resultado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Despesa não encontrada no espaço ativo.
+        "409":
+          description: Versão ou situação desatualizada, ou chave reutilizada com outro payload. Consulte novamente antes de reaplicar; não há sobrescrita forçada.
   /expenses/{id}/payment:
     post:
       operationId: settleExpense
@@ -634,6 +690,38 @@ components:
           pattern: '^\d{1,8}(\.\d{1,2})?$'
         paymentDate: { type: string, format: date }
         paidByUserId: { type: string, format: uuid }
+        paymentNotes: { type: [string, "null"], maxLength: 2000 }
+    CorrectExpenseRequest:
+      type: object
+      additionalProperties: false
+      required: [version, status, description, amount]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
+        status:
+          type: string
+          enum: [PENDING, PAID]
+          description: Deve coincidir com a situação carregada; correção não muda o estado.
+        description: { type: string, minLength: 1, maxLength: 200 }
+        amount:
+          type: string
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+        dueDate:
+          type: [string, "null"]
+          format: date
+          description: Obrigatório para PENDING e opcional para PAID.
+        notes: { type: [string, "null"], maxLength: 2000 }
+        paidAmount:
+          type: [string, "null"]
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          description: Obrigatório somente para PAID.
+        paymentDate:
+          type: [string, "null"]
+          format: date
+          description: Obrigatório somente para PAID.
+        paidByUserId:
+          type: [string, "null"]
+          format: uuid
+          description: Membro ativo pagador; obrigatório somente para PAID.
         paymentNotes: { type: [string, "null"], maxLength: 2000 }
     Expense:
       type: object

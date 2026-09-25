@@ -55,6 +55,22 @@ class ExpenseController {
         return useCase.list(principal.getName(), new ExpenseListQuery(page, size, sort, direction));
     }
 
+    @GetMapping("/{id}")
+    ExpenseView get(Principal principal, @org.springframework.web.bind.annotation.PathVariable UUID id) {
+        return useCase.get(principal.getName(), id);
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/{id}")
+    ExpenseView correct(Principal principal,
+            @org.springframework.web.bind.annotation.PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") UUID key,
+            @Valid @RequestBody CorrectExpenseRequest request) {
+        return useCase.correct(principal.getName(), new com.malyah.accountmanager.expenses.application.CorrectExpenseCommand(
+                id, request.version(), request.status(), request.description(), request.amount(), request.dueDate(),
+                request.notes(), request.paidAmount(), request.paymentDate(), request.paidByUserId(),
+                request.paymentNotes(), key)).expense();
+    }
+
     @PostMapping("/{id}/payment")
     ExpenseView settle(Principal principal,
             @org.springframework.web.bind.annotation.PathVariable UUID id,
@@ -69,4 +85,16 @@ class ExpenseController {
             @jakarta.validation.constraints.NotBlank String paidAmount,
             @jakarta.validation.constraints.NotNull java.time.LocalDate paymentDate,
             @jakarta.validation.constraints.NotNull UUID paidByUserId, String paymentNotes) { }
+
+    record CorrectExpenseRequest(
+            @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version,
+            @jakarta.validation.constraints.NotNull com.malyah.accountmanager.expenses.domain.ExpenseStatus status,
+            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 200) String description,
+            @jakarta.validation.constraints.NotBlank String amount,
+            java.time.LocalDate dueDate,
+            @jakarta.validation.constraints.Size(max = 2000) String notes,
+            String paidAmount,
+            java.time.LocalDate paymentDate,
+            UUID paidByUserId,
+            @jakarta.validation.constraints.Size(max = 2000) String paymentNotes) { }
 }

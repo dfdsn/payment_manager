@@ -91,6 +91,28 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   const marketExpense = guestPage.locator('.expense-row').filter({ hasText: 'Mercado' });
   await expect(marketExpense).toBeVisible();
   await expect(marketExpense.getByText('Paga', { exact: true })).toBeVisible();
+
+  const concurrentPage = await guestContext.newPage();
+  await concurrentPage.goto('/despesas');
+  const firstCopy = concurrentPage.locator('.expense-row').filter({ hasText: 'Energia' });
+  const staleCopy = guestPage.locator('.expense-row').filter({ hasText: 'Energia' });
+  await firstCopy.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await staleCopy.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await concurrentPage.getByLabel('Descrição da correção').fill('Energia conferida');
+  await concurrentPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(concurrentPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+
+  await guestPage.getByLabel('Descrição da correção').fill('Energia final');
+  await guestPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(guestPage.getByText(/Outra alteração foi salva antes da sua/)).toBeVisible();
+  await expect(guestPage.getByText(/Energia conferida/)).toBeVisible();
+  await expect(guestPage.getByLabel('Descrição da correção')).toHaveValue('Energia final');
+  await guestPage.getByRole('button', { name: 'Revisei: usar versão atual mantendo meus campos' }).click();
+  await guestPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(guestPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Energia final' })).toBeVisible();
+  await concurrentPage.close();
+
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();
 

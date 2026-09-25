@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 25/09/2026.
 
-**Estado atual: H02.2 concluída.** E01, H02.1 e H02.2 estão concluídos. Quitação integral, valor efetivo, pagador distinto do autor, concorrência, idempotência e auditoria atômica foram validados; reversão, cancelamento e lote continuam fora deste escopo.
+**Estado atual: H02.3 concluída.** E01 e H02.1–H02.3 estão concluídos. Correções auditáveis de pendentes e pagas, versão otimista, idempotência e revisão explícita de conflitos foram validadas; reversão e cancelamento permanecem H02.4.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 25/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 6 de 46 concluídas; E01 concluído e E02 em andamento. |
-| Critérios do PRD | CA-01 aprovado. CA-02 comprova uso e quitação pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro pendente/pago e quitação aprovados, restando reflexos de dashboard/histórico para E06/E07. |
+| Histórias | 7 de 46 concluídas; E01 concluído e E02 em andamento. |
+| Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação e correção pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção/histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Implementar e validar H02.3 — Corrigir com proteção contra conflito. |
+| Próxima ação | Implementar e validar H02.4 — Desfazer quitação e cancelar. |
 
 ## Estados permitidos
 
@@ -48,7 +48,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H01.4 | Aplicar papéis e gerenciar saída | Concluído | 65 testes Java, 10 ITs PostgreSQL, JaCoCo 94,93%/80,52%, PIT 80%, 20 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H01.4.md`. |
 | H02.1 | Cadastrar e listar uma despesa avulsa | Concluído | 77 testes Java, 14 ITs PostgreSQL, JaCoCo 95,38%/84,26%, PIT 80%, 27 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H02.1.md`. |
 | H02.2 | Quitar e identificar quem pagou | Concluído | 81 testes Java, 19 ITs PostgreSQL, JaCoCo 95,58%/85,29%, PIT 80%, 30 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H02.2.md`. |
-| H02.3 | Corrigir com proteção contra conflito | Não iniciado | — |
+| H02.3 | Corrigir com proteção contra conflito | Concluído | 85 testes Java, 23 ITs PostgreSQL, JaCoCo 95,77%/84,87%, PIT 81%, 33 frontend, build e E2E de conflito em duas páginas aprovados. Evidência: `docs/evidencias/H02.3.md`. |
 | H02.4 | Desfazer quitação e cancelar | Não iniciado | — |
 | H02.5 | Quitar vários lançamentos | Não iniciado | — |
 | H03.1 | Gerenciar categorias | Não iniciado | — |
@@ -244,6 +244,25 @@ Condição de conclusão ou desbloqueio: critérios executáveis da H02.2 satisf
 Próximo passo: H02.3 — corrigir com proteção contra conflito.
 ```
 
+## Registro H02.3
+
+```text
+História / objetivo: H02.3 — Corrigir com proteção contra conflito.
+Estado / responsável / data: Concluído / desenvolvimento / 25/09/2026.
+Requisitos e critérios de aceite relacionados: RF-DES-03, D16–D18 e CA-02/CA-04; correção por estado, autorização, versão otimista, idempotência, auditoria antes/depois, atomicidade e conflito revisável.
+Decisões e pendências aplicáveis: T10 registrada. P08 permanece aberta somente para retenção operacional da idempotência. Relatórios, fechamento e notificações serão validados em E06–E08; reversão/cancelamento continuam H02.4.
+Branch / commit / PR: branch `h02-3-correct-expense`, base H02.2 `b992ec5`; entrega ainda não publicada, implantada ou aberta em PR.
+Arquivos e comportamento alterados: módulo expenses nas quatro camadas; V8; GET/PUT de despesa; formulário de correção pendente/paga e revisão explícita de conflito; E2E; OpenAPI, README, decisões e evidência H02.3.
+Migrações e impacto sobre dados: V8 cria somente o histórico `expense_correction_events`; nenhuma migração aplicada foi editada. V1–V8 foram aplicadas em PostgreSQL 17.6 efêmero/Testcontainers e no Compose descartável, sem alterar banco compartilhado.
+Testes executados: 85 unitários/HTTP/ArchUnit; suíte completa com 23 ITs Failsafe (13 específicos de despesas) e repetição final selecionada com 14 ITs (despesas + Flyway); 33 Vitest; build Angular; 1 E2E full-stack. Todos aprovados, sem ignorados/falhas/erros. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V8 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 589/615 linhas (95,77%) e 258/304 branches (84,87%); PIT 81% (203/251), 94% das linhas mutadas cobertas e força 86%; gates mantidos.
+Validação manual / integração real: E2E Chrome em Nginx/backend/PostgreSQL/Mailpit abriu a mesma despesa em duas páginas, aplicou a primeira correção, recusou a versão antiga, preservou o texto e só reaplicou após revisão explícita. Mailpit permaneceu apenas captura local; H02.3 não envia email.
+Limitações e cenários não executados: reflexos futuros em dashboard, fechamento e notificações ainda não existem; H02.4 implementará reversão/cancelamento e seus motivos. Android/Edge reais continuam no aceite transversal. A primeira execução PIT ficou sem progresso no executor e foi interrompida; a repetição isolada com timeout explícito concluiu com sucesso e gerou o relatório usado como evidência.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H02.3.md e este arquivo.
+Condição de conclusão ou desbloqueio: critérios executáveis da H02.3 satisfeitos em 25/09/2026, sem antecipar H02.4.
+Próximo passo: H02.4 — desfazer quitação e cancelar.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -294,3 +313,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 25/09/2026 | H01.4 implementou matriz de papéis, remoção/saída, transferência atômica, revogação JDBC, associação histórica e eventos V5. Regressão final: 65 Java, 10 ITs PostgreSQL, JaCoCo 94,93%/80,52%, PIT 80%, 20 frontend, build e E2E aprovados. H01.4 e o escopo próprio do E01 concluídos; parcelas transversais de CA-02/CA-03 seguem para E02/E03/E04/E08. |
 | 25/09/2026 | H02.1 implementou cadastro/listagem avulsa nas quatro camadas e UI, V6, autorização por associação, dinheiro decimal, datas, paginação, isolamento e idempotência concorrente. Regressão final: 77 Java, 14 ITs PostgreSQL, JaCoCo 95,38%/84,26%, PIT 80%, 27 frontend, build e E2E aprovados. H02.1 concluída; próximo passo H02.2. |
 | 25/09/2026 | H02.2 implementou quitação integral nas quatro camadas e UI, V7, pagador distinto do autor, valor efetivo, auditoria/rollback, versão e idempotência concorrente. Regressão final: 81 Java, 19 ITs PostgreSQL, JaCoCo 95,58%/85,29%, PIT 80%, 30 frontend, build e E2E aprovados. H02.2 concluída; próximo passo H02.3. |
+| 25/09/2026 | H02.3 implementou correções pendentes/pagas nas quatro camadas e UI, V8, histórico antes/depois, versão, idempotência, concorrência/rollback e revisão manual do conflito. Regressão final: 85 Java, 23 ITs PostgreSQL, JaCoCo 95,77%/84,87%, PIT 81%, 33 frontend, build e E2E aprovados. H02.3 concluída; próximo passo H02.4. |

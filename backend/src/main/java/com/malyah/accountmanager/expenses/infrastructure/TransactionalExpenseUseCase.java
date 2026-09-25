@@ -31,6 +31,18 @@ final class TransactionalExpenseUseCase implements ExpenseUseCase {
     }
 
     @Override
+    public com.malyah.accountmanager.expenses.application.ExpenseView get(
+            String actorEmail, java.util.UUID expenseId) {
+        return delegate.get(actorEmail, expenseId);
+    }
+
+    @Override
+    public ExpenseCreationResult correct(String actorEmail,
+            com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.correct(actorEmail, command)));
+    }
+
+    @Override
     public ExpenseCreationResult settle(String actorEmail,
             com.malyah.accountmanager.expenses.application.SettleExpenseCommand command) {
         return Objects.requireNonNull(transactions.execute(status -> delegate.settle(actorEmail, command)));

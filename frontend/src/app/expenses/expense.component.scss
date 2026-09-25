@@ -11,6 +11,7 @@ form button[type='submit'] { justify-self: start; }
 .select-field.compact select { min-height: 2.75rem; }
 .select-field select:focus-visible { outline: 2px solid #005cbb; outline-offset: 2px; }
 .error-summary, .success-summary, .empty-state { padding: 0.75rem 1rem; margin-bottom: 1rem; border-left: 0.25rem solid; }
+.conflict-summary { padding: 0.75rem 1rem; margin-bottom: 1rem; border-left: 0.25rem solid #9c5d00; background: #fff3d6; }
 .error-summary { border-color: #ba1a1a; background: #ffdad6; }
 .success-summary { border-color: #247238; background: #d8f7df; }
 .empty-state { border-color: #52677d; background: #e9eef5; }
@@ -19,6 +20,7 @@ form button[type='submit'] { justify-self: start; }
 .expense-row p { margin-bottom: 0; }
 .status-label { font-weight: 600; }
 .pagination { justify-content: center; margin-top: 1rem; }
+.form-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 @media (max-width: 42rem) {
   form { grid-template-columns: 1fr; }
   .wide-field { grid-column: auto; }

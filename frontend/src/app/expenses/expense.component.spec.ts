@@ -9,7 +9,7 @@ import { AccountAccessService } from '../identity/account-access.service';
 describe('ExpenseComponent', () => {
   let fixture: ComponentFixture<ExpenseComponent>;
   const api = {
-    newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(), settle: vi.fn(),
+    newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(), settle: vi.fn(), get: vi.fn(), correct: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -132,5 +132,52 @@ describe('ExpenseComponent', () => {
     expect(component.paymentForm.controls.paidAmount.value).toBe('150.00');
     expect(component.settling()?.version).toBe(3);
     expect(component.errorMessage()).toBe('Atualize a lista.');
+  });
+
+  it('corrects pending and paid expenses with the loaded version and applicable fields', () => {
+    const component = fixture.componentInstance;
+    component.openCorrection({ id: 'pending', status: 'PENDING', version: 4, description: 'Energia', amount: '150.00',
+      dueDate: '2026-09-30', notes: null } as any);
+    component.editForm.patchValue({ description: 'Energia corrigida', amount: '151,25', dueDate: '2026-10-01' });
+    api.correct.mockReturnValue(of({}));
+    component.confirmCorrection();
+    expect(api.correct).toHaveBeenCalledWith('pending', {
+      version: 4, status: 'PENDING', description: 'Energia corrigida', amount: '151.25',
+      dueDate: '2026-10-01', notes: null,
+    }, 'next-key');
+
+    component.openCorrection({ id: 'paid', status: 'PAID', version: 2, description: 'Mercado', amount: '25.50',
+      dueDate: null, notes: 'compra', paidAmount: '26.00', paymentDate: '2026-09-25', paidByUserId: 'payer',
+      paymentAudit: { notes: 'taxa' } } as any);
+    component.editForm.patchValue({ paidAmount: '27,00', paymentDate: '2026-09-26', paymentNotes: 'ajuste' });
+    component.confirmCorrection();
+    expect(api.correct).toHaveBeenLastCalledWith('paid', {
+      version: 2, status: 'PAID', description: 'Mercado', amount: '25.50', dueDate: null, notes: 'compra',
+      paidAmount: '27.00', paymentDate: '2026-09-26', paidByUserId: 'payer', paymentNotes: 'ajuste',
+    }, 'next-key');
+  });
+
+  it('preserves typed fields on conflict, loads current data and requires an explicit manual retry', () => {
+    const component = fixture.componentInstance;
+    component.openCorrection({ id: 'expense', status: 'PENDING', version: 3, description: 'Energia', amount: '150.00',
+      dueDate: '2026-09-30', notes: null } as any);
+    component.editForm.controls.description.setValue('Minha correção');
+    api.correct.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 409 })));
+    api.get.mockReturnValue(of({ id: 'expense', status: 'PENDING', version: 4, description: 'Alteração concorrente',
+      amount: '152.00', dueDate: '2026-10-01', referenceDate: '2026-10-01' }));
+
+    component.confirmCorrection();
+    fixture.detectChanges();
+
+    expect(api.get).toHaveBeenCalledWith('expense');
+    expect(component.conflictCurrent()?.version).toBe(4);
+    expect(component.editForm.controls.description.value).toBe('Minha correção');
+    expect(api.correct).toHaveBeenCalledTimes(1);
+    expect(fixture.nativeElement.textContent).toContain('nada será reenviado automaticamente');
+
+    component.useCurrentVersion();
+    expect(component.editing()?.version).toBe(4);
+    expect(component.editForm.controls.description.value).toBe('Minha correção');
+    expect(api.correct).toHaveBeenCalledTimes(1);
   });
 });

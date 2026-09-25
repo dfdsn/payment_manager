@@ -28,12 +28,25 @@ export class ExpenseComponent implements OnInit {
   private readonly identity = inject(AccountAccessService);
   readonly members = signal<SpaceMember[]>([]);
   readonly settling = signal<Expense | null>(null);
+  readonly editing = signal<Expense | null>(null);
+  readonly conflictCurrent = signal<Expense | null>(null);
   private paymentKey = '';
+  private correctionKey = '';
   private today = '';
   readonly paymentForm = this.formBuilder.nonNullable.group({
     paidAmount: ['', [Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]],
     paymentDate: ['', Validators.required],
     paidByUserId: ['', Validators.required],
+    paymentNotes: ['', Validators.maxLength(2000)],
+  });
+  readonly editForm = this.formBuilder.nonNullable.group({
+    description: ['', [Validators.required, Validators.maxLength(200)]],
+    amount: ['', [Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]],
+    dueDate: [''],
+    notes: ['', Validators.maxLength(2000)],
+    paidAmount: ['', Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)],
+    paymentDate: [''],
+    paidByUserId: [''],
     paymentNotes: ['', Validators.maxLength(2000)],
   });
 
@@ -138,6 +151,69 @@ export class ExpenseComponent implements OnInit {
       next: () => { this.settling.set(null); this.message.set('Quitação registrada com sucesso.'); this.load(); },
       error: error => this.handleError(error, 'Não foi possível quitar. Os campos foram preservados para nova tentativa.'),
     });
+  }
+
+  openCorrection(expense: Expense): void {
+    this.editing.set(expense);
+    this.conflictCurrent.set(null);
+    this.correctionKey = this.expensesApi.newIdempotencyKey();
+    this.editForm.reset({
+      description: expense.description, amount: expense.amount, dueDate: expense.dueDate ?? '',
+      notes: expense.notes ?? '', paidAmount: expense.paidAmount ?? '', paymentDate: expense.paymentDate ?? '',
+      paidByUserId: expense.paidByUserId ?? '', paymentNotes: expense.paymentAudit?.notes ?? '',
+    });
+    if (expense.status === 'PAID') {
+      this.editForm.controls.paidAmount.setValidators([Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]);
+      this.editForm.controls.paymentDate.setValidators(Validators.required);
+      this.editForm.controls.paidByUserId.setValidators(Validators.required);
+      this.editForm.controls.dueDate.clearValidators();
+    } else {
+      this.editForm.controls.dueDate.setValidators(Validators.required);
+      this.editForm.controls.paidAmount.clearValidators();
+      this.editForm.controls.paymentDate.clearValidators();
+      this.editForm.controls.paidByUserId.clearValidators();
+    }
+    Object.values(this.editForm.controls).forEach(control => control.updateValueAndValidity());
+    this.errorMessage.set(null);
+    this.message.set(null);
+  }
+
+  confirmCorrection(): void {
+    const expense = this.editing();
+    if (!expense || this.submitting()) return;
+    if (this.editForm.invalid) { this.editForm.markAllAsTouched(); return; }
+    const value = this.editForm.getRawValue();
+    this.submitting.set(true);
+    this.errorMessage.set(null);
+    this.conflictCurrent.set(null);
+    this.expensesApi.correct(expense.id, {
+      version: expense.version, status: expense.status, description: value.description,
+      amount: value.amount.replace(',', '.'), dueDate: value.dueDate || null, notes: value.notes.trim() || null,
+      ...(expense.status === 'PAID' ? {
+        paidAmount: value.paidAmount.replace(',', '.'), paymentDate: value.paymentDate,
+        paidByUserId: value.paidByUserId, paymentNotes: value.paymentNotes.trim() || null,
+      } : {}),
+    }, this.correctionKey).pipe(finalize(() => this.submitting.set(false))).subscribe({
+      next: () => { this.editing.set(null); this.message.set('Despesa corrigida com sucesso.'); this.load(); },
+      error: error => {
+        if (error instanceof HttpErrorResponse && error.status === 409) {
+          this.errorMessage.set('Outra alteração foi salva antes da sua. Seus campos foram preservados; consulte os dados atuais antes de reaplicar.');
+          this.expensesApi.get(expense.id).subscribe({
+            next: current => this.conflictCurrent.set(current),
+            error: refreshError => this.handleError(refreshError, 'Houve conflito e não foi possível consultar os dados atuais.'),
+          });
+        } else this.handleError(error, 'Não foi possível corrigir. Os campos foram preservados para nova tentativa.');
+      },
+    });
+  }
+
+  useCurrentVersion(): void {
+    const current = this.conflictCurrent();
+    if (!current) return;
+    this.editing.set(current);
+    this.conflictCurrent.set(null);
+    this.correctionKey = this.expensesApi.newIdempotencyKey();
+    this.errorMessage.set(null);
   }
 
   toggleDirection(): void {

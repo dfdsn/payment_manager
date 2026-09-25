@@ -8,6 +8,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -152,6 +153,35 @@ class ExpenseHttpTest {
         willThrow(new AuthenticatedUserContextNotFoundException()).given(useCase).settle(any(), any());
         mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
                 .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+    }
+
+    @Test void getsAndCorrectsWithSessionCsrfVersionAndConflictSemantics() throws Exception {
+        var path = "/expenses/" + EXPENSE;
+        given(useCase.get(any(), any())).willReturn(view());
+        mvc.perform(get(path).with(user("guest@example.com")).session(activeSession()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(0));
+        mvc.perform(put(path).with(user("guest@example.com")).session(activeSession())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(validCorrectionBody()))
+                .andExpect(status().isForbidden());
+        given(useCase.correct(any(), any())).willReturn(new ExpenseCreationResult(view(), false));
+        mvc.perform(put(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(validCorrectionBody()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.description").value("Energia"));
+        then(useCase).should().correct(org.mockito.ArgumentMatchers.eq("guest@example.com"),
+                org.mockito.ArgumentMatchers.argThat(command -> command.expenseId().equals(EXPENSE)
+                        && command.version() == 0 && command.status() == ExpenseStatus.PENDING));
+        willThrow(new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException())
+                .given(useCase).correct(any(), any());
+        mvc.perform(put(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(validCorrectionBody()))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPENSE_STATE_CONFLICT"));
+    }
+
+    private String validCorrectionBody() {
+        return """
+                {"version":0,"status":"PENDING","description":"Energia corrigida",
+                 "amount":"151.00","dueDate":"2026-09-26","notes":"Correção"}
+                """;
     }
 
     private ExpenseView view() {
