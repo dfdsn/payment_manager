@@ -16,5 +16,6 @@ record CreateExpenseRequest(
         @NotNull(message = "Informe a situação.") ExpenseStatus status,
         LocalDate dueDate,
         LocalDate paymentDate,
-        @Size(max = 2000, message = "A observação deve ter no máximo 2.000 caracteres.") String notes) {
+        @Size(max = 2000, message = "A observação deve ter no máximo 2.000 caracteres.") String notes,
+        String paidAmount, java.util.UUID paidByUserId, String paymentNotes) {
 }

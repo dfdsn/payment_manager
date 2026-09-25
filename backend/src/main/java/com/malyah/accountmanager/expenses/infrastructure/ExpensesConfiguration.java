@@ -35,8 +35,9 @@ class ExpensesConfiguration {
             AuthenticatedUserContextQuery contextQuery,
             ExpenseIdentifierGenerator identifiers,
             Clock applicationClock,
-            PlatformTransactionManager transactionManager) {
-        var service = new ExpenseService(repository, contextQuery, identifiers, applicationClock);
+            PlatformTransactionManager transactionManager,
+            com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess) {
+        var service = new ExpenseService(repository, contextQuery, identifiers, applicationClock, memberAccess);
         return new TransactionalExpenseUseCase(service, new TransactionTemplate(transactionManager));
     }
 }

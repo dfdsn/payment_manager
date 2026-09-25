@@ -29,4 +29,10 @@ final class TransactionalExpenseUseCase implements ExpenseUseCase {
     public ExpensePage list(String actorEmail, ExpenseListQuery query) {
         return delegate.list(actorEmail, query);
     }
+
+    @Override
+    public ExpenseCreationResult settle(String actorEmail,
+            com.malyah.accountmanager.expenses.application.SettleExpenseCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.settle(actorEmail, command)));
+    }
 }

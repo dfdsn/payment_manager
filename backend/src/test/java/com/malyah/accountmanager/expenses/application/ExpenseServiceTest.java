@@ -38,7 +38,7 @@ class ExpenseServiceTest {
         repository = mock(ExpenseRepository.class);
         AuthenticatedUserContextQuery context = email -> new AuthenticatedUserContext(
                 USER, "Pessoa", email, SPACE, "Casa", SpaceRole.GUEST, "BRL", "pt-BR", "America/Sao_Paulo");
-        service = new ExpenseService(repository, context, () -> EXPENSE, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new ExpenseService(repository, context, () -> EXPENSE, Clock.fixed(NOW, ZoneOffset.UTC), (space, actor, payer) -> { });
     }
 
     @Test
@@ -105,6 +105,21 @@ class ExpenseServiceTest {
     private void assertInvalidQuery(ExpenseListQuery query) {
         assertThatThrownBy(() -> service.list("guest@example.com", query))
                 .isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
+    @Test void settlesWithTheAuthenticatedActorAndPreservesMoneyAndPayer() {
+        given(repository.settle(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(stored(ExpenseStatus.PAID, LocalDate.of(2026, 9, 24), LocalDate.of(2026, 10, 1)), false));
+        var command = new SettleExpenseCommand(EXPENSE, 0, "155", LocalDate.of(2026, 10, 1), USER, "Taxa", KEY);
+        assertThat(service.settle("guest@example.com", command).expense().status()).isEqualTo(ExpenseStatus.PAID);
+        org.mockito.Mockito.verify(repository).settle(org.mockito.ArgumentMatchers.eq(SPACE), org.mockito.ArgumentMatchers.eq(USER),
+                org.mockito.ArgumentMatchers.eq(command), org.mockito.ArgumentMatchers.argThat(payment ->
+                        payment.amount().canonical().equals("155.00") && payment.payerId().equals(USER)), org.mockito.ArgumentMatchers.eq(NOW));
+        for (var invalid : List.of(
+                new SettleExpenseCommand(null, 0, "1", LocalDate.now(), USER, null, KEY),
+                new SettleExpenseCommand(EXPENSE, -1, "1", LocalDate.now(), USER, null, KEY),
+                new SettleExpenseCommand(EXPENSE, 0, "1", LocalDate.now(), USER, null, null)))
+            assertThatThrownBy(() -> service.settle("guest@example.com", invalid)).isInstanceOf(ExpenseQueryValidationException.class);
     }
 
     private StoredExpense stored(ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate) {

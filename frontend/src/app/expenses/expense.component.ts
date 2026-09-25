@@ -8,6 +8,7 @@ import { MatInputModule } from '@angular/material/input';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { ApiError } from '../identity/initial-setup.service';
+import { AccountAccessService, SpaceMember } from '../identity/account-access.service';
 import {
   Expense, ExpenseService, ExpenseSort, ExpenseStatus, SortDirection,
 } from './expense.service';
@@ -24,6 +25,17 @@ import {
 export class ExpenseComponent implements OnInit {
   private readonly formBuilder = inject(FormBuilder);
   private readonly expensesApi = inject(ExpenseService);
+  private readonly identity = inject(AccountAccessService);
+  readonly members = signal<SpaceMember[]>([]);
+  readonly settling = signal<Expense | null>(null);
+  private paymentKey = '';
+  private today = '';
+  readonly paymentForm = this.formBuilder.nonNullable.group({
+    paidAmount: ['', [Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]],
+    paymentDate: ['', Validators.required],
+    paidByUserId: ['', Validators.required],
+    paymentNotes: ['', Validators.maxLength(2000)],
+  });
 
   readonly loading = signal(true);
   readonly submitting = signal(false);
@@ -47,6 +59,14 @@ export class ExpenseComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.identity.context().subscribe({ next: context => {
+      const parts = new Intl.DateTimeFormat('en-CA', { timeZone: context.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+      const part = (type: string) => parts.find(value => value.type === type)!.value;
+      this.today = `${part('year')}-${part('month')}-${part('day')}`;
+      this.paymentForm.patchValue({ paymentDate: this.today, paidByUserId: context.userId });
+    }, error: error => this.handleError(error, 'Não foi possível consultar sua sessão.') });
+    this.identity.members().subscribe({ next: members => this.members.set(members),
+      error: error => this.handleError(error, 'Não foi possível carregar os pagadores.') });
     this.form.controls.status.valueChanges.subscribe(status => this.updateDateRules(status));
     this.load();
   }
@@ -57,6 +77,10 @@ export class ExpenseComponent implements OnInit {
       return;
     }
     const value = this.form.getRawValue();
+    if (value.status === 'PAID') {
+      this.paymentForm.controls.paymentDate.setValue(value.paymentDate);
+      if (this.paymentForm.invalid) { this.paymentForm.markAllAsTouched(); return; }
+    }
     this.submitting.set(true);
     this.message.set(null);
     this.errorMessage.set(null);
@@ -67,6 +91,11 @@ export class ExpenseComponent implements OnInit {
       dueDate: value.dueDate || null,
       paymentDate: value.paymentDate || null,
       notes: value.notes.trim() || null,
+      ...(value.status === 'PAID' ? {
+        paidAmount: this.paymentForm.controls.paidAmount.value.replace(',', '.'),
+        paidByUserId: this.paymentForm.controls.paidByUserId.value,
+        paymentNotes: this.paymentForm.controls.paymentNotes.value.trim() || null,
+      } : {}),
     }, this.idempotencyKey).pipe(finalize(() => this.submitting.set(false))).subscribe({
       next: () => {
         this.message.set('Despesa cadastrada com sucesso.');
@@ -85,6 +114,30 @@ export class ExpenseComponent implements OnInit {
     this.sort.set(sort);
     this.page.set(0);
     this.load();
+  }
+
+  openPayment(expense: Expense): void {
+    this.settling.set(expense);
+    this.paymentKey = this.expensesApi.newIdempotencyKey();
+    this.paymentForm.reset({ paidAmount: expense.amount, paymentDate: this.today,
+      paidByUserId: this.members().find(member => member.currentUser)?.userId ?? '', paymentNotes: '' });
+    this.errorMessage.set(null);
+    this.message.set(null);
+  }
+
+  confirmPayment(): void {
+    const expense = this.settling();
+    if (!expense || this.submitting()) return;
+    if (this.paymentForm.invalid) { this.paymentForm.markAllAsTouched(); return; }
+    const values = this.paymentForm.getRawValue();
+    this.submitting.set(true);
+    this.errorMessage.set(null);
+    this.expensesApi.settle(expense.id, { ...values, version: expense.version,
+      paidAmount: values.paidAmount.replace(',', '.'), paymentNotes: values.paymentNotes.trim() || null,
+    }, this.paymentKey).pipe(finalize(() => this.submitting.set(false))).subscribe({
+      next: () => { this.settling.set(null); this.message.set('Quitação registrada com sucesso.'); this.load(); },
+      error: error => this.handleError(error, 'Não foi possível quitar. Os campos foram preservados para nova tentativa.'),
+    });
   }
 
   toggleDirection(): void {
@@ -125,6 +178,9 @@ export class ExpenseComponent implements OnInit {
     } else {
       dueDate.clearValidators();
       paymentDate.setValidators(Validators.required);
+      paymentDate.setValue(this.today);
+      this.paymentForm.patchValue({ paidAmount: this.form.controls.amount.value,
+        paidByUserId: this.members().find(member => member.currentUser)?.userId ?? '', paymentNotes: '' });
     }
     dueDate.updateValueAndValidity();
     paymentDate.updateValueAndValidity();

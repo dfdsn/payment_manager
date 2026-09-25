@@ -26,5 +26,14 @@ public record ExpenseView(
         UUID paidByUserId,
         String paidByDisplayName,
         Instant createdAt,
-        long version) {
+        long version, PaymentAudit paymentAudit) {
+    public ExpenseView(UUID id, String origin, String description, String amount, String currency,
+            ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate, String paidAmount,
+            LocalDate referenceDate, boolean overdue, String categoryName, UUID responsibleUserId,
+            String notes, UUID createdByUserId, String createdByDisplayName, UUID paidByUserId,
+            String paidByDisplayName, Instant createdAt, long version) {
+        this(id, origin, description, amount, currency, status, dueDate, paymentDate, paidAmount, referenceDate,
+                overdue, categoryName, responsibleUserId, notes, createdByUserId, createdByDisplayName,
+                paidByUserId, paidByDisplayName, createdAt, version, null);
+    }
 }

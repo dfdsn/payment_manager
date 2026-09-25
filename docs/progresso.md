@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 25/09/2026.
 
-**Estado atual: H02.1 concluída em 25/09/2026.** E01 permanece concluído e E02 está em andamento. O primeiro fluxo financeiro entrega cadastro idempotente e listagem paginada de despesa avulsa; quitação posterior de pendência continua reservada à H02.2.
+**Estado atual: H02.2 concluída.** E01, H02.1 e H02.2 estão concluídos. Quitação integral, valor efetivo, pagador distinto do autor, concorrência, idempotência e auditoria atômica foram validados; reversão, cancelamento e lote continuam fora deste escopo.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 25/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 5 de 46 concluídas; E01 concluído e E02 em andamento. |
-| Critérios do PRD | CA-01 aprovado. CA-02 agora comprova uso de despesas pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro pendente/pago aprovado e aguarda a quitação da H02.2. |
+| Histórias | 6 de 46 concluídas; E01 concluído e E02 em andamento. |
+| Critérios do PRD | CA-01 aprovado. CA-02 comprova uso e quitação pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro pendente/pago e quitação aprovados, restando reflexos de dashboard/histórico para E06/E07. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Implementar e validar H02.2 — Quitar e identificar quem pagou. |
+| Próxima ação | Implementar e validar H02.3 — Corrigir com proteção contra conflito. |
 
 ## Estados permitidos
 
@@ -47,7 +47,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H01.3 | Convidar e aceitar o segundo membro | Concluído | 52 unitários, 7 ITs PostgreSQL, JaCoCo, PIT 78%, 17 frontend, E2E Mailpit e entrega/aceite Gmail real aprovados. Evidência: `docs/evidencias/H01.3.md`. |
 | H01.4 | Aplicar papéis e gerenciar saída | Concluído | 65 testes Java, 10 ITs PostgreSQL, JaCoCo 94,93%/80,52%, PIT 80%, 20 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H01.4.md`. |
 | H02.1 | Cadastrar e listar uma despesa avulsa | Concluído | 77 testes Java, 14 ITs PostgreSQL, JaCoCo 95,38%/84,26%, PIT 80%, 27 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H02.1.md`. |
-| H02.2 | Quitar e identificar quem pagou | Não iniciado | — |
+| H02.2 | Quitar e identificar quem pagou | Concluído | 81 testes Java, 19 ITs PostgreSQL, JaCoCo 95,58%/85,29%, PIT 80%, 30 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H02.2.md`. |
 | H02.3 | Corrigir com proteção contra conflito | Não iniciado | — |
 | H02.4 | Desfazer quitação e cancelar | Não iniciado | — |
 | H02.5 | Quitar vários lançamentos | Não iniciado | — |
@@ -94,9 +94,9 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | Verificação | Estado inicial | Evidência ao executar |
 |---|---|---|
 | CA-01 — configuração, login e convite | Aprovado | E2E full-stack H01.1–H01.4, ITs PostgreSQL e entregas Gmail reais cobrem fechamento do setup, identidade destinatária, expiração, revogação e reenvio. |
-| CA-02 — uso pelos dois perfis | Em validação transversal | Matriz/bloqueio administrativo e cadastro/listagem da mesma despesa pelos dois papéis aprovados; ausência de WhatsApp será executada em E08. |
+| CA-02 — uso pelos dois perfis | Em validação transversal | Matriz/bloqueio administrativo, cadastro/listagem e quitação da mesma despesa pelos dois papéis aprovados; ausência de WhatsApp será executada em E08. |
 | CA-03 — saída/remoção e transferência | Em validação transversal | Revogação, histórico de associação, vaga e transferência aprovados; responsabilidades/anexos/novo consentimento serão revalidados em E03/E04/E08. |
-| CA-04 — avulsa pendente/paga | Em validação transversal | Cadastro pendente e já pago, atraso e pagador inicial aprovados; quitação posterior de uma pendência e seu reflexo no histórico/dashboard dependem de H02.2/E06. |
+| CA-04 — avulsa pendente/paga | Em validação transversal | Cadastro pendente/já pago, atraso, quitação posterior, valor efetivo e identificação de pagador/autor aprovados; reflexos no dashboard e histórico mensal dependem de E06/E07. |
 | CA-05 a CA-32 do PRD | Não executados | Registrar resultado individual, cenário, ambiente e evidência; não inferir aprovação a partir de cobertura. |
 | Email real | Não executado | Confirmação, convite, reset, expiração/reenvio; sem expor tokens. |
 | WhatsApp real | Não executado | Entrega ao administrador, ausência para convidado, agrupamento, quitação/falha/retomada. |
@@ -225,6 +225,25 @@ Condição de conclusão ou desbloqueio: critérios executáveis da H02.1 satisf
 Próximo passo: H02.2 — quitar e identificar quem pagou.
 ```
 
+## Registro H02.2
+
+```text
+História / objetivo: H02.2 — Quitar e identificar quem pagou.
+Estado / responsável / data: Concluído / desenvolvimento / 25/09/2026.
+Requisitos e critérios de aceite relacionados: RF-DES-02, RF-DES-10, D16–D18 e CA-02/CA-04; quitação integral, valor/data efetivos, pagador, autor, autorização, idempotência, conflito e atomicidade.
+Decisões e pendências aplicáveis: T09 registrada. P08 permanece aberta somente para retenção operacional da idempotência. Dashboard, fechamento mensal e notificações continuam E06/E07/E08; estorno/cancelamento/lote continuam H02.4/H02.5.
+Branch / commit / PR: branch `h02-2-settle-expense`, base `488e48e`; entrega registrada no Git ao final da execução, sem publicação de imagens, deploy ou PR.
+Arquivos e comportamento alterados: módulo expenses nas quatro camadas; contrato público de membros ativos; V7; quitação e criação paga na tela `/despesas`; E2E; OpenAPI, README, decisões e evidência H02.2.
+Migrações e impacto sobre dados: V7 adiciona valor/data/pagador/autor/observação de pagamento e `expense_payment_events`, incluindo backfill auditável dos lançamentos pagos preexistentes. V1–V7 aplicadas em PostgreSQL 17.6 efêmero/Testcontainers e Compose descartável; nenhuma migração anterior foi editada e nenhum banco compartilhado foi alterado.
+Testes executados: 81 unitários/HTTP/ArchUnit; 19 ITs Failsafe (9 específicos de despesas); 30 Vitest; build Angular; 1 E2E full-stack. Todos finais aprovados, sem ignorados/falhas/erros. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V7 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 562/588 linhas (95,58%) e 232/272 branches (85,29%); PIT 80% (183/229), 94% das linhas mutadas cobertas e força 86%; gates mantidos.
+Validação manual / integração real: E2E Chromium em Nginx/backend/PostgreSQL/Mailpit comprovou convidado quitando despesa criada pelo administrador, com valor efetivo diferente, administrador como pagador e convidado como autor; também criou despesa já paga pelas mesmas regras e regrediu E01/H02.1. Mailpit permaneceu apenas captura local e H02.2 não introduziu envio de email.
+Limitações e cenários não executados: dashboard/relatórios, fechamento mensal, notificações e responsabilidades futuras não existem e serão validados em seus épicos. Estorno, cancelamento, lote, juros/descontos estruturados, pagamento parcial e múltiplos pagadores não foram antecipados. Android/Edge reais continuam no aceite transversal.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H02.2.md e este arquivo.
+Condição de conclusão ou desbloqueio: critérios executáveis da H02.2 satisfeitos em 25/09/2026, sem antecipar H02.3.
+Próximo passo: H02.3 — corrigir com proteção contra conflito.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -274,3 +293,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 24/09/2026 | Convite Gmail real entregue e aceito com SMTP AUTH/STARTTLS e validação TLS ativa. PostgreSQL descartável confirmou 1 convite consumido, 2 membros ativos, 1 GUEST confirmado e 1 espaço. Credencial, CA exportada, contêineres e volumes foram removidos. P04 e H01.3 concluídas; próximo passo H01.4. |
 | 25/09/2026 | H01.4 implementou matriz de papéis, remoção/saída, transferência atômica, revogação JDBC, associação histórica e eventos V5. Regressão final: 65 Java, 10 ITs PostgreSQL, JaCoCo 94,93%/80,52%, PIT 80%, 20 frontend, build e E2E aprovados. H01.4 e o escopo próprio do E01 concluídos; parcelas transversais de CA-02/CA-03 seguem para E02/E03/E04/E08. |
 | 25/09/2026 | H02.1 implementou cadastro/listagem avulsa nas quatro camadas e UI, V6, autorização por associação, dinheiro decimal, datas, paginação, isolamento e idempotência concorrente. Regressão final: 77 Java, 14 ITs PostgreSQL, JaCoCo 95,38%/84,26%, PIT 80%, 27 frontend, build e E2E aprovados. H02.1 concluída; próximo passo H02.2. |
+| 25/09/2026 | H02.2 implementou quitação integral nas quatro camadas e UI, V7, pagador distinto do autor, valor efetivo, auditoria/rollback, versão e idempotência concorrente. Regressão final: 81 Java, 19 ITs PostgreSQL, JaCoCo 95,58%/85,29%, PIT 80%, 30 frontend, build e E2E aprovados. H02.2 concluída; próximo passo H02.3. |

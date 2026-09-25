@@ -128,6 +128,32 @@ class ExpenseHttpTest {
                 """;
     }
 
+    @Test void paymentRequiresSessionCsrfAndValidDataAndMapsConflicts() throws Exception {
+        var path = "/expenses/" + EXPENSE + "/payment";
+        var body = "{\"version\":0,\"paidAmount\":\"155.00\",\"paymentDate\":\"2026-10-01\",\"paidByUserId\":\"" + KEY + "\"}";
+        mvc.perform(post(path).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isUnauthorized());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+        given(useCase.settle(any(), any())).willReturn(new ExpenseCreationResult(view(), false));
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+        then(useCase).should().settle(org.mockito.ArgumentMatchers.eq("guest@example.com"), org.mockito.ArgumentMatchers.argThat(
+                command -> command.expenseId().equals(EXPENSE) && command.paidByUserId().equals(KEY) && command.version() == 0));
+        willThrow(new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException()).given(useCase).settle(any(), any());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPENSE_STATE_CONFLICT"));
+        willThrow(new com.malyah.accountmanager.expenses.application.ExpenseNotFoundException()).given(useCase).settle(any(), any());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isNotFound());
+        willThrow(new AuthenticatedUserContextNotFoundException()).given(useCase).settle(any(), any());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+    }
+
     private ExpenseView view() {
         return new ExpenseView(EXPENSE, "ONE_OFF", "Energia", "150.00", "BRL", ExpenseStatus.PENDING,
                 LocalDate.of(2026, 9, 24), null, null, LocalDate.of(2026, 9, 24), true,

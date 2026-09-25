@@ -18,6 +18,15 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNo
 
 @RestControllerAdvice(assignableTypes = ExpenseController.class)
 class ExpenseApiExceptionHandler {
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class)
+    ResponseEntity<ApiError> stateConflict(RuntimeException exception) {
+        return response(HttpStatus.CONFLICT, "EXPENSE_STATE_CONFLICT", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseNotFoundException.class)
+    ResponseEntity<ApiError> notFound(RuntimeException exception) {
+        return response(HttpStatus.NOT_FOUND, "EXPENSE_NOT_FOUND", exception.getMessage(), List.of());
+    }
     @ExceptionHandler(ExpenseValidationException.class)
     ResponseEntity<ApiError> domainValidation(ExpenseValidationException exception) {
         return response(HttpStatus.BAD_REQUEST, "EXPENSE_VALIDATION_FAILED", exception.getMessage(),

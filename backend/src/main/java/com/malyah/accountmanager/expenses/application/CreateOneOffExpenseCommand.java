@@ -12,5 +12,10 @@ public record CreateOneOffExpenseCommand(
         LocalDate dueDate,
         LocalDate paymentDate,
         String notes,
-        UUID idempotencyKey) {
+        UUID idempotencyKey,
+        String paidAmount, UUID paidByUserId, String paymentNotes) {
+    public CreateOneOffExpenseCommand(String description, String amount, ExpenseStatus status,
+            LocalDate dueDate, LocalDate paymentDate, String notes, UUID key) {
+        this(description, amount, status, dueDate, paymentDate, notes, key, null, null, null);
+    }
 }

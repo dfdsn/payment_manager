@@ -23,16 +23,18 @@ public final class ExpenseService {
     private final AuthenticatedUserContextQuery contextQuery;
     private final ExpenseIdentifierGenerator identifiers;
     private final Clock clock;
+    private final com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess;
 
     public ExpenseService(
             ExpenseRepository repository,
             AuthenticatedUserContextQuery contextQuery,
             ExpenseIdentifierGenerator identifiers,
-            Clock clock) {
+            Clock clock, com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess) {
         this.repository = repository;
         this.contextQuery = contextQuery;
         this.identifiers = identifiers;
         this.clock = clock;
+        this.memberAccess = memberAccess;
     }
 
     public ExpenseCreationResult create(String actorEmail, CreateOneOffExpenseCommand command) {
@@ -41,13 +43,32 @@ public final class ExpenseService {
             throw new ExpenseQueryValidationException("Idempotency-Key", "Informe uma chave de repetição válida.");
         }
         var actor = contextQuery.findByEmail(actorEmail);
+        var payment = command.status() == com.malyah.accountmanager.expenses.domain.ExpenseStatus.PAID
+                ? new com.malyah.accountmanager.expenses.domain.PaymentDetails(
+                        ExpenseAmount.parse(command.paidAmount() == null ? command.amount() : command.paidAmount()),
+                        command.paymentDate(), command.paidByUserId() == null ? actor.userId() : command.paidByUserId(),
+                        command.paymentNotes()) : null;
+        if (payment == null && (command.paidAmount() != null || command.paidByUserId() != null || command.paymentNotes() != null))
+            throw new com.malyah.accountmanager.expenses.domain.ExpenseValidationException("payment", "Despesa pendente não possui pagamento.");
+        memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment == null ? null : payment.payerId());
         var expense = new OneOffExpense(
                 identifiers.next(), actor.spaceId(), command.description(), ExpenseAmount.parse(command.amount()),
                 command.status(), command.dueDate(), command.paymentDate(), null, command.notes(), actor.userId(),
-                clock.instant());
+                clock.instant(), payment);
         var stored = repository.createIdempotently(
                 expense, actor.userId(), command.idempotencyKey(), fingerprint(expense), clock.instant());
         return new ExpenseCreationResult(view(stored.expense(), actor.timeZone()), stored.replayed());
+    }
+
+    public ExpenseCreationResult settle(String email, SettleExpenseCommand command) {
+        if (command.idempotencyKey() == null || command.expenseId() == null || command.version() < 0)
+            throw new ExpenseQueryValidationException("payment", "Informe a despesa, versão e chave de repetição válidas.");
+        var actor = contextQuery.findByEmail(email);
+        var payment = new com.malyah.accountmanager.expenses.domain.PaymentDetails(
+                ExpenseAmount.parse(command.paidAmount()), command.paymentDate(), command.paidByUserId(), command.paymentNotes());
+        memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment.payerId());
+        var result = repository.settle(actor.spaceId(), actor.userId(), command, payment, clock.instant());
+        return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
     }
 
     public ExpensePage list(String actorEmail, ExpenseListQuery query) {
@@ -82,13 +103,18 @@ public final class ExpenseService {
                 expense.paidAmount() == null ? null : expense.paidAmount().toPlainString(),
                 referenceDate, overdue, null, null, expense.notes(), expense.createdByUserId(),
                 expense.createdByDisplayName(), expense.paidByUserId(), expense.paidByDisplayName(),
-                expense.createdAt(), expense.version());
+                expense.createdAt(), expense.version(), expense.paymentAudit());
     }
 
     private String fingerprint(OneOffExpense expense) {
         var canonical = String.join("\u001f",
                 expense.description(), expense.amount().canonical(), expense.status().name(),
                 value(expense.dueDate()), value(expense.paymentDate()), value(expense.notes()));
+        var payment = expense.payment();
+        // Keep the H02.1 fingerprint for unchanged/default creation requests, including retries after upgrade.
+        if (payment != null && (!payment.amount().equals(expense.amount())
+                || !payment.payerId().equals(expense.createdByUserId()) || payment.notes() != null))
+            canonical += "\u001fPAYMENT:" + payment.canonical();
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(canonical.getBytes(StandardCharsets.UTF_8)));

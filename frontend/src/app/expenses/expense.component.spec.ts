@@ -4,11 +4,12 @@ import { of, throwError } from 'rxjs';
 import { ExpenseComponent } from './expense.component';
 import { ExpenseService } from './expense.service';
 import { provideRouter } from '@angular/router';
+import { AccountAccessService } from '../identity/account-access.service';
 
 describe('ExpenseComponent', () => {
   let fixture: ComponentFixture<ExpenseComponent>;
   const api = {
-    newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(),
+    newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(), settle: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -20,7 +21,11 @@ describe('ExpenseComponent', () => {
     }));
     await TestBed.configureTestingModule({
       imports: [ExpenseComponent],
-      providers: [{ provide: ExpenseService, useValue: api }, provideRouter([])],
+      providers: [{ provide: ExpenseService, useValue: api }, provideRouter([]),
+        { provide: AccountAccessService, useValue: {
+          context: () => of({ userId: 'actor', timeZone: 'America/Sao_Paulo' }),
+          members: () => of([{ userId: 'actor', displayName: 'Autor', currentUser: true }, { userId: 'payer', displayName: 'Outro', currentUser: false }]),
+        } }],
     }).compileComponents();
     fixture = TestBed.createComponent(ExpenseComponent);
     fixture.detectChanges();
@@ -52,6 +57,7 @@ describe('ExpenseComponent', () => {
   it('requires the applicable date when situation changes', () => {
     fixture.componentInstance.form.controls.status.setValue('PAID');
     fixture.componentInstance.form.patchValue({ description: 'Mercado', amount: '20,00' });
+    fixture.componentInstance.form.controls.paymentDate.setValue('');
 
     fixture.componentInstance.submit();
 
@@ -99,5 +105,32 @@ describe('ExpenseComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Atrasada');
     expect(fixture.nativeElement.textContent).toContain('Paga');
     expect(fixture.nativeElement.textContent).toContain('Sem categoria');
+  });
+
+  it('suggests the charge and current payer then sends selected payer and preserved version', () => {
+    const component = fixture.componentInstance;
+    component.openPayment({ id: 'expense', amount: '150.00', version: 3 } as any);
+    expect(component.paymentForm.controls.paidAmount.value).toBe('150.00');
+    expect(component.paymentForm.controls.paidByUserId.value).toBe('actor');
+    component.paymentForm.patchValue({ paidAmount: '145,00', paidByUserId: 'payer', paymentDate: '2026-10-01' });
+    api.settle.mockReturnValue(of({}));
+    component.confirmPayment();
+    expect(api.settle).toHaveBeenCalledWith('expense', {
+      version: 3, paidAmount: '145.00', paidByUserId: 'payer', paymentDate: '2026-10-01', paymentNotes: null,
+    }, 'next-key');
+    expect(component.settling()).toBeNull();
+    expect(component.message()).toBe('Quitação registrada com sucesso.');
+  });
+
+  it('preserves payment fields key and stale version after conflict or lost response', () => {
+    const component = fixture.componentInstance;
+    component.openPayment({ id: 'expense', amount: '150.00', version: 3 } as any);
+    api.settle.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 409, error: { message: 'Atualize a lista.' } })));
+    component.confirmPayment();
+    component.confirmPayment();
+    expect(api.settle.mock.calls[0]).toEqual(api.settle.mock.calls[1]);
+    expect(component.paymentForm.controls.paidAmount.value).toBe('150.00');
+    expect(component.settling()?.version).toBe(3);
+    expect(component.errorMessage()).toBe('Atualize a lista.');
   });
 });

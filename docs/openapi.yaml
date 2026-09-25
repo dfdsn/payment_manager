@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H02.1.
+  description: Contrato versionado dos endpoints implementados até H02.2.
 servers:
   - url: /api/v1
 paths:
@@ -497,6 +497,42 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /expenses/{id}/payment:
+    post:
+      operationId: settleExpense
+      summary: Quita integralmente uma despesa pendente
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentRequest"
+      responses:
+        "200":
+          description: Quitação criada ou repetição idempotente do mesmo resultado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Despesa não encontrada no espaço ativo.
+        "409":
+          description: Despesa já paga, versão desatualizada ou chave reutilizada com outro payload.
 components:
   securitySchemes:
     sessionCookie:
@@ -576,6 +612,29 @@ components:
         notes:
           type: [string, "null"]
           maxLength: 2000
+        paidAmount:
+          type: [string, "null"]
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          description: Para PAID, valor efetivo; omissão sugere o valor da cobrança.
+        paidByUserId:
+          type: [string, "null"]
+          format: uuid
+          description: Para PAID, membro ativo pagador; omissão sugere o autor.
+        paymentNotes:
+          type: [string, "null"]
+          maxLength: 2000
+    PaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [version, paidAmount, paymentDate, paidByUserId]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
+        paidAmount:
+          type: string
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+        paymentDate: { type: string, format: date }
+        paidByUserId: { type: string, format: uuid }
+        paymentNotes: { type: [string, "null"], maxLength: 2000 }
     Expense:
       type: object
       required: [id, origin, description, amount, currency, status, referenceDate, overdue,
@@ -609,6 +668,18 @@ components:
         paidByDisplayName: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
         version: { type: integer, format: int64, minimum: 0 }
+        paymentAudit:
+          oneOf:
+            - $ref: "#/components/schemas/PaymentAudit"
+            - type: "null"
+    PaymentAudit:
+      type: object
+      required: [recordedByUserId, recordedByDisplayName, recordedAt]
+      properties:
+        recordedByUserId: { type: string, format: uuid }
+        recordedByDisplayName: { type: string }
+        recordedAt: { type: string, format: date-time }
+        notes: { type: [string, "null"], maxLength: 2000 }
     ExpensePage:
       type: object
       required: [content, page, size, totalElements, totalPages, sort, direction]

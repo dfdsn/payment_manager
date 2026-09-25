@@ -13,4 +13,7 @@ public interface ExpenseRepository {
             OneOffExpense expense, UUID actorUserId, UUID idempotencyKey, String requestHash, Instant requestedAt);
 
     StoredExpensePage findBySpace(UUID spaceId, ExpenseListQuery query);
+    StoredExpenseCreation settle(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.SettleExpenseCommand command,
+            com.malyah.accountmanager.expenses.domain.PaymentDetails payment, Instant at);
 }

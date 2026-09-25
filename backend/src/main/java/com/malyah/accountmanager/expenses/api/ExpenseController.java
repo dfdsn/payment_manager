@@ -39,7 +39,7 @@ class ExpenseController {
             @Valid @RequestBody CreateExpenseRequest request) {
         var result = useCase.create(principal.getName(), new CreateOneOffExpenseCommand(
                 request.description(), request.amount(), request.status(), request.dueDate(), request.paymentDate(),
-                request.notes(), idempotencyKey));
+                request.notes(), idempotencyKey, request.paidAmount(), request.paidByUserId(), request.paymentNotes()));
         if (result.replayed()) return ResponseEntity.ok(result.expense());
         return ResponseEntity.created(URI.create("/api/v1/expenses/" + result.expense().id()))
                 .body(result.expense());
@@ -54,4 +54,19 @@ class ExpenseController {
             @RequestParam(defaultValue = "ASC") SortDirection direction) {
         return useCase.list(principal.getName(), new ExpenseListQuery(page, size, sort, direction));
     }
+
+    @PostMapping("/{id}/payment")
+    ExpenseView settle(Principal principal,
+            @org.springframework.web.bind.annotation.PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") UUID key,
+            @Valid @RequestBody PaymentRequest request) {
+        return useCase.settle(principal.getName(), new com.malyah.accountmanager.expenses.application.SettleExpenseCommand(
+                id, request.version(), request.paidAmount(), request.paymentDate(),
+                request.paidByUserId(), request.paymentNotes(), key)).expense();
+    }
+
+    record PaymentRequest(@jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version,
+            @jakarta.validation.constraints.NotBlank String paidAmount,
+            @jakarta.validation.constraints.NotNull java.time.LocalDate paymentDate,
+            @jakarta.validation.constraints.NotNull UUID paidByUserId, String paymentNotes) { }
 }

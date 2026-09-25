@@ -13,6 +13,9 @@ export interface CreateExpenseData {
   dueDate: string | null;
   paymentDate: string | null;
   notes: string | null;
+  paidAmount?: string;
+  paidByUserId?: string;
+  paymentNotes?: string | null;
 }
 
 export interface Expense {
@@ -34,6 +37,7 @@ export interface Expense {
   paidByDisplayName: string | null;
   createdAt: string;
   version: number;
+  paymentAudit?: { recordedByDisplayName: string; recordedByUserId: string; recordedAt: string; notes: string | null } | null;
 }
 
 export interface ExpensePage {
@@ -70,5 +74,10 @@ export class ExpenseService {
       .set('sort', sort)
       .set('direction', direction);
     return this.http.get<ExpensePage>(this.endpoint, { params });
+  }
+
+  settle(id: string, data: { version: number; paidAmount: string; paymentDate: string; paidByUserId: string; paymentNotes: string | null }, key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
+      this.http.post<Expense>(`${this.endpoint}/${id}/payment`, data, { headers: { 'Idempotency-Key': key } })));
   }
 }

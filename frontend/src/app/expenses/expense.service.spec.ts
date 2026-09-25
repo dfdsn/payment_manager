@@ -43,4 +43,20 @@ describe('ExpenseService', () => {
     expect(request.request.params.get('direction')).toBe('DESC');
     request.flush({ content: [], page: 2, size: 20, totalElements: 0, totalPages: 0 });
   });
+
+  it('settles with CSRF, idempotency key, version, payer and effective amount', () => {
+    service.settle('expense-id', {
+      version: 2, paidAmount: '155.00', paymentDate: '2026-10-01',
+      paidByUserId: 'payer-id', paymentNotes: 'Juros',
+    }, 'payment-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    const request = http.expectOne('/api/v1/expenses/expense-id/payment');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('Idempotency-Key')).toBe('payment-key');
+    expect(request.request.body).toEqual({
+      version: 2, paidAmount: '155.00', paymentDate: '2026-10-01',
+      paidByUserId: 'payer-id', paymentNotes: 'Juros',
+    });
+    request.flush({});
+  });
 });

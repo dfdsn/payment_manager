@@ -72,14 +72,25 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(guestPage.getByText(/como convidado/)).toBeVisible();
   await guestPage.getByRole('link', { name: 'Cadastrar e consultar despesas' }).click();
   await expect(guestPage.getByText('Energia')).toBeVisible();
+  await guestPage.getByRole('button', { name: 'Quitar despesa' }).click();
+  await guestPage.getByRole('textbox', { name: 'Valor efetivamente pago' }).fill('155,00');
+  await guestPage.getByLabel('Data da quitação').fill('2026-09-25');
+  await guestPage.getByLabel('Pagador da quitação').selectOption({ label: 'Diego' });
+  await guestPage.getByLabel('Observação da quitação').fill('Juros confirmados');
+  await guestPage.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(guestPage.getByText('Quitação registrada com sucesso.')).toBeVisible();
+  await expect(guestPage.getByText('Valor pago: R$ 155,00')).toBeVisible();
+  await expect(guestPage.getByText('Pagamento em 25/09/2026 por Diego.')).toBeVisible();
+  await expect(guestPage.getByText('Registrado por Pessoa Convidada.')).toBeVisible();
   await guestPage.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Mercado');
   await guestPage.getByRole('textbox', { name: 'Valor', exact: true }).fill('25,50');
   await guestPage.getByLabel('Situação').selectOption('PAID');
   await guestPage.getByLabel('Data do pagamento').fill('2026-09-25');
   await guestPage.getByRole('button', { name: 'Salvar despesa' }).click();
   await expect(guestPage.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
-  await expect(guestPage.getByText('Mercado')).toBeVisible();
-  await expect(guestPage.getByText('Paga', { exact: true })).toBeVisible();
+  const marketExpense = guestPage.locator('.expense-row').filter({ hasText: 'Mercado' });
+  await expect(marketExpense).toBeVisible();
+  await expect(marketExpense.getByText('Paga', { exact: true })).toBeVisible();
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();
 
