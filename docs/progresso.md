@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 25/09/2026.
 
-**Estado atual: H02.4 concluída.** P10 foi encerrada com correção prévia obrigatória do vencimento para reverter uma despesa criada paga sem vencimento. E01 e H02.1–H02.4 estão concluídos; não houve restauração de cancelado ou quitação em lote.
+**Estado atual: H02.5 e E02 concluídos.** A quitação em lote foi validada como operação atômica, versionada, idempotente e auditável. E01 e E02 estão concluídos; a próxima história é H03.1.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 25/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 8 de 46 concluídas; E01 concluído e E02 em andamento. |
-| Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
+| Histórias | 9 de 46 concluídas; E01 e E02 concluídos. |
+| Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | H02.5 — Quitar vários lançamentos; não iniciada nesta execução. |
+| Próxima ação | H03.1 — Gerenciar categorias; não iniciada nesta execução. |
 
 ## Estados permitidos
 
@@ -50,7 +50,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H02.2 | Quitar e identificar quem pagou | Concluído | 81 testes Java, 19 ITs PostgreSQL, JaCoCo 95,58%/85,29%, PIT 80%, 30 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H02.2.md`. |
 | H02.3 | Corrigir com proteção contra conflito | Concluído | 85 testes Java, 23 ITs PostgreSQL, JaCoCo 95,77%/84,87%, PIT 81%, 33 frontend, build e E2E de conflito em duas páginas aprovados. Evidência: `docs/evidencias/H02.3.md`. |
 | H02.4 | Desfazer quitação e cancelar | Concluído | 91 Java, 28 ITs PostgreSQL (18 de despesas), JaCoCo 95,57%/85,55%, PIT 82%, 37 frontend, build e E2E aprovados. P10 encerrada com correção prévia do vencimento. Evidência: `docs/evidencias/H02.4.md`. |
-| H02.5 | Quitar vários lançamentos | Não iniciado | — |
+| H02.5 | Quitar vários lançamentos | Concluído | 97 Java, 34 ITs PostgreSQL (24 de despesas), JaCoCo 95,73%/85,64%, PIT 83%, 40 frontend, build e E2E atômico aprovados. Evidência: `docs/evidencias/H02.5.md`. |
 | H03.1 | Gerenciar categorias | Não iniciado | — |
 | H03.2 | Atribuir responsável e consultar histórico | Não iniciado | — |
 | H03.3 | Anexar e acessar documentos | Não iniciado | — |
@@ -280,6 +280,25 @@ Limitações e cenários não executados: reflexos futuros em anexos/relatórios
 Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H02.4.md e este arquivo.
 Condição de conclusão ou desbloqueio: critérios executáveis satisfeitos e P10 encerrada em 25/09/2026; H02.4 concluída.
 Próximo passo: H02.5 — quitar vários lançamentos, sem iniciá-la nesta execução.
+```
+
+## Registro H02.5
+
+```text
+História / objetivo: H02.5 — Quitar vários lançamentos.
+Estado / responsável / data: Concluído / desenvolvimento / 25/09/2026.
+Requisitos e critérios de aceite relacionados: RF-DES-06, RF-DES-10, D16–D19 e CA-02/CA-04; seleção, confirmação, data/pagador comuns, valor integral por item, autorização, atomicidade, versão, idempotência, concorrência e auditoria correlacionada.
+Decisões e pendências aplicáveis: T12 registrada. P08 permanece aberta somente para retenção operacional dos registros idempotentes. Relatórios, fechamentos e notificações serão revalidados em E06–E08; pagamento parcial, rateio e múltiplos pagadores não foram introduzidos.
+Branch / commit / PR: branch `h02-5-batch-settlement`, base H02.4 `fa6be85`; entrega não publicada, implantada ou aberta em PR.
+Arquivos e comportamento alterados: lote no módulo expenses nas quatro camadas; V10; POST `/expenses/batch-payment`; seleção/resumo/confirmação Angular; correlação no histórico; E2E; OpenAPI, README, decisões e evidência H02.5.
+Migrações e impacto sobre dados: V10 cria operação/itens de lote e adiciona correlação opcional ao evento individual de pagamento; V1–V10 aplicadas em PostgreSQL 17.6 efêmero. Nenhuma migração anterior foi editada e nenhum banco compartilhado foi alterado.
+Testes executados: 97 unitários/HTTP/ArchUnit; 34 ITs Failsafe (24 específicos de despesas); 40 Vitest; build Angular; 1 E2E full-stack. Todos aprovados, sem ignorados/falhas/erros. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V10 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 672/702 linhas (95,73%) e 322/376 branches (85,64%); PIT 83% (247/298), 94% das linhas mutadas cobertas e força 87%; gates mantidos. A recusa de cobrança não confirmada foi validada no domínio; o cenário persistido depende da futura H04.4 porque a V6 exige confirmação em despesas avulsas.
+Validação manual / integração real: Testcontainers comprovou lote integral, estados/versões/espaço, replay/conflito de chave, locks concorrentes, disputas com quitação/correção/cancelamento e rollback forçado. E2E Chrome em Nginx/backend/PostgreSQL/Mailpit rejeitou integralmente uma seleção desatualizada, preservou o formulário e depois quitou os dois itens em uma única chamada.
+Limitações e cenários futuros: reflexos de dashboard, fechamento e notificação ainda não existem e serão verificados em E06–E08. Mailpit foi apenas captura local; H02.5 não envia email. Android/Edge reais continuam no aceite transversal. Não há limite numérico aprovado além do lote não vazio; nenhum teto arbitrário foi criado.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H02.5.md e este arquivo.
+Condição de conclusão ou desbloqueio: critérios executáveis da H02.5 e o escopo próprio do E02 satisfeitos em 25/09/2026; integrações futuras explicitamente diferidas conforme backlog.
+Próximo passo: H03.1 — gerenciar categorias.
 ```
 
 ## Registro de release: modelo

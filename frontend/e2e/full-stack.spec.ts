@@ -144,6 +144,51 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(guestPage.getByText('Quitação desfeita', { exact: false })).toHaveCount(2);
   await expect(guestPage.getByText('Despesa cancelada', { exact: true })).toBeVisible();
 
+  await guestPage.getByRole('button', { name: 'Fechar histórico' }).click();
+  for (const [description, amount] of [['Água', '80,00'], ['Internet', '99,90']] as const) {
+    await guestPage.getByRole('textbox', { name: 'Descrição', exact: true }).fill(description);
+    await guestPage.getByRole('textbox', { name: 'Valor', exact: true }).fill(amount);
+    await guestPage.getByLabel('Vencimento').fill('2026-10-10');
+    await guestPage.getByRole('button', { name: 'Salvar despesa' }).click();
+    await expect(guestPage.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
+  }
+  await guestPage.getByLabel('Selecionar para quitação em lote: Água').check();
+  await guestPage.getByLabel('Selecionar para quitação em lote: Internet').check();
+  await guestPage.getByRole('button', { name: 'Quitar selecionadas (2)' }).click();
+  await expect(guestPage.getByText('2 lançamentos · total R$ 179,90')).toBeVisible();
+  await guestPage.getByLabel('Data da quitação do lote').fill('2026-10-01');
+  await guestPage.getByLabel('Pagador do lote').selectOption({ label: 'Diego' });
+  await guestPage.getByLabel(/Confirmo a quitação integral/).check();
+
+  const batchConflictPage = await guestContext.newPage();
+  await batchConflictPage.goto('/despesas');
+  const waterCopy = batchConflictPage.locator('.expense-row').filter({ hasText: 'Água' });
+  await waterCopy.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await batchConflictPage.getByLabel('Descrição da correção').fill('Água conferida');
+  await batchConflictPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(batchConflictPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+  await batchConflictPage.close();
+
+  await guestPage.getByRole('button', { name: 'Quitar todos ou nenhum' }).click();
+  await expect(guestPage.getByText(/lote inteiro foi rejeitado/)).toBeVisible();
+  await expect(guestPage.getByLabel('Data da quitação do lote')).toHaveValue('2026-10-01');
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Internet' })
+    .getByRole('button', { name: 'Quitar despesa' })).toBeVisible();
+
+  await guestPage.reload();
+  await guestPage.getByLabel('Selecionar para quitação em lote: Água conferida').check();
+  await guestPage.getByLabel('Selecionar para quitação em lote: Internet').check();
+  await guestPage.getByRole('button', { name: 'Quitar selecionadas (2)' }).click();
+  await guestPage.getByLabel('Data da quitação do lote').fill('2026-10-01');
+  await guestPage.getByLabel('Pagador do lote').selectOption({ label: 'Diego' });
+  await guestPage.getByLabel(/Confirmo a quitação integral/).check();
+  await guestPage.getByRole('button', { name: 'Quitar todos ou nenhum' }).click();
+  await expect(guestPage.getByText(/2 lançamentos quitados no lote/)).toBeVisible();
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Água conferida' })
+    .getByText('Paga', { exact: true })).toBeVisible();
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Internet' })
+    .getByText('Paga', { exact: true })).toBeVisible();
+
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();
 

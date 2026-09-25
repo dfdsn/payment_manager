@@ -81,6 +81,20 @@ class ExpenseController {
                 request.paidByUserId(), request.paymentNotes(), key)).expense();
     }
 
+    @PostMapping("/batch-payment")
+    com.malyah.accountmanager.expenses.application.BatchSettlementResult settleBatch(
+            Principal principal,
+            @RequestHeader("Idempotency-Key") UUID key,
+            @Valid @RequestBody BatchPaymentRequest request) {
+        var items = request.items().stream()
+                .map(item -> new com.malyah.accountmanager.expenses.application.BatchSettlementItem(
+                        item.expenseId(), item.version()))
+                .toList();
+        return useCase.settleBatch(principal.getName(),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementCommand(
+                        items, request.paymentDate(), request.paidByUserId(), request.confirmed(), key));
+    }
+
     @PostMapping("/{id}/payment-reversal")
     ExpenseView reversePayment(Principal principal,
             @org.springframework.web.bind.annotation.PathVariable UUID id,
@@ -105,6 +119,16 @@ class ExpenseController {
             @jakarta.validation.constraints.NotBlank String paidAmount,
             @jakarta.validation.constraints.NotNull java.time.LocalDate paymentDate,
             @jakarta.validation.constraints.NotNull UUID paidByUserId, String paymentNotes) { }
+
+    record BatchPaymentRequest(
+            @jakarta.validation.constraints.NotEmpty java.util.List<@Valid BatchPaymentItemRequest> items,
+            @jakarta.validation.constraints.NotNull java.time.LocalDate paymentDate,
+            @jakarta.validation.constraints.NotNull UUID paidByUserId,
+            @jakarta.validation.constraints.AssertTrue boolean confirmed) { }
+
+    record BatchPaymentItemRequest(
+            @jakarta.validation.constraints.NotNull UUID expenseId,
+            @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version) { }
 
     record ExpenseActionRequest(
             @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version,

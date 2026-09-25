@@ -18,6 +18,16 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNo
 
 @RestControllerAdvice(assignableTypes = ExpenseController.class)
 class ExpenseApiExceptionHandler {
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.BatchSettlementConflictException.class)
+    ResponseEntity<ApiError> batchConflict(
+            com.malyah.accountmanager.expenses.application.BatchSettlementConflictException exception) {
+        var fields = exception.problems().stream()
+                .map(problem -> new FieldError("items[" + problem.expenseId() + "]",
+                        problem.code() + ": " + problem.message()))
+                .toList();
+        return response(HttpStatus.CONFLICT, "BATCH_SETTLEMENT_CONFLICT", exception.getMessage(), fields);
+    }
+
     @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class)
     ResponseEntity<ApiError> stateConflict(RuntimeException exception) {
         return response(HttpStatus.CONFLICT, "EXPENSE_STATE_CONFLICT", exception.getMessage(), List.of());

@@ -28,6 +28,13 @@ public interface ExpenseRepository {
             com.malyah.accountmanager.expenses.application.SettleExpenseCommand command,
             com.malyah.accountmanager.expenses.domain.PaymentDetails payment, Instant at);
 
+    com.malyah.accountmanager.expenses.application.BatchSettlementResult settleBatch(
+            UUID spaceId,
+            UUID actorId,
+            com.malyah.accountmanager.expenses.application.BatchSettlementCommand command,
+            com.malyah.accountmanager.expenses.domain.BatchPaymentInstruction payment,
+            Instant at);
+
     StoredExpenseCreation reversePayment(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.ReversePaymentCommand command,
             com.malyah.accountmanager.expenses.domain.ExpenseActionReason reason, Instant at);

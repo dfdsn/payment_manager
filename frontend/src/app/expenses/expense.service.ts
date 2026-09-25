@@ -68,6 +68,13 @@ export interface ExpenseHistoryEvent {
   payerUserId: string | null;
   payerDisplayName: string | null;
   changedFields: string | null;
+  batchOperationId: string | null;
+}
+
+export interface BatchSettlementResult {
+  operationId: string;
+  replayed: boolean;
+  items: { expenseId: string; fromVersion: number; toVersion: number; paidAmount: string }[];
 }
 
 export interface ExpensePage {
@@ -121,6 +128,17 @@ export class ExpenseService {
   settle(id: string, data: { version: number; paidAmount: string; paymentDate: string; paidByUserId: string; paymentNotes: string | null }, key: string) {
     return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
       this.http.post<Expense>(`${this.endpoint}/${id}/payment`, data, { headers: { 'Idempotency-Key': key } })));
+  }
+
+  settleBatch(data: {
+    items: { expenseId: string; version: number }[];
+    paymentDate: string;
+    paidByUserId: string;
+    confirmed: boolean;
+  }, key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
+      this.http.post<BatchSettlementResult>(`${this.endpoint}/batch-payment`, data,
+        { headers: { 'Idempotency-Key': key } })));
   }
 
   reversePayment(id: string, version: number, reason: string, key: string) {

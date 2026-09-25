@@ -123,6 +123,48 @@
     </mat-card>
   }
 
+  @if (batchOpen()) {
+    <mat-card appearance="outlined" class="expense-form-card batch-card">
+      <mat-card-header>
+        <mat-card-title>Confirmar quitação em lote</mat-card-title>
+        <mat-card-subtitle>{{ selectedForBatch().size }} lançamentos · total {{ batchTotal() }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        <p>Todos os lançamentos serão quitados pela data e pelo pagador abaixo, usando o valor integral de cada cobrança.</p>
+        <p>O lote é atômico: se um item estiver alterado ou inelegível, nenhum pagamento será registrado.</p>
+        <ul class="batch-summary">
+          @for (expense of selectedBatchItems(); track expense.id) {
+            <li>{{ expense.description }} — {{ formatCurrency(expense.amount) }} — versão {{ expense.version }}</li>
+          }
+        </ul>
+        <form [formGroup]="batchForm" (ngSubmit)="confirmBatch()" novalidate>
+          <mat-form-field appearance="outline"><mat-label>Data da quitação do lote</mat-label>
+            <input matInput type="date" formControlName="paymentDate" />
+            <mat-error>Informe a data do pagamento.</mat-error>
+          </mat-form-field>
+          <label class="select-field">Pagador do lote
+            <select formControlName="paidByUserId">
+              @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+            </select>
+          </label>
+          <label class="confirmation-field">
+            <input type="checkbox" formControlName="confirmed" />
+            Confirmo a quitação integral dos {{ selectedForBatch().size }} lançamentos, no total de {{ batchTotal() }}.
+          </label>
+          @if (batchForm.controls.confirmed.invalid && batchForm.controls.confirmed.touched) {
+            <p class="field-error">Confirme conscientemente a operação antes de continuar.</p>
+          }
+          <div class="form-actions wide-field">
+            <button matButton="filled" type="submit" [disabled]="submitting()">
+              {{ submitting() ? 'Quitando lote…' : 'Quitar todos ou nenhum' }}
+            </button>
+            <button matButton="outlined" type="button" [disabled]="submitting()" (click)="batchOpen.set(false)">Voltar e revisar seleção</button>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  }
+
   @if (editing(); as expense) {
     <mat-card appearance="outlined" class="expense-form-card correction-card">
       <mat-card-header>
@@ -232,6 +274,7 @@
                 @if (event.reason) { <p>Motivo: {{ event.reason }}</p> }
                 @if (event.paidAmount) { <p>Pagamento preservado: {{ formatCurrency(event.paidAmount) }} em {{ formatDate(event.paymentDate) }} por {{ event.payerDisplayName }}.</p> }
                 @if (event.changedFields) { <p>Campos alterados: {{ event.changedFields }}.</p> }
+                @if (event.batchOperationId) { <p>Operação em lote: {{ event.batchOperationId }}.</p> }
               </li>
             }
           </ol>
@@ -248,6 +291,10 @@
         <p>{{ totalElements() }} {{ totalElements() === 1 ? 'despesa' : 'despesas' }}</p>
       </div>
       <div class="sort-controls">
+        <button matButton="filled" type="button" (click)="openBatch()"
+          [disabled]="selectedForBatch().size === 0 || submitting()">
+          Quitar selecionadas ({{ selectedForBatch().size }})
+        </button>
         <label class="select-field compact">Ordenar por
           <select [value]="sort()" (change)="changeSort($any($event.target).value)">
             <option value="REFERENCE_DATE">Data de referência</option>
@@ -271,7 +318,16 @@
           <mat-card appearance="outlined" class="expense-row">
             <mat-card-content>
               <div class="expense-title-line">
-                <h3>{{ expense.description }}</h3>
+                <h3>
+                  @if (expense.status === 'PENDING') {
+                    <label class="batch-selector">
+                      <input type="checkbox" [checked]="isBatchSelected(expense.id)"
+                        (change)="toggleBatch(expense)" [disabled]="submitting()"
+                        [attr.aria-label]="'Selecionar para quitação em lote: ' + expense.description" />
+                    </label>
+                  }
+                  {{ expense.description }}
+                </h3>
                 <strong>{{ formatCurrency(expense.amount) }}</strong>
               </div>
               <p>

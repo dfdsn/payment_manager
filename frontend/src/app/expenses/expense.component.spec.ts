@@ -10,7 +10,7 @@ describe('ExpenseComponent', () => {
   let fixture: ComponentFixture<ExpenseComponent>;
   const api = {
     newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(), settle: vi.fn(), get: vi.fn(), correct: vi.fn(),
-    reversePayment: vi.fn(), cancel: vi.fn(),
+    reversePayment: vi.fn(), cancel: vi.fn(), settleBatch: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -227,5 +227,44 @@ describe('ExpenseComponent', () => {
     expect(component.errorMessage()).toContain('Informe o vencimento pela correção');
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('corrija a despesa e informe um vencimento');
+  });
+
+  it('selects pending expenses and confirms one atomic batch with common data', () => {
+    const component = fixture.componentInstance;
+    const first = { id: 'one', status: 'PENDING', version: 2, description: 'Energia', amount: '150.00' } as any;
+    const second = { id: 'two', status: 'PENDING', version: 4, description: 'Mercado', amount: '25.50' } as any;
+    component.toggleBatch(first);
+    component.toggleBatch(second);
+    component.openBatch();
+    expect(component.batchTotal()).toBe('R$ 175,50');
+    component.batchForm.patchValue({ paymentDate: '2026-10-01', paidByUserId: 'payer', confirmed: true });
+    api.settleBatch.mockReturnValue(of({ operationId: 'batch-id', replayed: false,
+      items: [{ expenseId: 'one' }, { expenseId: 'two' }] }));
+
+    component.confirmBatch();
+
+    expect(api.settleBatch).toHaveBeenCalledWith({
+      items: [{ expenseId: 'one', version: 2 }, { expenseId: 'two', version: 4 }],
+      paymentDate: '2026-10-01', paidByUserId: 'payer', confirmed: true,
+    }, 'next-key');
+    expect(component.selectedForBatch().size).toBe(0);
+    expect(component.message()).toContain('2 lançamentos quitados');
+  });
+
+  it('preserves batch selection data and operation key after an atomic conflict', () => {
+    const component = fixture.componentInstance;
+    component.toggleBatch({ id: 'one', status: 'PENDING', version: 2,
+      description: 'Energia', amount: '150.00' } as any);
+    component.openBatch();
+    component.batchForm.patchValue({ paymentDate: '2026-10-01', paidByUserId: 'payer', confirmed: true });
+    api.settleBatch.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 409 })));
+
+    component.confirmBatch();
+    component.confirmBatch();
+
+    expect(api.settleBatch.mock.calls[0]).toEqual(api.settleBatch.mock.calls[1]);
+    expect(component.selectedForBatch().has('one')).toBe(true);
+    expect(component.batchForm.controls.paymentDate.value).toBe('2026-10-01');
+    expect(component.errorMessage()).toContain('lote inteiro foi rejeitado');
   });
 });

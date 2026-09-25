@@ -60,6 +60,18 @@ describe('ExpenseService', () => {
     request.flush({});
   });
 
+  it('sends one protected request for the complete atomic batch', () => {
+    const data = { items: [{ expenseId: 'one', version: 2 }, { expenseId: 'two', version: 4 }],
+      paymentDate: '2026-10-01', paidByUserId: 'payer-id', confirmed: true };
+    service.settleBatch(data, 'batch-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    const request = http.expectOne('/api/v1/expenses/batch-payment');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('Idempotency-Key')).toBe('batch-key');
+    expect(request.request.body).toEqual(data);
+    request.flush({ operationId: 'batch', replayed: false, items: [] });
+  });
+
   it('loads one expense and corrects it with CSRF, version and idempotency key', () => {
     service.get('expense-id').subscribe();
     const get = http.expectOne('/api/v1/expenses/expense-id');

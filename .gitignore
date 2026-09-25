@@ -8,6 +8,7 @@
 backend/target/
 backend/bin/
 backend/.settings/
+backend/.project
 frontend/node_modules/
 frontend/dist/
 frontend/test-results/

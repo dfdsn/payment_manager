@@ -7,6 +7,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.HexFormat;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -70,6 +71,27 @@ public final class ExpenseService {
         memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment.payerId());
         var result = repository.settle(actor.spaceId(), actor.userId(), command, payment, clock.instant());
         return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
+    }
+
+    public BatchSettlementResult settleBatch(String email, BatchSettlementCommand command) {
+        if (command == null || command.idempotencyKey() == null)
+            throw new ExpenseQueryValidationException("batch", "Informe uma chave de repetição válida.");
+        if (!command.confirmed())
+            throw new ExpenseQueryValidationException("confirmed", "Confirme a quitação integral do lote.");
+        if (command.items() == null || command.items().isEmpty())
+            throw new ExpenseQueryValidationException("items", "Selecione ao menos um lançamento.");
+        var identifiers = new HashSet<UUID>();
+        for (var item : command.items()) {
+            if (item == null || item.expenseId() == null || item.version() < 0)
+                throw new ExpenseQueryValidationException("items", "Informe lançamentos e versões válidos.");
+            if (!identifiers.add(item.expenseId()))
+                throw new ExpenseQueryValidationException("items", "Não repita um lançamento no mesmo lote.");
+        }
+        var payment = new com.malyah.accountmanager.expenses.domain.BatchPaymentInstruction(
+                command.paymentDate(), command.paidByUserId());
+        var actor = contextQuery.findByEmail(email);
+        memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment.payerId());
+        return repository.settleBatch(actor.spaceId(), actor.userId(), command, payment, clock.instant());
     }
 
     public ExpenseView get(String email, UUID expenseId) {

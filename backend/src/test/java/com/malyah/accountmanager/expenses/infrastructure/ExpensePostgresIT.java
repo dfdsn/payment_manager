@@ -62,7 +62,7 @@ class ExpensePostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(9);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(10);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var context = new AuthenticatedUserContextService(contextRepository());
@@ -573,11 +573,182 @@ class ExpensePostgresIT {
                 .containsExactly("EXPENSE_PAID", "EXPENSE_CORRECTED", "PAYMENT_REVERSED");
     }
 
+    @Test void atomicBatchSettlesEveryItemWithChargeAmountPayerActorAndCorrelation() {
+        var first = pending();
+        var second = useCase.create("guest@example.com", command("Mercado", "25.50", ExpenseStatus.PENDING,
+                LocalDate.of(2026, 10, 2), null, UUID.randomUUID())).expense().id();
+        var key = UUID.randomUUID();
+        var command = batch(key, new com.malyah.accountmanager.expenses.application.BatchSettlementItem(first, 0),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(second, 0));
+
+        var result = useCase.settleBatch("admin@example.com", command);
+
+        assertThat(result.replayed()).isFalse();
+        assertThat(result.items()).extracting(item -> item.paidAmount()).containsExactlyInAnyOrder("150.00", "25.50");
+        assertThat(result.items()).allSatisfy(item -> {
+            assertThat(item.fromVersion()).isZero();
+            assertThat(item.toVersion()).isOne();
+        });
+        assertThat(useCase.get("guest@example.com", first).status()).isEqualTo(ExpenseStatus.PAID);
+        assertThat(useCase.get("guest@example.com", second).paidByUserId()).isEqualTo(GUEST);
+        assertThat(useCase.get("guest@example.com", second).paymentAudit().recordedByUserId()).isEqualTo(ADMIN);
+        assertThat(jdbc.queryForList("select distinct batch_operation_id from expense_payment_events where expense_id in (?, ?)",
+                UUID.class, first, second)).containsExactly(result.operationId());
+        assertThat(useCase.get("admin@example.com", first).history()).singleElement()
+                .satisfies(event -> assertThat(event.batchOperationId()).isEqualTo(result.operationId()));
+
+        var replay = useCase.settleBatch("admin@example.com", command);
+        assertThat(replay.replayed()).isTrue();
+        assertThat(replay.operationId()).isEqualTo(result.operationId());
+        assertThat(replay.items()).isEqualTo(result.items());
+        assertThat(jdbc.queryForObject("select count(*) from expense_payment_events where batch_operation_id=?",
+                Integer.class, result.operationId())).isEqualTo(2);
+        assertThatThrownBy(() -> useCase.settleBatch("admin@example.com",
+                new com.malyah.accountmanager.expenses.application.BatchSettlementCommand(command.items(),
+                        LocalDate.of(2026, 10, 2), GUEST, true, key)))
+                .isInstanceOf(ExpenseIdempotencyConflictException.class);
+    }
+
+    @Test void onePaidCancelledStaleOrForeignItemRejectsTheWholeBatch() {
+        var paid = pending();
+        useCase.settle("admin@example.com", payment(paid, "150", UUID.randomUUID()));
+        assertBatchRejectedWithoutChangingCompanion(paid, 1, "STATE_INCOMPATIBLE");
+
+        var cancelled = pending();
+        useCase.cancel("admin@example.com", new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                cancelled, 0, "Duplicada", UUID.randomUUID()));
+        assertBatchRejectedWithoutChangingCompanion(cancelled, 1, "STATE_INCOMPATIBLE");
+
+        var stale = pending();
+        jdbc.update("update expense_entries set version=1 where id=?", stale);
+        assertBatchRejectedWithoutChangingCompanion(stale, 0, "VERSION_CONFLICT");
+
+        var foreign = insertOtherSpaceExpense();
+        assertBatchRejectedWithoutChangingCompanion(foreign, 0, "UNAVAILABLE");
+    }
+
+    @Test void inactiveActorOrPayerCannotRunBatchAndNoOperationIsClaimed() {
+        var id = pending();
+        jdbc.update("update space_memberships set active=false, ended_at=?, ended_by_user_id=?, end_reason='VOLUNTARY_EXIT' where user_id=?",
+                Timestamp.from(NOW), GUEST, GUEST);
+        assertThatThrownBy(() -> useCase.settleBatch("admin@example.com", batch(UUID.randomUUID(),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(id, 0))))
+                .isInstanceOf(com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException.class);
+        assertThatThrownBy(() -> useCase.settleBatch("guest@example.com", new com.malyah.accountmanager.expenses.application.BatchSettlementCommand(
+                List.of(new com.malyah.accountmanager.expenses.application.BatchSettlementItem(id, 0)),
+                LocalDate.of(2026, 10, 1), ADMIN, true, UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException.class);
+        assertThat(jdbc.queryForObject("select count(*) from expense_batch_payment_operations", Integer.class)).isZero();
+        assertThat(useCase.get("admin@example.com", id).status()).isEqualTo(ExpenseStatus.PENDING);
+    }
+
+    @Test void overlappingConcurrentBatchesHaveOneWinnerAndTheLoserHasNoPartialPayment() throws Exception {
+        var shared = pending();
+        var firstOnly = pending();
+        var secondOnly = pending();
+        Callable<String> first = () -> batchOutcome(batch(UUID.randomUUID(),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(shared, 0),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(firstOnly, 0)));
+        Callable<String> second = () -> batchOutcome(batch(UUID.randomUUID(),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(shared, 0),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(secondOnly, 0)));
+        List<String> outcomes;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var futures = executor.invokeAll(List.of(first, second));
+            outcomes = List.of(futures.get(0).get(), futures.get(1).get());
+        }
+        assertThat(outcomes).containsExactlyInAnyOrder("paid", "conflict");
+        assertThat(jdbc.queryForObject("select count(*) from expense_payment_events", Integer.class)).isEqualTo(2);
+        assertThat(List.of(useCase.get("admin@example.com", firstOnly).status(),
+                useCase.get("admin@example.com", secondOnly).status()))
+                .containsExactlyInAnyOrder(ExpenseStatus.PAID, ExpenseStatus.PENDING);
+    }
+
+    @Test void batchCompetesAtomicallyWithIndividualPaymentCorrectionAndCancellation() throws Exception {
+        for (String operation : List.of("payment", "correction", "cancellation")) {
+            var shared = pending();
+            var companion = pending();
+            Callable<String> batch = () -> batchOutcome(batch(UUID.randomUUID(),
+                    new com.malyah.accountmanager.expenses.application.BatchSettlementItem(shared, 0),
+                    new com.malyah.accountmanager.expenses.application.BatchSettlementItem(companion, 0)));
+            Callable<String> individual = () -> individualOutcome(operation, shared);
+            List<String> outcomes;
+            try (var executor = Executors.newFixedThreadPool(2)) {
+                var futures = executor.invokeAll(List.of(batch, individual));
+                outcomes = List.of(futures.get(0).get(), futures.get(1).get());
+            }
+            assertThat(outcomes).contains("conflict");
+            if (outcomes.getFirst().equals("conflict"))
+                assertThat(useCase.get("admin@example.com", companion).status()).isEqualTo(ExpenseStatus.PENDING);
+        }
+    }
+
+    @Test void auditFailureRollsBackEntireBatchIncludingOperationAndAllPayments() {
+        var first = pending();
+        var second = pending();
+        var command = batch(UUID.randomUUID(),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(first, 0),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(second, 0));
+        jdbc.execute("alter table expense_payment_events add constraint test_batch_audit_failure check (expense_id <> '" + second + "')");
+
+        assertThatThrownBy(() -> useCase.settleBatch("admin@example.com", command))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(useCase.get("admin@example.com", first).status()).isEqualTo(ExpenseStatus.PENDING);
+        assertThat(useCase.get("admin@example.com", second).status()).isEqualTo(ExpenseStatus.PENDING);
+        assertThat(jdbc.queryForObject("select count(*) from expense_payment_events", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from expense_batch_payment_operations", Integer.class)).isZero();
+        jdbc.execute("alter table expense_payment_events drop constraint test_batch_audit_failure");
+        assertThat(useCase.settleBatch("admin@example.com", command).items()).hasSize(2);
+    }
+
     private CorrectExpenseCommand correction(UUID id, long version, ExpenseStatus status, String description,
             String amount, LocalDate dueDate, String notes, String paidAmount, LocalDate paymentDate,
             UUID payer, String paymentNotes, UUID key) {
         return new CorrectExpenseCommand(id, version, status, description, amount, dueDate, notes,
                 paidAmount, paymentDate, payer, paymentNotes, key);
+    }
+
+    private com.malyah.accountmanager.expenses.application.BatchSettlementCommand batch(
+            UUID key, com.malyah.accountmanager.expenses.application.BatchSettlementItem... items) {
+        return new com.malyah.accountmanager.expenses.application.BatchSettlementCommand(
+                List.of(items), LocalDate.of(2026, 10, 1), GUEST, true, key);
+    }
+
+    private void assertBatchRejectedWithoutChangingCompanion(UUID invalidId, long version, String code) {
+        var companion = pending();
+        assertThatThrownBy(() -> useCase.settleBatch("admin@example.com", batch(UUID.randomUUID(),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(companion, 0),
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItem(invalidId, version))))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.BatchSettlementConflictException.class)
+                .satisfies(error -> assertThat(((com.malyah.accountmanager.expenses.application.BatchSettlementConflictException) error)
+                        .problems()).extracting(problem -> problem.code()).contains(code));
+        assertThat(useCase.get("admin@example.com", companion).status()).isEqualTo(ExpenseStatus.PENDING);
+    }
+
+    private String batchOutcome(com.malyah.accountmanager.expenses.application.BatchSettlementCommand command) {
+        try { useCase.settleBatch("admin@example.com", command); return "paid"; }
+        catch (com.malyah.accountmanager.expenses.application.BatchSettlementConflictException
+                | com.malyah.accountmanager.expenses.application.ExpenseStateConflictException conflict) {
+            return "conflict";
+        }
+    }
+
+    private String individualOutcome(String operation, UUID id) {
+        try {
+            switch (operation) {
+                case "payment" -> useCase.settle("guest@example.com", payment(id, "150", UUID.randomUUID()));
+                case "correction" -> useCase.correct("guest@example.com", correction(id, 0, ExpenseStatus.PENDING,
+                        "Editada", "151", LocalDate.of(2026, 10, 2), null, null, null, null, null,
+                        UUID.randomUUID()));
+                case "cancellation" -> useCase.cancel("guest@example.com",
+                        new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                                id, 0, "Cancelamento concorrente", UUID.randomUUID()));
+                default -> throw new IllegalArgumentException(operation);
+            }
+            return operation;
+        } catch (com.malyah.accountmanager.expenses.application.ExpenseStateConflictException conflict) {
+            return "conflict";
+        }
     }
 
     private String correctionOutcome(String email, CorrectExpenseCommand command) {
@@ -626,13 +797,15 @@ class ExpensePostgresIT {
                 """, UUID.randomUUID(), id, space, role, Timestamp.from(NOW.minusSeconds(60)));
     }
 
-    private void insertOtherSpaceExpense() {
+    private UUID insertOtherSpaceExpense() {
         var user = UUID.fromString("00000000-0000-0000-0000-000000000201");
         var date = LocalDate.of(2026, 9, 26);
+        var id = UUID.randomUUID();
         jdbc.update("""
                 insert into expense_entries(id, space_id, origin, description, charge_amount, charge_confirmed,
                     status, due_date, reference_date, created_by_user_id, created_at, version)
                 values (?, ?, 'ONE_OFF', 'Privada de outro espaço', 10.00, true, 'PENDING', ?, ?, ?, ?, 0)
-                """, UUID.randomUUID(), OTHER_SPACE, date, date, user, Timestamp.from(NOW));
+                """, id, OTHER_SPACE, date, date, user, Timestamp.from(NOW));
+        return id;
     }
 }

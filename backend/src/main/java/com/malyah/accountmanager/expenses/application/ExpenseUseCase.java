@@ -6,6 +6,7 @@ public interface ExpenseUseCase {
     ExpenseView get(String actorEmail, java.util.UUID expenseId);
     ExpenseCreationResult correct(String actorEmail, CorrectExpenseCommand command);
     ExpenseCreationResult settle(String actorEmail, SettleExpenseCommand command);
+    BatchSettlementResult settleBatch(String actorEmail, BatchSettlementCommand command);
     ExpenseCreationResult reversePayment(String actorEmail, ReversePaymentCommand command);
     ExpenseCreationResult cancel(String actorEmail, CancelExpenseCommand command);
 }

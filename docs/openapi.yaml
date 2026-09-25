@@ -589,6 +589,45 @@ paths:
           description: Despesa não encontrada no espaço ativo.
         "409":
           description: Despesa já paga, versão desatualizada ou chave reutilizada com outro payload.
+  /expenses/batch-payment:
+    post:
+      operationId: settleExpensesBatch
+      summary: Quita integralmente vários lançamentos em uma única transação
+      description: >-
+        Data e pagador são comuns ao lote; cada item usa o valor confirmado da própria cobrança.
+        Todos os itens são validados e bloqueados antes da gravação. Qualquer item indisponível,
+        inelegível ou desatualizado rejeita o lote inteiro, sem efeitos parciais.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID da intenção completa; deve ser preservado somente ao repetir o mesmo conteúdo.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchPaymentRequest" }
+      responses:
+        "200":
+          description: Lote aplicado integralmente ou replay idempotente do resultado original.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchPaymentResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: >-
+            Lote integralmente rejeitado por item indisponível, não pendente, com valor não confirmado
+            ou versão desatualizada; também cobre chave idempotente reutilizada com conteúdo diferente.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
   /expenses/{id}/payment-reversal:
     post:
       operationId: reverseExpensePayment
@@ -758,6 +797,47 @@ components:
         paymentDate: { type: string, format: date }
         paidByUserId: { type: string, format: uuid }
         paymentNotes: { type: [string, "null"], maxLength: 2000 }
+    BatchPaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [items, paymentDate, paidByUserId, confirmed]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          description: Seleção sem IDs repetidos; a ordem não altera a identidade da intenção.
+          items:
+            type: object
+            additionalProperties: false
+            required: [expenseId, version]
+            properties:
+              expenseId: { type: string, format: uuid }
+              version: { type: integer, format: int64, minimum: 0 }
+        paymentDate: { type: string, format: date }
+        paidByUserId:
+          type: string
+          format: uuid
+          description: Membro ativo do mesmo espaço, comum a todos os itens.
+        confirmed:
+          const: true
+          description: Confirmação explícita da quitação integral de todos ou nenhum.
+    BatchPaymentResult:
+      type: object
+      required: [operationId, items, replayed]
+      properties:
+        operationId: { type: string, format: uuid }
+        replayed: { type: boolean }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [expenseId, fromVersion, toVersion, paidAmount]
+            properties:
+              expenseId: { type: string, format: uuid }
+              fromVersion: { type: integer, format: int64, minimum: 0 }
+              toVersion: { type: integer, format: int64, minimum: 1 }
+              paidAmount: { type: string, pattern: '^\d+\.\d{2}$' }
     CorrectExpenseRequest:
       type: object
       additionalProperties: false
@@ -864,6 +944,10 @@ components:
         payerUserId: { type: [string, "null"], format: uuid }
         payerDisplayName: { type: [string, "null"] }
         changedFields: { type: [string, "null"] }
+        batchOperationId:
+          type: [string, "null"]
+          format: uuid
+          description: Correlação comum às auditorias individuais produzidas por uma quitação em lote.
     ExpensePage:
       type: object
       required: [content, page, size, totalElements, totalPages, sort, direction]

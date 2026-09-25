@@ -204,6 +204,46 @@ class ExpenseServiceTest {
                 .hasMessageContaining("vencimento");
     }
 
+    @Test void settlesValidatedAtomicBatchForAuthenticatedSpaceAndActivePayer() {
+        var second = UUID.fromString("00000000-0000-0000-0000-000000000005");
+        var operation = UUID.fromString("00000000-0000-0000-0000-000000000006");
+        var command = new BatchSettlementCommand(List.of(
+                new BatchSettlementItem(EXPENSE, 2), new BatchSettlementItem(second, 4)),
+                LocalDate.of(2026, 10, 1), USER, true, KEY);
+        given(repository.settleBatch(any(), any(), any(), any(), any())).willReturn(
+                new BatchSettlementResult(operation, List.of(
+                        new BatchSettlementItemResult(EXPENSE, 2, 3, "150.00"),
+                        new BatchSettlementItemResult(second, 4, 5, "25.50")), false));
+
+        var result = service.settleBatch("guest@example.com", command);
+
+        assertThat(result.operationId()).isEqualTo(operation);
+        assertThat(result.items()).hasSize(2);
+        org.mockito.Mockito.verify(repository).settleBatch(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(command),
+                org.mockito.ArgumentMatchers.argThat(payment -> payment.payerId().equals(USER)
+                        && payment.date().equals(LocalDate.of(2026, 10, 1))),
+                org.mockito.ArgumentMatchers.eq(NOW));
+    }
+
+    @Test void rejectsEmptyDuplicateUnconfirmedOrMalformedBatchBeforePersistence() {
+        var date = LocalDate.of(2026, 10, 1);
+        var invalid = List.of(
+                new BatchSettlementCommand(List.of(), date, USER, true, KEY),
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(EXPENSE, 0),
+                        new BatchSettlementItem(EXPENSE, 0)), date, USER, true, KEY),
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(EXPENSE, 0)), date, USER, false, KEY),
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(null, 0)), date, USER, true, KEY),
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(EXPENSE, -1)), date, USER, true, KEY));
+        invalid.forEach(command -> assertThatThrownBy(() -> service.settleBatch("guest@example.com", command))
+                .isInstanceOf(ExpenseQueryValidationException.class));
+        assertThatThrownBy(() -> service.settleBatch("guest@example.com",
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(EXPENSE, 0)), null, USER, true, KEY)))
+                .isInstanceOf(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .settleBatch(any(), any(), any(), any(), any());
+    }
+
     private StoredExpense stored(ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate) {
         return new StoredExpense(EXPENSE, SPACE, status == ExpenseStatus.PAID ? "Mercado" : "Energia",
                 new BigDecimal("150.00"), status, dueDate, paymentDate,

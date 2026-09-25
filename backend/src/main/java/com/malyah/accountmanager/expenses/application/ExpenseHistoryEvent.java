@@ -16,4 +16,12 @@ public record ExpenseHistoryEvent(
         LocalDate paymentDate,
         UUID payerUserId,
         String payerDisplayName,
-        String changedFields) { }
+        String changedFields,
+        UUID batchOperationId) {
+    public ExpenseHistoryEvent(String type, UUID actorUserId, String actorDisplayName, Instant occurredAt,
+            String reason, String notes, long version, String paidAmount, LocalDate paymentDate,
+            UUID payerUserId, String payerDisplayName, String changedFields) {
+        this(type, actorUserId, actorDisplayName, occurredAt, reason, notes, version, paidAmount,
+                paymentDate, payerUserId, payerDisplayName, changedFields, null);
+    }
+}

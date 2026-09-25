@@ -90,7 +90,8 @@ final class JdbcExpenseRepository implements ExpenseRepository {
         var events = new ArrayList<com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent>();
         events.addAll(jdbc.query("""
                 select p.event_type, p.actor_user_id, actor.display_name, p.recorded_at, p.reason, p.notes,
-                       p.expense_version, p.paid_amount, p.payment_date, p.payer_user_id, payer.display_name
+                       p.expense_version, p.paid_amount, p.payment_date, p.payer_user_id, payer.display_name,
+                       p.batch_operation_id
                   from expense_payment_events p
                   join identity_users actor on actor.id=p.actor_user_id
                   join identity_users payer on payer.id=p.payer_user_id
@@ -98,7 +99,8 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
                     rs.getString(1), rs.getObject(2, UUID.class), rs.getString(3), rs.getTimestamp(4).toInstant(),
                     rs.getString(5), rs.getString(6), rs.getLong(7), rs.getBigDecimal(8).toPlainString(),
-                    rs.getObject(9, java.time.LocalDate.class), rs.getObject(10, UUID.class), rs.getString(11), null),
+                    rs.getObject(9, java.time.LocalDate.class), rs.getObject(10, UUID.class), rs.getString(11), null,
+                    rs.getObject(12, UUID.class)),
                 spaceId, expenseId));
         events.addAll(jdbc.query("""
                 select c.actor_user_id, actor.display_name, c.corrected_at, c.to_version, c.changed_fields
@@ -218,6 +220,95 @@ final class JdbcExpenseRepository implements ExpenseRepository {
     }
 
     @Override
+    public com.malyah.accountmanager.expenses.application.BatchSettlementResult settleBatch(
+            UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.BatchSettlementCommand command,
+            com.malyah.accountmanager.expenses.domain.BatchPaymentInstruction instruction, Instant at) {
+        var orderedItems = command.items().stream()
+                .sorted(java.util.Comparator.comparing(item -> item.expenseId().toString())).toList();
+        var hash = hashBatch(orderedItems, instruction);
+        var operationId = UUID.randomUUID();
+        var claimed = jdbc.update("""
+                insert into expense_batch_payment_operations(
+                    id, space_id, actor_user_id, payer_user_id, payment_date,
+                    idempotency_key, request_hash, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing
+                """, operationId, spaceId, actorId, instruction.payerId(), instruction.date(),
+                command.idempotencyKey(), hash, Timestamp.from(at));
+        if (claimed == 0) {
+            var previous = jdbc.queryForObject("""
+                    select id, request_hash, completed_at from expense_batch_payment_operations
+                    where space_id=? and actor_user_id=? and idempotency_key=? for update
+                    """, (rs, row) -> new BatchOperationRecord(rs.getObject(1, UUID.class), rs.getString(2),
+                            rs.getTimestamp(3) == null ? null : rs.getTimestamp(3).toInstant()),
+                    spaceId, actorId, command.idempotencyKey());
+            if (previous == null || previous.completedAt() == null || !hash.equals(previous.requestHash()))
+                throw new ExpenseIdempotencyConflictException();
+            return new com.malyah.accountmanager.expenses.application.BatchSettlementResult(
+                    previous.id(), batchResults(previous.id()), true);
+        }
+
+        var placeholders = String.join(",", java.util.Collections.nCopies(orderedItems.size(), "?"));
+        var arguments = new ArrayList<Object>();
+        arguments.add(spaceId);
+        orderedItems.forEach(item -> arguments.add(item.expenseId()));
+        var locked = jdbc.query("""
+                select id, charge_amount, status, version, charge_confirmed
+                  from expense_entries
+                 where space_id=? and id in (%s)
+                 order by id for update
+                """.formatted(placeholders), (rs, row) -> new BatchLockedExpense(
+                    rs.getObject(1, UUID.class), rs.getBigDecimal(2), ExpenseStatus.valueOf(rs.getString(3)),
+                    rs.getLong(4), rs.getBoolean(5)), arguments.toArray());
+        var byId = locked.stream().collect(java.util.stream.Collectors.toMap(BatchLockedExpense::id, item -> item));
+        var problems = new ArrayList<com.malyah.accountmanager.expenses.application.BatchSettlementItemProblem>();
+        for (var item : orderedItems) {
+            var expense = byId.get(item.expenseId());
+            if (expense == null) {
+                problems.add(batchProblem(item.expenseId(), "UNAVAILABLE",
+                        "O lançamento não está disponível neste espaço."));
+            } else {
+                var eligibility = com.malyah.accountmanager.expenses.domain.BatchPaymentEligibility.evaluate(
+                        expense.chargeConfirmed(), expense.status(), expense.version(), item.version());
+                switch (eligibility) {
+                    case AMOUNT_UNCONFIRMED -> problems.add(batchProblem(item.expenseId(), eligibility.name(),
+                            "Confirme o valor do lançamento antes de quitá-lo."));
+                    case STATE_INCOMPATIBLE -> problems.add(batchProblem(item.expenseId(), eligibility.name(),
+                            "O lançamento não está pendente."));
+                    case VERSION_CONFLICT -> problems.add(batchProblem(item.expenseId(), eligibility.name(),
+                            "O lançamento foi alterado depois da seleção."));
+                    case ELIGIBLE -> { }
+                }
+            }
+        }
+        if (!problems.isEmpty())
+            throw new com.malyah.accountmanager.expenses.application.BatchSettlementConflictException(problems);
+
+        for (var item : orderedItems) {
+            var current = byId.get(item.expenseId());
+            var payment = instruction.paymentFor(current.amount());
+            var changed = jdbc.update("""
+                    update expense_entries set status='PAID', paid_amount=?, payment_date=?, paid_by_user_id=?,
+                        payment_recorded_by_user_id=?, payment_notes=null, payment_recorded_at=?, version=version+1
+                    where id=? and space_id=? and version=? and status='PENDING' and charge_confirmed=true
+                    """, payment.amount().value(), payment.date(), payment.payerId(), actorId, Timestamp.from(at),
+                    item.expenseId(), spaceId, item.version());
+            if (changed != 1)
+                throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
+            recordPayment(item.expenseId(), spaceId, actorId, payment, at, operationId);
+            jdbc.update("""
+                    insert into expense_batch_payment_items(
+                        batch_operation_id, expense_id, from_version, to_version, paid_amount)
+                    values (?, ?, ?, ?, ?)
+                    """, operationId, item.expenseId(), item.version(), item.version() + 1, payment.amount().value());
+        }
+        jdbc.update("update expense_batch_payment_operations set completed_at=? where id=?",
+                Timestamp.from(at), operationId);
+        return new com.malyah.accountmanager.expenses.application.BatchSettlementResult(
+                operationId, batchResults(operationId), false);
+    }
+
+    @Override
     public StoredExpenseCreation reversePayment(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.ReversePaymentCommand command,
             com.malyah.accountmanager.expenses.domain.ExpenseActionReason reason, Instant at) {
@@ -313,15 +404,48 @@ final class JdbcExpenseRepository implements ExpenseRepository {
 
     private void recordPayment(UUID expenseId, UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.domain.PaymentDetails payment, Instant at) {
+        recordPayment(expenseId, spaceId, actorId, payment, at, null);
+    }
+
+    private void recordPayment(UUID expenseId, UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.domain.PaymentDetails payment, Instant at, UUID batchOperationId) {
         jdbc.update("""
                 update expense_entries set payment_notes=?, payment_recorded_at=? where id=?
                 """, payment.notes(), Timestamp.from(at), expenseId);
         jdbc.update("""
                 insert into expense_payment_events(id, expense_id, space_id, event_type, charge_amount, paid_amount,
-                    payment_date, payer_user_id, actor_user_id, notes, recorded_at, expense_version)
+                    payment_date, payer_user_id, actor_user_id, notes, recorded_at, expense_version,
+                    batch_operation_id)
                 select ?, id, space_id, 'EXPENSE_PAID', charge_amount, paid_amount, payment_date,
-                    paid_by_user_id, ?, ?, ?, version from expense_entries where id=? and space_id=?
-                """, UUID.randomUUID(), actorId, payment.notes(), Timestamp.from(at), expenseId, spaceId);
+                    paid_by_user_id, ?, ?, ?, version, ? from expense_entries where id=? and space_id=?
+                """, UUID.randomUUID(), actorId, payment.notes(), Timestamp.from(at), batchOperationId,
+                expenseId, spaceId);
+    }
+
+    private java.util.List<com.malyah.accountmanager.expenses.application.BatchSettlementItemResult> batchResults(
+            UUID operationId) {
+        return jdbc.query("""
+                select expense_id, from_version, to_version, paid_amount
+                  from expense_batch_payment_items where batch_operation_id=? order by expense_id
+                """, (rs, row) -> new com.malyah.accountmanager.expenses.application.BatchSettlementItemResult(
+                    rs.getObject(1, UUID.class), rs.getLong(2), rs.getLong(3),
+                    rs.getBigDecimal(4).toPlainString()), operationId);
+    }
+
+    private com.malyah.accountmanager.expenses.application.BatchSettlementItemProblem batchProblem(
+            UUID expenseId, String code, String message) {
+        return new com.malyah.accountmanager.expenses.application.BatchSettlementItemProblem(expenseId, code, message);
+    }
+
+    private String hashBatch(
+            java.util.List<com.malyah.accountmanager.expenses.application.BatchSettlementItem> items,
+            com.malyah.accountmanager.expenses.domain.BatchPaymentInstruction instruction) {
+        var canonical = new StringBuilder(instruction.date().toString()).append(':').append(instruction.payerId());
+        items.forEach(item -> canonical.append(':').append(item.expenseId()).append('@').append(item.version()));
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
     }
 
     private void insert(OneOffExpense expense) {
@@ -422,4 +546,9 @@ final class JdbcExpenseRepository implements ExpenseRepository {
 
     private record IdempotencyRecord(String requestHash, UUID expenseId) {
     }
+
+    private record BatchOperationRecord(UUID id, String requestHash, Instant completedAt) { }
+
+    private record BatchLockedExpense(
+            UUID id, java.math.BigDecimal amount, ExpenseStatus status, long version, boolean chargeConfirmed) { }
 }

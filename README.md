@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e as histórias H02.1–H02.4 estão validados. Ambos os papéis podem cadastrar, listar, quitar, corrigir, reverter quitação e cancelar despesas avulsas, com auditoria e proteção contra conflito.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Ambos os papéis podem cadastrar, listar, quitar individualmente ou em lote, corrigir, reverter quitação e cancelar despesas avulsas, com auditoria e proteção contra conflito.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites, V5 registra o ciclo da associação, V6 adiciona despesas avulsas/idempotência, V7 registra pagamentos e V8 registra correções auditáveis.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites, V5 registra o ciclo da associação, V6 adiciona despesas avulsas/idempotência, V7 registra pagamentos, V8 registra correções auditáveis, V9 reversões/cancelamentos e V10 operações de quitação em lote com correlação individual.
 
 ## Pré-requisitos
 
@@ -209,6 +209,17 @@ Administrador e convidado com associação ativa podem executar ambas as operaç
 
 Para despesa criada como paga **sem vencimento**, a reversão exige primeiro uma correção que informe o vencimento. Backend e interface recusam a reversão até essa correção; a data do pagamento não é convertida silenciosamente em vencimento. Essa decisão preserva a referência financeira original e garante que toda despesa pendente tenha vencimento.
 
+### Quitar vários lançamentos
+
+1. Em `/despesas`, marque duas ou mais despesas pendentes pelos seletores ao lado da descrição e use **Quitar selecionadas**. Itens pagos e cancelados não são selecionáveis.
+2. Revise a quantidade, cada valor e o total; informe a data e o pagador comuns ao lote. O valor pago de cada item será exatamente o valor confirmado de sua cobrança.
+3. Marque a confirmação explícita e use **Quitar todos ou nenhum**. A interface envia uma única requisição; não encadeia quitações individuais.
+4. Em sucesso, a lista é recarregada e cada lançamento mostra sua quitação. O histórico apresenta o mesmo identificador de operação em lote nos eventos individuais.
+
+Para testar a rejeição integral, abra a confirmação do lote e, em outra aba, corrija, quite ou cancele um dos itens. Ao confirmar na primeira aba, a API responde `409`, mantém seleção, data e pagador para revisão e não altera nenhum item do lote. Recarregue, selecione as versões atuais e confirme uma nova intenção. IDs repetidos, lote vazio, item de outro espaço, estado incompatível, versão antiga ou valor ainda não confirmado também rejeitam tudo. Repetir a mesma chave com conteúdo idêntico retorna o resultado original sem duplicar pagamento/auditoria; conteúdo diferente com a mesma chave conflita.
+
+Administrador e convidado ativos podem executar o lote no próprio espaço. O backend deriva espaço e autor da sessão, valida o pagador ativo, bloqueia os lançamentos em ordem estável e grava operação, pagamentos, versões, auditorias e correlação em uma transação PostgreSQL. Não há limite numérico arbitrário além do lote não vazio, pois os requisitos aprovados não definem outro limite. Pagamento parcial, rateio e múltiplos pagadores não fazem parte deste fluxo.
+
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
 ## Testes e gates
@@ -242,7 +253,7 @@ Somente para papéis, saída, revogação e concorrência da H01.4:
 & .\backend\scripts\run-integration-tests.ps1 -Tests MembershipPostgresIT,FlywayPostgresIT
 ```
 
-Somente para persistência, isolamento, paginação, idempotência, quitação, correção, reversão e cancelamento das H02.1–H02.4:
+Somente para persistência, isolamento, paginação, idempotência, quitação individual/em lote, correção, reversão e cancelamento do E02:
 
 ```powershell
 & .\backend\scripts\run-integration-tests.ps1 -Tests ExpensePostgresIT,FlywayPostgresIT
@@ -276,7 +287,7 @@ cd backend
 ```
 
 - `test`: JUnit/Spring e ArchUnit; não executa classes `*IT`.
-- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V8, identidade e despesas, incluindo quitação/correção/auditoria atômicas, conflitos otimistas, idempotência concorrente, isolamento por espaço e constraints monetárias.
+- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V10, identidade e despesas, incluindo lote atômico, quitação/correção/auditoria, conflitos otimistas, idempotência concorrente, isolamento por espaço e constraints monetárias.
 - `-Pmutation`: PIT sobre domínio/aplicação. `-DskipITs` evita criar PostgreSQL novamente; não elimina unitários nem gates.
 - JaCoCo: linhas ≥80% e branches ≥70% em domínio/aplicação.
 - PIT: mutação ≥70% e cobertura de linhas ≥80% no código mutado.
@@ -304,7 +315,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar com histórico e simular duas edições concorrentes com revisão manual do conflito. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar com histórico, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -388,4 +399,4 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01 e H02.1–H02.4 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.5 — Quitar vários lançamentos**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01 e E02 estão concluídos pelas evidências atuais. A próxima história recomendada é **H03.1 — Gerenciar categorias**.

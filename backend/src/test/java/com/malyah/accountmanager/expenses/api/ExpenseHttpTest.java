@@ -155,6 +155,50 @@ class ExpenseHttpTest {
                 .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
     }
 
+    @Test void batchPaymentRequiresCsrfConfirmationAndMapsAtomicItemConflicts() throws Exception {
+        var second = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        var path = "/expenses/batch-payment";
+        var body = """
+                {"items":[
+                  {"expenseId":"%s","version":0},
+                  {"expenseId":"%s","version":2}
+                ],"paymentDate":"2026-10-01","paidByUserId":"%s","confirmed":true}
+                """.formatted(EXPENSE, second, KEY);
+        mvc.perform(post(path).with(csrf()).header("Idempotency-Key", KEY)
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isUnauthorized());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"items\":[],\"confirmed\":false}"))
+                .andExpect(status().isBadRequest());
+
+        given(useCase.settleBatch(any(), any())).willReturn(
+                new com.malyah.accountmanager.expenses.application.BatchSettlementResult(KEY, List.of(
+                        new com.malyah.accountmanager.expenses.application.BatchSettlementItemResult(
+                                EXPENSE, 0, 1, "150.00"),
+                        new com.malyah.accountmanager.expenses.application.BatchSettlementItemResult(
+                                second, 2, 3, "25.50")), false));
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.replayed").value(false));
+        then(useCase).should().settleBatch(org.mockito.ArgumentMatchers.eq("guest@example.com"),
+                org.mockito.ArgumentMatchers.argThat(command -> command.confirmed()
+                        && command.items().size() == 2 && command.items().get(1).version() == 2));
+
+        willThrow(new com.malyah.accountmanager.expenses.application.BatchSettlementConflictException(List.of(
+                new com.malyah.accountmanager.expenses.application.BatchSettlementItemProblem(
+                        second, "VERSION_CONFLICT", "O lançamento foi alterado depois da seleção."))))
+                .given(useCase).settleBatch(any(), any());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BATCH_SETTLEMENT_CONFLICT"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("items[" + second + "]"));
+    }
+
     @Test void getsAndCorrectsWithSessionCsrfVersionAndConflictSemantics() throws Exception {
         var path = "/expenses/" + EXPENSE;
         given(useCase.get(any(), any())).willReturn(view());

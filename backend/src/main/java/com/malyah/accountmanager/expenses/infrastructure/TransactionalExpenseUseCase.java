@@ -49,6 +49,13 @@ final class TransactionalExpenseUseCase implements ExpenseUseCase {
     }
 
     @Override
+    public com.malyah.accountmanager.expenses.application.BatchSettlementResult settleBatch(
+            String actorEmail,
+            com.malyah.accountmanager.expenses.application.BatchSettlementCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.settleBatch(actorEmail, command)));
+    }
+
+    @Override
     public ExpenseCreationResult reversePayment(String actorEmail,
             com.malyah.accountmanager.expenses.application.ReversePaymentCommand command) {
         return Objects.requireNonNull(transactions.execute(status -> delegate.reversePayment(actorEmail, command)));

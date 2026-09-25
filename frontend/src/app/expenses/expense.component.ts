@@ -32,9 +32,12 @@ export class ExpenseComponent implements OnInit {
   readonly conflictCurrent = signal<Expense | null>(null);
   readonly lifecycleAction = signal<{ expense: Expense; type: 'REVERSE' | 'CANCEL' } | null>(null);
   readonly detail = signal<Expense | null>(null);
+  readonly selectedForBatch = signal(new Map<string, Expense>());
+  readonly batchOpen = signal(false);
   private paymentKey = '';
   private correctionKey = '';
   private actionKey = '';
+  private batchKey = '';
   private today = '';
   readonly paymentForm = this.formBuilder.nonNullable.group({
     paidAmount: ['', [Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]],
@@ -54,6 +57,11 @@ export class ExpenseComponent implements OnInit {
   });
   readonly actionForm = this.formBuilder.nonNullable.group({
     reason: ['', [Validators.required, Validators.maxLength(2000)]],
+  });
+  readonly batchForm = this.formBuilder.nonNullable.group({
+    paymentDate: ['', Validators.required],
+    paidByUserId: ['', Validators.required],
+    confirmed: [false, Validators.requiredTrue],
   });
 
   readonly loading = signal(true);
@@ -83,6 +91,7 @@ export class ExpenseComponent implements OnInit {
       const part = (type: string) => parts.find(value => value.type === type)!.value;
       this.today = `${part('year')}-${part('month')}-${part('day')}`;
       this.paymentForm.patchValue({ paymentDate: this.today, paidByUserId: context.userId });
+      this.batchForm.patchValue({ paymentDate: this.today, paidByUserId: context.userId });
     }, error: error => this.handleError(error, 'Não foi possível consultar sua sessão.') });
     this.identity.members().subscribe({ next: members => this.members.set(members),
       error: error => this.handleError(error, 'Não foi possível carregar os pagadores.') });
@@ -157,6 +166,70 @@ export class ExpenseComponent implements OnInit {
       next: () => { this.settling.set(null); this.message.set('Quitação registrada com sucesso.'); this.load(); },
       error: error => this.handleError(error, 'Não foi possível quitar. Os campos foram preservados para nova tentativa.'),
     });
+  }
+
+  toggleBatch(expense: Expense): void {
+    if (expense.status !== 'PENDING') return;
+    const selection = new Map(this.selectedForBatch());
+    if (selection.has(expense.id)) selection.delete(expense.id);
+    else selection.set(expense.id, expense);
+    this.selectedForBatch.set(selection);
+    if (selection.size === 0) this.batchOpen.set(false);
+  }
+
+  isBatchSelected(id: string): boolean {
+    return this.selectedForBatch().has(id);
+  }
+
+  openBatch(): void {
+    if (this.selectedForBatch().size === 0) return;
+    this.batchKey = this.expensesApi.newIdempotencyKey();
+    this.batchForm.reset({ paymentDate: this.today,
+      paidByUserId: this.members().find(member => member.currentUser)?.userId ?? '', confirmed: false });
+    this.batchOpen.set(true);
+    this.errorMessage.set(null);
+    this.message.set(null);
+  }
+
+  confirmBatch(): void {
+    if (!this.batchOpen() || this.selectedForBatch().size === 0 || this.submitting()) return;
+    if (this.batchForm.invalid) { this.batchForm.markAllAsTouched(); return; }
+    const value = this.batchForm.getRawValue();
+    const items = [...this.selectedForBatch().values()].map(expense => ({
+      expenseId: expense.id, version: expense.version,
+    }));
+    this.submitting.set(true);
+    this.errorMessage.set(null);
+    this.expensesApi.settleBatch({ items, paymentDate: value.paymentDate,
+      paidByUserId: value.paidByUserId, confirmed: value.confirmed }, this.batchKey)
+      .pipe(finalize(() => this.submitting.set(false))).subscribe({
+        next: result => {
+          this.batchOpen.set(false);
+          this.selectedForBatch.set(new Map());
+          this.message.set(`${result.items.length} lançamentos quitados no lote ${result.operationId}.`);
+          this.load();
+        },
+        error: error => {
+          if (error instanceof HttpErrorResponse && error.status === 409) {
+            this.errorMessage.set('O lote inteiro foi rejeitado porque um ou mais lançamentos mudaram ou não podem ser quitados. A seleção e os dados foram preservados para revisão.');
+            this.load(false);
+          } else this.handleError(error,
+            'Não foi possível quitar o lote. Nenhum item foi alterado e os dados foram preservados.');
+        },
+      });
+  }
+
+  selectedBatchItems(): Expense[] {
+    return [...this.selectedForBatch().values()];
+  }
+
+  batchTotal(): string {
+    const cents = this.selectedBatchItems().reduce((sum, expense) => {
+      const [whole, fraction = ''] = expense.amount.split('.');
+      return sum + BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'));
+    }, 0n);
+    const whole = (cents / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return `R$ ${whole},${(cents % 100n).toString().padStart(2, '0')}`;
   }
 
   openCorrection(expense: Expense): void {
@@ -321,9 +394,9 @@ export class ExpenseComponent implements OnInit {
     paymentDate.updateValueAndValidity();
   }
 
-  private load(): void {
+  private load(clearError = true): void {
     this.loading.set(true);
-    this.errorMessage.set(null);
+    if (clearError) this.errorMessage.set(null);
     this.expensesApi.list(this.page(), 20, this.sort(), this.direction())
       .pipe(finalize(() => this.loading.set(false)))
       .subscribe({
