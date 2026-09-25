@@ -12,6 +12,9 @@ form button[type='submit'] { justify-self: start; }
 .select-field select:focus-visible { outline: 2px solid #005cbb; outline-offset: 2px; }
 .error-summary, .success-summary, .empty-state { padding: 0.75rem 1rem; margin-bottom: 1rem; border-left: 0.25rem solid; }
 .conflict-summary { padding: 0.75rem 1rem; margin-bottom: 1rem; border-left: 0.25rem solid #9c5d00; background: #fff3d6; }
+.lifecycle-card p, .history-card p { line-height: 1.5; }
+.history-list { display: grid; gap: 1rem; padding-left: 1.4rem; }
+.history-list li { border-bottom: 1px solid #ddd; padding-bottom: 0.75rem; }
 .error-summary { border-color: #ba1a1a; background: #ffdad6; }
 .success-summary { border-color: #247238; background: #d8f7df; }
 .empty-state { border-color: #52677d; background: #e9eef5; }

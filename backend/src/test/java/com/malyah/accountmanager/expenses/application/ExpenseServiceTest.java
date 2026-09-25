@@ -159,6 +159,51 @@ class ExpenseServiceTest {
                 .isInstanceOf(ExpenseQueryValidationException.class);
     }
 
+    @Test void reversesAndCancelsWithAuthenticatedSpaceActorAndNormalizedReason() {
+        var paid = stored(ExpenseStatus.PAID, LocalDate.of(2026, 9, 24), LocalDate.of(2026, 9, 25));
+        var pending = stored(ExpenseStatus.PENDING, LocalDate.of(2026, 9, 24), null);
+        given(repository.findById(SPACE, EXPENSE)).willReturn(paid, pending);
+        given(repository.reversePayment(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(pending, false));
+        given(repository.cancel(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(pending, true));
+
+        var reversal = new ReversePaymentCommand(EXPENSE, 0, "  pagamento incorreto  ", KEY);
+        assertThat(service.reversePayment("guest@example.com", reversal).expense().status())
+                .isEqualTo(ExpenseStatus.PENDING);
+        org.mockito.Mockito.verify(repository).reversePayment(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(reversal),
+                org.mockito.ArgumentMatchers.argThat(reason -> reason.value().equals("pagamento incorreto")),
+                org.mockito.ArgumentMatchers.eq(NOW));
+
+        var cancellation = new CancelExpenseCommand(EXPENSE, 0, "duplicada", KEY);
+        assertThat(service.cancel("guest@example.com", cancellation).replayed()).isTrue();
+        org.mockito.Mockito.verify(repository).cancel(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(cancellation),
+                org.mockito.ArgumentMatchers.argThat(reason -> reason.value().equals("duplicada")),
+                org.mockito.ArgumentMatchers.eq(NOW));
+    }
+
+    @Test void rejectsInvalidActionsAndPaidWithoutDueDateCannotBecomeInvalidPendingExpense() {
+        for (var invalid : List.of(
+                new ReversePaymentCommand(null, 0, "motivo", KEY),
+                new ReversePaymentCommand(EXPENSE, -1, "motivo", KEY),
+                new ReversePaymentCommand(EXPENSE, 0, "motivo", null)))
+            assertThatThrownBy(() -> service.reversePayment("guest@example.com", invalid))
+                    .isInstanceOf(ExpenseQueryValidationException.class);
+        assertThatThrownBy(() -> service.cancel("guest@example.com", null))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+        assertThatThrownBy(() -> service.cancel("guest@example.com",
+                new CancelExpenseCommand(EXPENSE, 0, "  ", KEY)))
+                .isInstanceOf(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class);
+
+        given(repository.findById(SPACE, EXPENSE)).willReturn(stored(ExpenseStatus.PAID, null, LocalDate.now()));
+        assertThatThrownBy(() -> service.reversePayment("guest@example.com",
+                new ReversePaymentCommand(EXPENSE, 0, "erro", KEY)))
+                .isInstanceOf(ExpenseQueryValidationException.class)
+                .hasMessageContaining("vencimento");
+    }
+
     private StoredExpense stored(ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate) {
         return new StoredExpense(EXPENSE, SPACE, status == ExpenseStatus.PAID ? "Mercado" : "Energia",
                 new BigDecimal("150.00"), status, dueDate, paymentDate,

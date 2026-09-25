@@ -17,6 +17,9 @@ public interface ExpenseRepository {
 
     StoredExpense findById(UUID spaceId, UUID expenseId);
 
+    java.util.List<com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent> history(
+            UUID spaceId, UUID expenseId);
+
     StoredExpenseCreation correct(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command,
             OneOffExpense corrected, Instant at);
@@ -24,4 +27,12 @@ public interface ExpenseRepository {
     StoredExpenseCreation settle(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.SettleExpenseCommand command,
             com.malyah.accountmanager.expenses.domain.PaymentDetails payment, Instant at);
+
+    StoredExpenseCreation reversePayment(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.ReversePaymentCommand command,
+            com.malyah.accountmanager.expenses.domain.ExpenseActionReason reason, Instant at);
+
+    StoredExpenseCreation cancel(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.CancelExpenseCommand command,
+            com.malyah.accountmanager.expenses.domain.ExpenseActionReason reason, Instant at);
 }

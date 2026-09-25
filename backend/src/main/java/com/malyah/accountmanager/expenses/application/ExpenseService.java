@@ -76,7 +76,8 @@ public final class ExpenseService {
         if (expenseId == null)
             throw new ExpenseQueryValidationException("expenseId", "Informe a despesa.");
         var actor = contextQuery.findByEmail(email);
-        return view(repository.findById(actor.spaceId(), expenseId), actor.timeZone());
+        return view(repository.findById(actor.spaceId(), expenseId), actor.timeZone(),
+                repository.history(actor.spaceId(), expenseId));
     }
 
     public ExpenseCreationResult correct(String email, CorrectExpenseCommand command) {
@@ -105,6 +106,29 @@ public final class ExpenseService {
         return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
     }
 
+    public ExpenseCreationResult reversePayment(String email, ReversePaymentCommand command) {
+        validateAction(command == null ? null : command.expenseId(), command == null ? -1 : command.version(),
+                command == null ? null : command.idempotencyKey(), "paymentReversal");
+        var actor = contextQuery.findByEmail(email);
+        var reason = new com.malyah.accountmanager.expenses.domain.ExpenseActionReason(command.reason());
+        var current = repository.findById(actor.spaceId(), command.expenseId());
+        if (current.status() == com.malyah.accountmanager.expenses.domain.ExpenseStatus.PAID
+                && current.dueDate() == null)
+            throw new ExpenseQueryValidationException("dueDate",
+                    "Informe o vencimento por correção antes de desfazer esta quitação.");
+        var result = repository.reversePayment(actor.spaceId(), actor.userId(), command, reason, clock.instant());
+        return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
+    }
+
+    public ExpenseCreationResult cancel(String email, CancelExpenseCommand command) {
+        validateAction(command == null ? null : command.expenseId(), command == null ? -1 : command.version(),
+                command == null ? null : command.idempotencyKey(), "cancellation");
+        var actor = contextQuery.findByEmail(email);
+        var reason = new com.malyah.accountmanager.expenses.domain.ExpenseActionReason(command.reason());
+        var result = repository.cancel(actor.spaceId(), actor.userId(), command, reason, clock.instant());
+        return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
+    }
+
     public ExpensePage list(String actorEmail, ExpenseListQuery query) {
         validate(query);
         var actor = contextQuery.findByEmail(actorEmail);
@@ -127,6 +151,10 @@ public final class ExpenseService {
     }
 
     private ExpenseView view(StoredExpense expense, String timeZone) {
+        return view(expense, timeZone, java.util.List.of());
+    }
+
+    private ExpenseView view(StoredExpense expense, String timeZone, java.util.List<ExpenseHistoryEvent> history) {
         var referenceDate = expense.dueDate() == null ? expense.paymentDate() : expense.dueDate();
         var today = LocalDate.now(clock.withZone(ZoneId.of(timeZone)));
         var overdue = expense.status() == com.malyah.accountmanager.expenses.domain.ExpenseStatus.PENDING
@@ -137,7 +165,13 @@ public final class ExpenseService {
                 expense.paidAmount() == null ? null : expense.paidAmount().toPlainString(),
                 referenceDate, overdue, null, null, expense.notes(), expense.createdByUserId(),
                 expense.createdByDisplayName(), expense.paidByUserId(), expense.paidByDisplayName(),
-                expense.createdAt(), expense.version(), expense.paymentAudit());
+                expense.createdAt(), expense.version(), expense.paymentAudit(), history);
+    }
+
+    private void validateAction(UUID expenseId, long version, UUID key, String field) {
+        if (expenseId == null || key == null || version < 0)
+            throw new ExpenseQueryValidationException(field,
+                    "Informe a despesa, versão e chave de repetição válidas.");
     }
 
     private String fingerprint(OneOffExpense expense) {

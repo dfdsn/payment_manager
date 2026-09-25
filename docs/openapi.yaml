@@ -589,6 +589,73 @@ paths:
           description: Despesa não encontrada no espaço ativo.
         "409":
           description: Despesa já paga, versão desatualizada ou chave reutilizada com outro payload.
+  /expenses/{id}/payment-reversal:
+    post:
+      operationId: reverseExpensePayment
+      summary: Desfaz a quitação ativa preservando pagamento e reversão no histórico
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpenseActionRequest" }
+      responses:
+        "200":
+          description: Quitação desfeita ou repetição idempotente; a despesa volta a PENDING.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400":
+          description: Motivo inválido ou despesa paga sem vencimento; nesse caso, informe o vencimento pelo fluxo de correção antes da reversão.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Despesa não encontrada no espaço ativo. }
+        "409": { description: Situação ou versão desatualizada, ou chave reutilizada com outro payload. }
+  /expenses/{id}/cancellation:
+    post:
+      operationId: cancelExpense
+      summary: Cancela uma despesa pendente sem exclusão física
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpenseActionRequest" }
+      responses:
+        "200":
+          description: Despesa cancelada ou repetição idempotente; permanece consultável por id e some da lista ativa.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Despesa não encontrada no espaço ativo. }
+        "409": { description: Despesa paga/cancelada, versão desatualizada ou chave reutilizada com outro payload. }
 components:
   securitySchemes:
     sessionCookie:
@@ -723,10 +790,17 @@ components:
           format: uuid
           description: Membro ativo pagador; obrigatório somente para PAID.
         paymentNotes: { type: [string, "null"], maxLength: 2000 }
+    ExpenseActionRequest:
+      type: object
+      additionalProperties: false
+      required: [version, reason]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
     Expense:
       type: object
       required: [id, origin, description, amount, currency, status, referenceDate, overdue,
-        createdByUserId, createdByDisplayName, createdAt, version]
+        createdByUserId, createdByDisplayName, createdAt, version, history]
       properties:
         id: { type: string, format: uuid }
         origin: { const: ONE_OFF }
@@ -735,7 +809,7 @@ components:
           type: string
           pattern: '^\d+\.\d{2}$'
         currency: { const: BRL }
-        status: { type: string, enum: [PENDING, PAID] }
+        status: { type: string, enum: [PENDING, PAID, CANCELLED] }
         dueDate: { type: [string, "null"], format: date }
         paymentDate: { type: [string, "null"], format: date }
         paidAmount:
@@ -760,6 +834,10 @@ components:
           oneOf:
             - $ref: "#/components/schemas/PaymentAudit"
             - type: "null"
+        history:
+          type: array
+          description: Eventos históricos no detalhe; a listagem retorna lista vazia.
+          items: { $ref: "#/components/schemas/ExpenseHistoryEvent" }
     PaymentAudit:
       type: object
       required: [recordedByUserId, recordedByDisplayName, recordedAt]
@@ -768,6 +846,24 @@ components:
         recordedByDisplayName: { type: string }
         recordedAt: { type: string, format: date-time }
         notes: { type: [string, "null"], maxLength: 2000 }
+    ExpenseHistoryEvent:
+      type: object
+      required: [type, actorUserId, actorDisplayName, occurredAt, version]
+      properties:
+        type:
+          type: string
+          enum: [EXPENSE_PAID, PAYMENT_REVERSED, EXPENSE_CORRECTED, EXPENSE_CANCELLED]
+        actorUserId: { type: string, format: uuid }
+        actorDisplayName: { type: string }
+        occurredAt: { type: string, format: date-time }
+        reason: { type: [string, "null"], maxLength: 2000 }
+        notes: { type: [string, "null"], maxLength: 2000 }
+        version: { type: integer, format: int64, minimum: 0 }
+        paidAmount: { type: [string, "null"], pattern: '^\d+\.\d{2}$' }
+        paymentDate: { type: [string, "null"], format: date }
+        payerUserId: { type: [string, "null"], format: uuid }
+        payerDisplayName: { type: [string, "null"] }
+        changedFields: { type: [string, "null"] }
     ExpensePage:
       type: object
       required: [content, page, size, totalElements, totalPages, sort, direction]

@@ -78,4 +78,19 @@ describe('ExpenseService', () => {
     expect(put.request.body).toEqual(correction);
     put.flush({});
   });
+
+  it('reverses and cancels through protected versioned idempotent actions', () => {
+    for (const action of [
+      { invoke: () => service.reversePayment('expense-id', 4, 'Pagamento incorreto', 'reverse-key'), path: 'payment-reversal', key: 'reverse-key', reason: 'Pagamento incorreto' },
+      { invoke: () => service.cancel('expense-id', 5, 'Duplicada', 'cancel-key'), path: 'cancellation', key: 'cancel-key', reason: 'Duplicada' },
+    ]) {
+      action.invoke().subscribe();
+      http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+      const request = http.expectOne(`/api/v1/expenses/expense-id/${action.path}`);
+      expect(request.request.method).toBe('POST');
+      expect(request.request.headers.get('Idempotency-Key')).toBe(action.key);
+      expect(request.request.body.reason).toBe(action.reason);
+      request.flush({});
+    }
+  });
 });

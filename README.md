@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e as histórias H02.1–H02.3 estão validados. Ambos os papéis podem cadastrar, listar, quitar e corrigir despesas avulsas, com auditoria e proteção contra conflito.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e as histórias H02.1–H02.4 estão validados. Ambos os papéis podem cadastrar, listar, quitar, corrigir, reverter quitação e cancelar despesas avulsas, com auditoria e proteção contra conflito.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -198,6 +198,17 @@ Administrador e convidado ativos podem quitar despesas do próprio espaço. A AP
 
 Criador, origem, situação, instante de criação e autoria/data do pagamento original são históricos protegidos. Cada correção grava autor, instante, versões anterior/nova, lista de campos e valores antes/depois em `expense_correction_events`. Reflexos futuros em relatórios, fechamentos e notificações serão validados nos respectivos épicos.
 
+### Desfazer quitação e cancelar
+
+1. Em uma despesa paga com vencimento, use **Desfazer quitação**, leia a consequência, informe o motivo e confirme. A despesa volta a pendente (ou atrasada pela data local); o pagamento anterior e a reversão continuam no histórico.
+2. A despesa pode ser quitada novamente: somente a quitação mais recente fica ativa, sem apagar os eventos anteriores.
+3. Em uma pendente, use **Cancelar despesa**, informe o motivo e confirme. Ela sai da listagem ativa, mas permanece consultável no detalhe com autor, instante e motivo. Uma paga precisa ser revertida antes.
+4. **Ver histórico** mostra quitações, reversões, correções e cancelamento. Não existe exclusão física, reembolso nem restauração de cancelado nesta história.
+
+Administrador e convidado com associação ativa podem executar ambas as operações apenas no próprio espaço. A API exige sessão, CSRF, `Idempotency-Key`, versão carregada e motivo de até 2.000 caracteres. Estado/versão divergente retorna conflito sem sobrescrita; a tela preserva o motivo e consulta os dados atuais. Despesa, evento e idempotência são gravados atomicamente.
+
+Para despesa criada como paga **sem vencimento**, a reversão exige primeiro uma correção que informe o vencimento. Backend e interface recusam a reversão até essa correção; a data do pagamento não é convertida silenciosamente em vencimento. Essa decisão preserva a referência financeira original e garante que toda despesa pendente tenha vencimento.
+
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
 ## Testes e gates
@@ -231,7 +242,7 @@ Somente para papéis, saída, revogação e concorrência da H01.4:
 & .\backend\scripts\run-integration-tests.ps1 -Tests MembershipPostgresIT,FlywayPostgresIT
 ```
 
-Somente para persistência, isolamento, paginação, idempotência, quitação e correção das H02.1–H02.3:
+Somente para persistência, isolamento, paginação, idempotência, quitação, correção, reversão e cancelamento das H02.1–H02.4:
 
 ```powershell
 & .\backend\scripts\run-integration-tests.ps1 -Tests ExpensePostgresIT,FlywayPostgresIT
@@ -293,7 +304,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar/quitar despesas e simular duas edições concorrentes com revisão manual do conflito. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar com histórico e simular duas edições concorrentes com revisão manual do conflito. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -377,4 +388,4 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01 e H02.1–H02.3 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.4 — Reverter quitação e cancelar**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01 e H02.1–H02.4 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.5 — Quitar vários lançamentos**.

@@ -181,6 +181,66 @@
     </mat-card>
   }
 
+  @if (lifecycleAction(); as action) {
+    <mat-card appearance="outlined" class="expense-form-card lifecycle-card">
+      <mat-card-header>
+        <mat-card-title>{{ action.type === 'REVERSE' ? 'Desfazer quitação' : 'Cancelar despesa' }} — {{ action.expense.description }}</mat-card-title>
+        <mat-card-subtitle>Versão carregada: {{ action.expense.version }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        @if (action.type === 'REVERSE') {
+          <p>A quitação ativa será encerrada e a despesa voltará a ficar pendente. Os dados do pagamento e desta reversão permanecerão no histórico.</p>
+          @if (!action.expense.dueDate) {
+            <div class="error-summary" role="alert">Antes de desfazer, corrija a despesa e informe um vencimento para que ela possa voltar ao estado pendente.</div>
+          }
+        } @else {
+          <p>A despesa será retirada da lista ativa sem ser excluída. Seu lançamento e o motivo continuarão disponíveis no histórico. Não há restauração nesta etapa.</p>
+        }
+        <form [formGroup]="actionForm" (ngSubmit)="confirmLifecycleAction()" novalidate>
+          <mat-form-field appearance="outline" class="wide-field">
+            <mat-label>Motivo obrigatório</mat-label>
+            <textarea matInput formControlName="reason" maxlength="2000" rows="3"></textarea>
+            <mat-error>Informe o motivo com até 2.000 caracteres.</mat-error>
+          </mat-form-field>
+          <div class="form-actions wide-field">
+            <button matButton="filled" type="submit"
+              [disabled]="submitting() || (action.type === 'REVERSE' && !action.expense.dueDate)">
+              {{ submitting() ? 'Processando…' : (action.type === 'REVERSE' ? 'Confirmar reversão' : 'Confirmar cancelamento') }}
+            </button>
+            <button matButton="outlined" type="button" [disabled]="submitting()" (click)="lifecycleAction.set(null)">Voltar sem alterar</button>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  }
+
+  @if (detail(); as selected) {
+    <mat-card appearance="outlined" class="expense-form-card history-card">
+      <mat-card-header>
+        <mat-card-title>Histórico de {{ selected.description }}</mat-card-title>
+        <mat-card-subtitle>Situação atual: {{ selected.status === 'CANCELLED' ? 'Cancelada' : (selected.status === 'PAID' ? 'Paga' : 'Pendente') }} · versão {{ selected.version }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        @if (selected.history.length === 0) {
+          <p>Nenhuma alteração histórica registrada.</p>
+        } @else {
+          <ol class="history-list">
+            @for (event of selected.history; track event.type + event.version) {
+              <li>
+                <strong>{{ historyLabel(event.type) }}</strong> por {{ event.actorDisplayName }}
+                <span>· versão {{ event.version }} · {{ event.occurredAt }}</span>
+                @if (event.reason) { <p>Motivo: {{ event.reason }}</p> }
+                @if (event.paidAmount) { <p>Pagamento preservado: {{ formatCurrency(event.paidAmount) }} em {{ formatDate(event.paymentDate) }} por {{ event.payerDisplayName }}.</p> }
+                @if (event.changedFields) { <p>Campos alterados: {{ event.changedFields }}.</p> }
+              </li>
+            }
+          </ol>
+        }
+        <button matButton="outlined" type="button" (click)="detail.set(null)">Fechar histórico</button>
+      </mat-card-content>
+    </mat-card>
+  }
+
   <section aria-labelledby="expense-list-title" class="expense-list-section">
     <div class="list-header">
       <div>
@@ -226,10 +286,13 @@
                   <p>Registrado por {{ audit.recordedByDisplayName }}.</p>
                   @if (audit.notes) { <p>{{ audit.notes }}</p> }
                 }
+                <button matButton="outlined" type="button" (click)="openLifecycleAction(expense, 'REVERSE')" [disabled]="submitting()">Desfazer quitação</button>
               } @else {
                 <button matButton="outlined" type="button" (click)="openPayment(expense)" [disabled]="submitting()">Quitar despesa</button>
+                <button matButton="outlined" type="button" (click)="openLifecycleAction(expense, 'CANCEL')" [disabled]="submitting()">Cancelar despesa</button>
               }
               <button matButton="outlined" type="button" (click)="openCorrection(expense)" [disabled]="submitting()">Corrigir despesa</button>
+              <button matButton="outlined" type="button" (click)="loadDetail(expense.id)" [disabled]="submitting()">Ver histórico</button>
             </mat-card-content>
           </mat-card>
         }

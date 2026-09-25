@@ -10,6 +10,7 @@ describe('ExpenseComponent', () => {
   let fixture: ComponentFixture<ExpenseComponent>;
   const api = {
     newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(), settle: vi.fn(), get: vi.fn(), correct: vi.fn(),
+    reversePayment: vi.fn(), cancel: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -179,5 +180,52 @@ describe('ExpenseComponent', () => {
     expect(component.editing()?.version).toBe(4);
     expect(component.editForm.controls.description.value).toBe('Minha correção');
     expect(api.correct).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires explicit reason and confirms reversal while preserving its evidence in detail', () => {
+    const component = fixture.componentInstance;
+    const paid = { id: 'paid', status: 'PAID', version: 2, description: 'Mercado', amount: '25.00',
+      dueDate: '2026-09-30', history: [] } as any;
+    component.openLifecycleAction(paid, 'REVERSE');
+    component.confirmLifecycleAction();
+    expect(api.reversePayment).not.toHaveBeenCalled();
+
+    component.actionForm.controls.reason.setValue('Pagamento incorreto');
+    api.reversePayment.mockReturnValue(of({}));
+    api.get.mockReturnValue(of({ ...paid, status: 'PENDING', version: 3,
+      history: [{ type: 'PAYMENT_REVERSED', version: 3, actorDisplayName: 'Autor', occurredAt: '2026-09-25T13:00:00Z', reason: 'Pagamento incorreto' }] }));
+    component.confirmLifecycleAction();
+    expect(api.reversePayment).toHaveBeenCalledWith('paid', 2, 'Pagamento incorreto', 'next-key');
+    expect(component.message()).toContain('voltou a ficar pendente');
+    expect(component.detail()?.history[0].type).toBe('PAYMENT_REVERSED');
+  });
+
+  it('preserves cancellation reason after conflict and never retries automatically', () => {
+    const component = fixture.componentInstance;
+    const pending = { id: 'pending', status: 'PENDING', version: 1, description: 'Energia', amount: '150.00',
+      dueDate: '2026-09-30', history: [] } as any;
+    component.openLifecycleAction(pending, 'CANCEL');
+    component.actionForm.controls.reason.setValue('Duplicada');
+    api.cancel.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 409 })));
+    api.get.mockReturnValue(of({ ...pending, version: 2 }));
+    component.confirmLifecycleAction();
+
+    expect(api.cancel).toHaveBeenCalledTimes(1);
+    expect(component.actionForm.controls.reason.value).toBe('Duplicada');
+    expect(component.errorMessage()).toContain('mudou antes da confirmação');
+    expect(component.detail()?.version).toBe(2);
+  });
+
+  it('requires correcting a due date before reversing a paid expense without one', () => {
+    const component = fixture.componentInstance;
+    component.openLifecycleAction({ id: 'paid', status: 'PAID', version: 0, description: 'Compra',
+      amount: '80.00', dueDate: null, history: [] } as any, 'REVERSE');
+    component.actionForm.controls.reason.setValue('Pagamento incorreto');
+    component.confirmLifecycleAction();
+
+    expect(api.reversePayment).not.toHaveBeenCalled();
+    expect(component.errorMessage()).toContain('Informe o vencimento pela correção');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('corrija a despesa e informe um vencimento');
   });
 });

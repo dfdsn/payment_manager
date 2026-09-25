@@ -45,12 +45,14 @@ public record OneOffExpense(
                 throw new ExpenseValidationException("paymentDate", "Despesa pendente não possui data de pagamento.");
             }
             referenceDate = dueDate;
-        } else {
+        } else if (status == ExpenseStatus.PAID) {
             if (paymentDate == null) {
                 throw new ExpenseValidationException("paymentDate", "Informe a data de pagamento.");
             }
             referenceDate = dueDate == null ? paymentDate : dueDate;
             if (payment == null) payment = new PaymentDetails(amount, paymentDate, createdByUserId, null);
+        } else {
+            throw new ExpenseValidationException("status", "Cadastre a despesa como pendente ou paga.");
         }
     }
 

@@ -177,6 +177,42 @@ class ExpenseHttpTest {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPENSE_STATE_CONFLICT"));
     }
 
+    @Test void reversalAndCancellationRequireSessionCsrfVersionReasonAndMapCommands() throws Exception {
+        var reversal = "/expenses/" + EXPENSE + "/payment-reversal";
+        var cancellation = "/expenses/" + EXPENSE + "/cancellation";
+        var body = "{\"version\":3,\"reason\":\"Lançamento duplicado\"}";
+        mvc.perform(post(reversal).with(csrf()).header("Idempotency-Key", KEY)
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isUnauthorized());
+        mvc.perform(post(reversal).with(user("guest@example.com")).session(activeSession())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden());
+        mvc.perform(post(cancellation).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+
+        given(useCase.reversePayment(any(), any())).willReturn(new ExpenseCreationResult(view(), false));
+        mvc.perform(post(reversal).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+        then(useCase).should().reversePayment(org.mockito.ArgumentMatchers.eq("guest@example.com"),
+                org.mockito.ArgumentMatchers.argThat(command -> command.expenseId().equals(EXPENSE)
+                        && command.version() == 3 && command.reason().equals("Lançamento duplicado")));
+
+        given(useCase.cancel(any(), any())).willReturn(new ExpenseCreationResult(view(), false));
+        mvc.perform(post(cancellation).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+        then(useCase).should().cancel(org.mockito.ArgumentMatchers.eq("guest@example.com"),
+                org.mockito.ArgumentMatchers.argThat(command -> command.expenseId().equals(EXPENSE)
+                        && command.version() == 3 && command.reason().equals("Lançamento duplicado")));
+
+        willThrow(new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException())
+                .given(useCase).cancel(any(), any());
+        mvc.perform(post(cancellation).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPENSE_STATE_CONFLICT"));
+    }
+
     private String validCorrectionBody() {
         return """
                 {"version":0,"status":"PENDING","description":"Energia corrigida",

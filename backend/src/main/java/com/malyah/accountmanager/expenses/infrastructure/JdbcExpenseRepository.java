@@ -64,14 +64,14 @@ final class JdbcExpenseRepository implements ExpenseRepository {
     @Override
     public StoredExpensePage findBySpace(UUID spaceId, ExpenseListQuery query) {
         var total = jdbc.queryForObject(
-                "select count(*) from expense_entries where space_id = ?", Long.class, spaceId);
+                "select count(*) from expense_entries where space_id = ? and status <> 'CANCELLED'", Long.class, spaceId);
         var order = switch (query.sort()) {
             case REFERENCE_DATE -> "e.reference_date";
             case AMOUNT -> "e.charge_amount";
             case DESCRIPTION -> "lower(e.description)";
         };
         var direction = query.direction().name();
-        var items = jdbc.query(selectBase() + " where e.space_id = ? order by " + order + " " + direction
+        var items = jdbc.query(selectBase() + " where e.space_id = ? and e.status <> 'CANCELLED' order by " + order + " " + direction
                         + ", e.created_at " + direction + ", e.id " + direction + " limit ? offset ?",
                 this::map, spaceId, query.size(), (long) query.page() * query.size());
         return new StoredExpensePage(items, total == null ? 0 : total);
@@ -82,6 +82,46 @@ final class JdbcExpenseRepository implements ExpenseRepository {
         var results = jdbc.query(selectBase() + " where e.space_id = ? and e.id = ?", this::map, spaceId, expenseId);
         if (results.isEmpty()) throw new com.malyah.accountmanager.expenses.application.ExpenseNotFoundException();
         return results.getFirst();
+    }
+
+    @Override
+    public java.util.List<com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent> history(
+            UUID spaceId, UUID expenseId) {
+        var events = new ArrayList<com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent>();
+        events.addAll(jdbc.query("""
+                select p.event_type, p.actor_user_id, actor.display_name, p.recorded_at, p.reason, p.notes,
+                       p.expense_version, p.paid_amount, p.payment_date, p.payer_user_id, payer.display_name
+                  from expense_payment_events p
+                  join identity_users actor on actor.id=p.actor_user_id
+                  join identity_users payer on payer.id=p.payer_user_id
+                 where p.space_id=? and p.expense_id=?
+                """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
+                    rs.getString(1), rs.getObject(2, UUID.class), rs.getString(3), rs.getTimestamp(4).toInstant(),
+                    rs.getString(5), rs.getString(6), rs.getLong(7), rs.getBigDecimal(8).toPlainString(),
+                    rs.getObject(9, java.time.LocalDate.class), rs.getObject(10, UUID.class), rs.getString(11), null),
+                spaceId, expenseId));
+        events.addAll(jdbc.query("""
+                select c.actor_user_id, actor.display_name, c.corrected_at, c.to_version, c.changed_fields
+                  from expense_correction_events c
+                  join identity_users actor on actor.id=c.actor_user_id
+                 where c.space_id=? and c.expense_id=?
+                """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
+                    "EXPENSE_CORRECTED", rs.getObject(1, UUID.class), rs.getString(2),
+                    rs.getTimestamp(3).toInstant(), null, null, rs.getLong(4), null, null, null, null,
+                    rs.getString(5)), spaceId, expenseId));
+        events.addAll(jdbc.query("""
+                select c.actor_user_id, actor.display_name, c.cancelled_at, c.reason, c.to_version
+                  from expense_cancellation_events c
+                  join identity_users actor on actor.id=c.actor_user_id
+                 where c.space_id=? and c.expense_id=?
+                """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
+                    "EXPENSE_CANCELLED", rs.getObject(1, UUID.class), rs.getString(2),
+                    rs.getTimestamp(3).toInstant(), rs.getString(4), null, rs.getLong(5), null, null, null,
+                    null, null), spaceId, expenseId));
+        events.sort(java.util.Comparator.comparing(
+                com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent::occurredAt)
+                .thenComparingLong(com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent::version));
+        return java.util.List.copyOf(events);
     }
 
     @Override
@@ -177,6 +217,100 @@ final class JdbcExpenseRepository implements ExpenseRepository {
         return new StoredExpenseCreation(findById(spaceId, command.expenseId()), false);
     }
 
+    @Override
+    public StoredExpenseCreation reversePayment(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.ReversePaymentCommand command,
+            com.malyah.accountmanager.expenses.domain.ExpenseActionReason reason, Instant at) {
+        var hash = hashAction(command.expenseId(), command.version(), reason.value());
+        if (!claimAction(spaceId, actorId, "REVERSE_PAYMENT", command.idempotencyKey(), hash, at))
+            return new StoredExpenseCreation(findById(spaceId, command.expenseId()), true);
+        lock(spaceId, command.expenseId());
+        var current = findById(spaceId, command.expenseId());
+        if (!com.malyah.accountmanager.expenses.domain.PaymentReversalEligibility.eligible(
+                current.status(), current.version(), command.version()))
+            throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
+        jdbc.update("""
+                insert into expense_payment_events(id, expense_id, space_id, event_type, charge_amount, paid_amount,
+                    payment_date, payer_user_id, actor_user_id, notes, recorded_at, expense_version, reason)
+                select ?, id, space_id, 'PAYMENT_REVERSED', charge_amount, paid_amount, payment_date,
+                    paid_by_user_id, ?, payment_notes, ?, version+1, ?
+                  from expense_entries where id=? and space_id=?
+                """, UUID.randomUUID(), actorId, Timestamp.from(at), reason.value(), command.expenseId(), spaceId);
+        jdbc.update("""
+                update expense_entries set status='PENDING', paid_amount=null, payment_date=null,
+                    paid_by_user_id=null, payment_recorded_by_user_id=null, payment_notes=null,
+                    payment_recorded_at=null, reference_date=due_date, version=version+1
+                where id=? and space_id=? and version=? and status='PAID'
+                """, command.expenseId(), spaceId, command.version());
+        completeAction(spaceId, actorId, "REVERSE_PAYMENT", command.idempotencyKey(), command.expenseId(), at);
+        return new StoredExpenseCreation(findById(spaceId, command.expenseId()), false);
+    }
+
+    @Override
+    public StoredExpenseCreation cancel(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.CancelExpenseCommand command,
+            com.malyah.accountmanager.expenses.domain.ExpenseActionReason reason, Instant at) {
+        var hash = hashAction(command.expenseId(), command.version(), reason.value());
+        if (!claimAction(spaceId, actorId, "CANCEL_EXPENSE", command.idempotencyKey(), hash, at))
+            return new StoredExpenseCreation(findById(spaceId, command.expenseId()), true);
+        lock(spaceId, command.expenseId());
+        var current = findById(spaceId, command.expenseId());
+        if (!com.malyah.accountmanager.expenses.domain.CancellationEligibility.eligible(
+                current.status(), current.version(), command.version()))
+            throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
+        jdbc.update("""
+                insert into expense_cancellation_events(
+                    id, expense_id, space_id, actor_user_id, reason, cancelled_at, from_version, to_version)
+                values (?, ?, ?, ?, ?, ?, ?, ?)
+                """, UUID.randomUUID(), command.expenseId(), spaceId, actorId, reason.value(), Timestamp.from(at),
+                command.version(), command.version() + 1);
+        jdbc.update("""
+                update expense_entries set status='CANCELLED', cancelled_at=?, cancelled_by_user_id=?,
+                    cancellation_reason=?, version=version+1
+                where id=? and space_id=? and version=? and status='PENDING'
+                """, Timestamp.from(at), actorId, reason.value(), command.expenseId(), spaceId, command.version());
+        completeAction(spaceId, actorId, "CANCEL_EXPENSE", command.idempotencyKey(), command.expenseId(), at);
+        return new StoredExpenseCreation(findById(spaceId, command.expenseId()), false);
+    }
+
+    private boolean claimAction(UUID spaceId, UUID actorId, String operation, UUID key, String hash, Instant at) {
+        var claimed = jdbc.update("""
+                insert into expense_idempotency_requests(
+                    space_id, actor_user_id, operation, idempotency_key, request_hash, created_at)
+                values (?, ?, ?, ?, ?, ?) on conflict do nothing
+                """, spaceId, actorId, operation, key, hash, Timestamp.from(at));
+        if (claimed == 1) return true;
+        var previous = jdbc.queryForObject("""
+                select request_hash, expense_id from expense_idempotency_requests
+                where space_id=? and actor_user_id=? and operation=? and idempotency_key=? for update
+                """, (rs, row) -> new IdempotencyRecord(rs.getString(1), rs.getObject(2, UUID.class)),
+                spaceId, actorId, operation, key);
+        if (previous == null || previous.expenseId() == null || !hash.equals(previous.requestHash()))
+            throw new ExpenseIdempotencyConflictException();
+        return false;
+    }
+
+    private void completeAction(UUID spaceId, UUID actorId, String operation, UUID key, UUID expenseId, Instant at) {
+        jdbc.update("""
+                update expense_idempotency_requests set expense_id=?, completed_at=?
+                where space_id=? and actor_user_id=? and operation=? and idempotency_key=?
+                """, expenseId, Timestamp.from(at), spaceId, actorId, operation, key);
+    }
+
+    private void lock(UUID spaceId, UUID expenseId) {
+        var locked = jdbc.query("select id from expense_entries where id=? and space_id=? for update",
+                (rs, row) -> rs.getObject(1, UUID.class), expenseId, spaceId);
+        if (locked.isEmpty()) throw new com.malyah.accountmanager.expenses.application.ExpenseNotFoundException();
+    }
+
+    private String hashAction(UUID expenseId, long version, String reason) {
+        var canonical = expenseId + ":" + version + ":" + encoded(reason);
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
+    }
+
     private void recordPayment(UUID expenseId, UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.domain.PaymentDetails payment, Instant at) {
         jdbc.update("""
@@ -196,12 +330,14 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 insert into expense_entries(
                     id, space_id, origin, description, charge_amount, charge_confirmed, status,
                     due_date, reference_date, notes, paid_amount, payment_date, paid_by_user_id,
-                    payment_recorded_by_user_id, created_by_user_id, created_at, version
-                ) values (?, ?, 'ONE_OFF', ?, ?, true, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    payment_recorded_by_user_id, payment_recorded_at, payment_notes,
+                    created_by_user_id, created_at, version
+                ) values (?, ?, 'ONE_OFF', ?, ?, true, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """, expense.id(), expense.spaceId(), expense.description(), expense.amount().value(),
                 expense.status().name(), expense.dueDate(), expense.referenceDate(), expense.notes(),
                 paid ? expense.payment().amount().value() : null, expense.paymentDate(),
                 paid ? expense.payment().payerId() : null, paid ? expense.createdByUserId() : null,
+                paid ? Timestamp.from(expense.createdAt()) : null, paid ? expense.payment().notes() : null,
                 expense.createdByUserId(), Timestamp.from(expense.createdAt()));
     }
 

@@ -43,7 +43,7 @@ class AccountAccessPostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(8);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(9);
         var jdbc = new JdbcTemplate(dataSource);
         insertAccount(jdbc);
         var sent = new ArrayList<PendingAccessEmail>();

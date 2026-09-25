@@ -81,10 +81,34 @@ class ExpenseController {
                 request.paidByUserId(), request.paymentNotes(), key)).expense();
     }
 
+    @PostMapping("/{id}/payment-reversal")
+    ExpenseView reversePayment(Principal principal,
+            @org.springframework.web.bind.annotation.PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") UUID key,
+            @Valid @RequestBody ExpenseActionRequest request) {
+        return useCase.reversePayment(principal.getName(),
+                new com.malyah.accountmanager.expenses.application.ReversePaymentCommand(
+                        id, request.version(), request.reason(), key)).expense();
+    }
+
+    @PostMapping("/{id}/cancellation")
+    ExpenseView cancel(Principal principal,
+            @org.springframework.web.bind.annotation.PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") UUID key,
+            @Valid @RequestBody ExpenseActionRequest request) {
+        return useCase.cancel(principal.getName(),
+                new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                        id, request.version(), request.reason(), key)).expense();
+    }
+
     record PaymentRequest(@jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version,
             @jakarta.validation.constraints.NotBlank String paidAmount,
             @jakarta.validation.constraints.NotNull java.time.LocalDate paymentDate,
             @jakarta.validation.constraints.NotNull UUID paidByUserId, String paymentNotes) { }
+
+    record ExpenseActionRequest(
+            @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version,
+            @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 2000) String reason) { }
 
     record CorrectExpenseRequest(
             @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version,

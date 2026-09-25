@@ -91,6 +91,14 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   const marketExpense = guestPage.locator('.expense-row').filter({ hasText: 'Mercado' });
   await expect(marketExpense).toBeVisible();
   await expect(marketExpense.getByText('Paga', { exact: true })).toBeVisible();
+  await marketExpense.getByRole('button', { name: 'Desfazer quitação' }).click();
+  await expect(guestPage.getByText(/corrija a despesa e informe um vencimento/)).toBeVisible();
+  await expect(guestPage.getByRole('button', { name: 'Confirmar reversão' })).toBeDisabled();
+  await guestPage.getByRole('button', { name: 'Voltar sem alterar' }).click();
+  await marketExpense.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await guestPage.getByLabel('Vencimento corrigido (opcional)').fill('2026-09-25');
+  await guestPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(guestPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
 
   const concurrentPage = await guestContext.newPage();
   await concurrentPage.goto('/despesas');
@@ -112,6 +120,29 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(guestPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
   await expect(guestPage.locator('.expense-row').filter({ hasText: 'Energia final' })).toBeVisible();
   await concurrentPage.close();
+
+  const finalEnergy = guestPage.locator('.expense-row').filter({ hasText: 'Energia final' });
+  await finalEnergy.getByRole('button', { name: 'Desfazer quitação' }).click();
+  await guestPage.getByLabel('Motivo obrigatório').fill('Pagamento lançado na conta errada');
+  await guestPage.getByRole('button', { name: 'Confirmar reversão' }).click();
+  await expect(guestPage.getByText(/voltou a ficar pendente/)).toBeVisible();
+  await expect(finalEnergy.getByRole('button', { name: 'Quitar despesa' })).toBeVisible();
+  await finalEnergy.getByRole('button', { name: 'Quitar despesa' }).click();
+  await guestPage.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(guestPage.getByText('Quitação registrada com sucesso.')).toBeVisible();
+
+  await finalEnergy.getByRole('button', { name: 'Desfazer quitação' }).click();
+  await guestPage.getByLabel('Motivo obrigatório').fill('Despesa será cancelada');
+  await guestPage.getByRole('button', { name: 'Confirmar reversão' }).click();
+  await expect(guestPage.getByText(/voltou a ficar pendente/)).toBeVisible();
+  await finalEnergy.getByRole('button', { name: 'Cancelar despesa' }).click();
+  await guestPage.getByLabel('Motivo obrigatório').fill('Cobrança duplicada');
+  await guestPage.getByRole('button', { name: 'Confirmar cancelamento' }).click();
+  await expect(guestPage.getByText(/removida da lista ativa/)).toBeVisible();
+  await expect(finalEnergy).toHaveCount(0);
+  await expect(guestPage.getByText('Situação atual: Cancelada')).toBeVisible();
+  await expect(guestPage.getByText('Quitação desfeita', { exact: false })).toHaveCount(2);
+  await expect(guestPage.getByText('Despesa cancelada', { exact: true })).toBeVisible();
 
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();

@@ -2,7 +2,7 @@ import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { switchMap } from 'rxjs';
 
-export type ExpenseStatus = 'PENDING' | 'PAID';
+export type ExpenseStatus = 'PENDING' | 'PAID' | 'CANCELLED';
 export type ExpenseSort = 'REFERENCE_DATE' | 'AMOUNT' | 'DESCRIPTION';
 export type SortDirection = 'ASC' | 'DESC';
 
@@ -52,6 +52,22 @@ export interface Expense {
   createdAt: string;
   version: number;
   paymentAudit?: { recordedByDisplayName: string; recordedByUserId: string; recordedAt: string; notes: string | null } | null;
+  history: ExpenseHistoryEvent[];
+}
+
+export interface ExpenseHistoryEvent {
+  type: 'EXPENSE_PAID' | 'PAYMENT_REVERSED' | 'EXPENSE_CORRECTED' | 'EXPENSE_CANCELLED';
+  actorUserId: string;
+  actorDisplayName: string;
+  occurredAt: string;
+  reason: string | null;
+  notes: string | null;
+  version: number;
+  paidAmount: string | null;
+  paymentDate: string | null;
+  payerUserId: string | null;
+  payerDisplayName: string | null;
+  changedFields: string | null;
 }
 
 export interface ExpensePage {
@@ -105,5 +121,19 @@ export class ExpenseService {
   settle(id: string, data: { version: number; paidAmount: string; paymentDate: string; paidByUserId: string; paymentNotes: string | null }, key: string) {
     return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
       this.http.post<Expense>(`${this.endpoint}/${id}/payment`, data, { headers: { 'Idempotency-Key': key } })));
+  }
+
+  reversePayment(id: string, version: number, reason: string, key: string) {
+    return this.action(id, 'payment-reversal', version, reason, key);
+  }
+
+  cancel(id: string, version: number, reason: string, key: string) {
+    return this.action(id, 'cancellation', version, reason, key);
+  }
+
+  private action(id: string, path: string, version: number, reason: string, key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
+      this.http.post<Expense>(`${this.endpoint}/${id}/${path}`, { version, reason },
+        { headers: { 'Idempotency-Key': key } })));
   }
 }

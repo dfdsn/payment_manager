@@ -62,7 +62,7 @@ class ExpensePostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(8);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(9);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var context = new AuthenticatedUserContextService(contextRepository());
@@ -381,6 +381,196 @@ class ExpensePostgresIT {
         assertThat(jdbc.queryForObject("select count(*) from expense_idempotency_requests where operation='CORRECT_EXPENSE'", Integer.class)).isZero();
         jdbc.execute("alter table expense_correction_events drop constraint test_correction_audit_failure");
         assertThat(useCase.correct("admin@example.com", command).expense().description()).isEqualTo("Corrigida");
+    }
+
+    @Test void reversesPaymentPreservesEvidenceAndAllowsASeparateNewPayment() {
+        var id = pending();
+        var paid = useCase.settle("admin@example.com", payment(id, "155", UUID.randomUUID())).expense();
+        var key = UUID.randomUUID();
+        var reverse = new com.malyah.accountmanager.expenses.application.ReversePaymentCommand(
+                id, paid.version(), "Cobrança paga pelo meio incorreto", key);
+
+        var reversed = useCase.reversePayment("guest@example.com", reverse);
+        assertThat(reversed.expense().status()).isEqualTo(ExpenseStatus.PENDING);
+        assertThat(reversed.expense().paidAmount()).isNull();
+        assertThat(reversed.expense().paymentDate()).isNull();
+        assertThat(reversed.expense().overdue()).isFalse();
+        assertThat(reversed.expense().version()).isEqualTo(2);
+        assertThat(useCase.reversePayment("guest@example.com", reverse).replayed()).isTrue();
+        assertThatThrownBy(() -> useCase.reversePayment("guest@example.com",
+                new com.malyah.accountmanager.expenses.application.ReversePaymentCommand(
+                        id, paid.version(), "Outro motivo", key)))
+                .isInstanceOf(ExpenseIdempotencyConflictException.class);
+
+        var historyAfterReversal = useCase.get("admin@example.com", id).history();
+        assertThat(historyAfterReversal).extracting(event -> event.type())
+                .containsExactly("EXPENSE_PAID", "PAYMENT_REVERSED");
+        assertThat(historyAfterReversal.get(1).reason()).isEqualTo("Cobrança paga pelo meio incorreto");
+        assertThat(historyAfterReversal.get(1).paidAmount()).isEqualTo("155.00");
+        assertThat(historyAfterReversal.get(1).payerUserId()).isEqualTo(GUEST);
+
+        var repaid = useCase.settle("guest@example.com",
+                new com.malyah.accountmanager.expenses.application.SettleExpenseCommand(
+                        id, 2, "150", LocalDate.of(2026, 10, 2), ADMIN, "Nova quitação", UUID.randomUUID())).expense();
+        assertThat(repaid.status()).isEqualTo(ExpenseStatus.PAID);
+        assertThat(repaid.paidByUserId()).isEqualTo(ADMIN);
+        assertThat(useCase.get("admin@example.com", id).history()).extracting(event -> event.type())
+                .containsExactly("EXPENSE_PAID", "PAYMENT_REVERSED", "EXPENSE_PAID");
+    }
+
+    @Test void cancellationIsHistoricalHiddenFromActiveListAndRejectsIncompatibleStates() {
+        var id = pending();
+        var key = UUID.randomUUID();
+        var cancel = new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                id, 0, "Lançamento duplicado", key);
+        var cancelled = useCase.cancel("guest@example.com", cancel);
+
+        assertThat(cancelled.expense().status()).isEqualTo(ExpenseStatus.CANCELLED);
+        assertThat(cancelled.expense().version()).isOne();
+        assertThat(useCase.cancel("guest@example.com", cancel).replayed()).isTrue();
+        assertThatThrownBy(() -> useCase.cancel("guest@example.com",
+                new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                        id, 0, "Outro motivo", key)))
+                .isInstanceOf(ExpenseIdempotencyConflictException.class);
+        assertThat(useCase.list("admin@example.com",
+                new ExpenseListQuery(0, 20, ExpenseSort.REFERENCE_DATE, SortDirection.ASC)).content()).isEmpty();
+        assertThat(useCase.get("admin@example.com", id).history()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo("EXPENSE_CANCELLED");
+            assertThat(event.actorUserId()).isEqualTo(GUEST);
+            assertThat(event.reason()).isEqualTo("Lançamento duplicado");
+        });
+        assertThatThrownBy(() -> useCase.settle("admin@example.com",
+                new com.malyah.accountmanager.expenses.application.SettleExpenseCommand(
+                        id, 1, "150", LocalDate.now(), ADMIN, null, UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class);
+        assertThatThrownBy(() -> useCase.correct("admin@example.com", correction(id, 1, ExpenseStatus.PENDING,
+                "Conta", "150", LocalDate.of(2026, 9, 30), null, null, null, null, null, UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class);
+
+        var paidId = pending();
+        var paid = useCase.settle("admin@example.com", payment(paidId, "150", UUID.randomUUID())).expense();
+        assertThatThrownBy(() -> useCase.cancel("admin@example.com",
+                new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                        paidId, paid.version(), "Cancelar paga", UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class);
+    }
+
+    @Test void staleAndForeignActionsFailAndConcurrentCancelVersusPaymentHasOneWinner() throws Exception {
+        var foreignId = pending();
+        assertThatThrownBy(() -> useCase.cancel("other@example.com",
+                new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                        foreignId, 0, "Sem acesso", UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseNotFoundException.class);
+
+        var id = pending();
+        Callable<String> cancel = () -> {
+            try {
+                useCase.cancel("guest@example.com", new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                        id, 0, "Não é mais necessária", UUID.randomUUID()));
+                return "cancelled";
+            } catch (com.malyah.accountmanager.expenses.application.ExpenseStateConflictException conflict) {
+                return "conflict";
+            }
+        };
+        Callable<String> pay = () -> {
+            try { useCase.settle("admin@example.com", payment(id, "150", UUID.randomUUID())); return "paid"; }
+            catch (com.malyah.accountmanager.expenses.application.ExpenseStateConflictException conflict) { return "conflict"; }
+        };
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var results = executor.invokeAll(List.of(cancel, pay));
+            var outcomes = List.of(results.get(0).get(), results.get(1).get());
+            assertThat(outcomes).contains("conflict");
+            assertThat(outcomes).anyMatch(value -> value.equals("cancelled") || value.equals("paid"));
+        }
+        assertThat(jdbc.queryForObject("select count(*) from expense_payment_events where expense_id=?", Integer.class, id)
+                + jdbc.queryForObject("select count(*) from expense_cancellation_events where expense_id=?", Integer.class, id)).isOne();
+
+        var editRaceId = pending();
+        Callable<String> cancelAgainstEdit = () -> {
+            try {
+                useCase.cancel("admin@example.com", new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                        editRaceId, 0, "Cancelamento concorrente", UUID.randomUUID()));
+                return "cancelled";
+            } catch (com.malyah.accountmanager.expenses.application.ExpenseStateConflictException conflict) { return "conflict"; }
+        };
+        Callable<String> editAgainstCancel = () -> correctionOutcome("guest@example.com", correction(
+                editRaceId, 0, ExpenseStatus.PENDING, "Editada", "151", LocalDate.of(2026, 10, 1),
+                null, null, null, null, null, UUID.randomUUID()));
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var results = executor.invokeAll(List.of(cancelAgainstEdit, editAgainstCancel));
+            assertThat(List.of(results.get(0).get(), results.get(1).get())).contains("conflict");
+        }
+
+        var reverseRaceId = pending();
+        var activePayment = useCase.settle("admin@example.com", payment(reverseRaceId, "150", UUID.randomUUID())).expense();
+        Callable<String> reverseAgainstEdit = () -> {
+            try {
+                useCase.reversePayment("admin@example.com", new com.malyah.accountmanager.expenses.application.ReversePaymentCommand(
+                        reverseRaceId, activePayment.version(), "Reversão concorrente", UUID.randomUUID()));
+                return "reversed";
+            } catch (com.malyah.accountmanager.expenses.application.ExpenseStateConflictException conflict) { return "conflict"; }
+        };
+        Callable<String> editAgainstReverse = () -> correctionOutcome("guest@example.com", correction(
+                reverseRaceId, activePayment.version(), ExpenseStatus.PAID, "Quitada editada", "150",
+                LocalDate.of(2026, 9, 30), null, "150", LocalDate.of(2026, 10, 1), GUEST,
+                "Pagamento integral", UUID.randomUUID()));
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var results = executor.invokeAll(List.of(reverseAgainstEdit, editAgainstReverse));
+            assertThat(List.of(results.get(0).get(), results.get(1).get())).contains("conflict");
+        }
+    }
+
+    @Test void reversalAndCancellationAuditFailuresRollBackStateVersionAndIdempotency() {
+        var paidId = pending();
+        var paid = useCase.settle("admin@example.com", payment(paidId, "150", UUID.randomUUID())).expense();
+        var reverse = new com.malyah.accountmanager.expenses.application.ReversePaymentCommand(
+                paidId, paid.version(), "Falha controlada", UUID.randomUUID());
+        jdbc.execute("alter table expense_payment_events add constraint test_reversal_failure check (event_type <> 'PAYMENT_REVERSED')");
+        assertThatThrownBy(() -> useCase.reversePayment("admin@example.com", reverse))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(useCase.get("admin@example.com", paidId).status()).isEqualTo(ExpenseStatus.PAID);
+        assertThat(useCase.get("admin@example.com", paidId).version()).isOne();
+        assertThat(jdbc.queryForObject("select count(*) from expense_idempotency_requests where operation='REVERSE_PAYMENT'", Integer.class)).isZero();
+        jdbc.execute("alter table expense_payment_events drop constraint test_reversal_failure");
+
+        var pendingId = pending();
+        var cancellation = new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                pendingId, 0, "Falha controlada", UUID.randomUUID());
+        jdbc.execute("alter table expense_cancellation_events add constraint test_cancellation_failure check (reason <> 'Falha controlada')");
+        assertThatThrownBy(() -> useCase.cancel("admin@example.com", cancellation))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(useCase.get("admin@example.com", pendingId).status()).isEqualTo(ExpenseStatus.PENDING);
+        assertThat(useCase.get("admin@example.com", pendingId).version()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from expense_idempotency_requests where operation='CANCEL_EXPENSE'", Integer.class)).isZero();
+    }
+
+    @Test void paidWithoutDueDateMustBeCorrectedWithDueDateBeforeReversal() {
+        var paid = useCase.create("admin@example.com", new CreateOneOffExpenseCommand(
+                "Compra sem vencimento", "80", ExpenseStatus.PAID, null, LocalDate.of(2026, 9, 25), null,
+                UUID.randomUUID(), "80", GUEST, null)).expense();
+        assertThatThrownBy(() -> useCase.reversePayment("admin@example.com",
+                new com.malyah.accountmanager.expenses.application.ReversePaymentCommand(
+                        paid.id(), paid.version(), "Pagamento incorreto", UUID.randomUUID())))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseQueryValidationException.class)
+                .hasMessageContaining("vencimento");
+        assertThat(jdbc.queryForObject(
+                "select count(*) from expense_idempotency_requests where operation='REVERSE_PAYMENT'", Integer.class))
+                .isZero();
+        assertThat(useCase.get("admin@example.com", paid.id()).status()).isEqualTo(ExpenseStatus.PAID);
+
+        var corrected = useCase.correct("admin@example.com", correction(
+                paid.id(), paid.version(), ExpenseStatus.PAID, paid.description(), paid.amount(),
+                LocalDate.of(2026, 9, 24), paid.notes(), paid.paidAmount(), paid.paymentDate(),
+                paid.paidByUserId(), paid.paymentAudit().notes(), UUID.randomUUID())).expense();
+        var reversed = useCase.reversePayment("admin@example.com",
+                new com.malyah.accountmanager.expenses.application.ReversePaymentCommand(
+                        paid.id(), corrected.version(), "Pagamento incorreto", UUID.randomUUID())).expense();
+
+        assertThat(reversed.status()).isEqualTo(ExpenseStatus.PENDING);
+        assertThat(reversed.dueDate()).isEqualTo(LocalDate.of(2026, 9, 24));
+        assertThat(reversed.overdue()).isTrue();
+        assertThat(useCase.get("admin@example.com", paid.id()).history()).extracting(event -> event.type())
+                .containsExactly("EXPENSE_PAID", "EXPENSE_CORRECTED", "PAYMENT_REVERSED");
     }
 
     private CorrectExpenseCommand correction(UUID id, long version, ExpenseStatus status, String description,

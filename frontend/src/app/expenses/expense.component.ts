@@ -30,8 +30,11 @@ export class ExpenseComponent implements OnInit {
   readonly settling = signal<Expense | null>(null);
   readonly editing = signal<Expense | null>(null);
   readonly conflictCurrent = signal<Expense | null>(null);
+  readonly lifecycleAction = signal<{ expense: Expense; type: 'REVERSE' | 'CANCEL' } | null>(null);
+  readonly detail = signal<Expense | null>(null);
   private paymentKey = '';
   private correctionKey = '';
+  private actionKey = '';
   private today = '';
   readonly paymentForm = this.formBuilder.nonNullable.group({
     paidAmount: ['', [Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]],
@@ -48,6 +51,9 @@ export class ExpenseComponent implements OnInit {
     paymentDate: [''],
     paidByUserId: [''],
     paymentNotes: ['', Validators.maxLength(2000)],
+  });
+  readonly actionForm = this.formBuilder.nonNullable.group({
+    reason: ['', [Validators.required, Validators.maxLength(2000)]],
   });
 
   readonly loading = signal(true);
@@ -214,6 +220,59 @@ export class ExpenseComponent implements OnInit {
     this.conflictCurrent.set(null);
     this.correctionKey = this.expensesApi.newIdempotencyKey();
     this.errorMessage.set(null);
+  }
+
+  openLifecycleAction(expense: Expense, type: 'REVERSE' | 'CANCEL'): void {
+    this.lifecycleAction.set({ expense, type });
+    this.actionForm.reset({ reason: '' });
+    this.actionKey = this.expensesApi.newIdempotencyKey();
+    this.errorMessage.set(null);
+    this.message.set(null);
+  }
+
+  confirmLifecycleAction(): void {
+    const action = this.lifecycleAction();
+    if (!action || this.submitting()) return;
+    if (action.type === 'REVERSE' && !action.expense.dueDate) {
+      this.errorMessage.set('Informe o vencimento pela correção da despesa antes de desfazer esta quitação.');
+      return;
+    }
+    if (this.actionForm.invalid) { this.actionForm.markAllAsTouched(); return; }
+    const reason = this.actionForm.controls.reason.value.trim();
+    const request = action.type === 'REVERSE'
+      ? this.expensesApi.reversePayment(action.expense.id, action.expense.version, reason, this.actionKey)
+      : this.expensesApi.cancel(action.expense.id, action.expense.version, reason, this.actionKey);
+    this.submitting.set(true);
+    this.errorMessage.set(null);
+    request.pipe(finalize(() => this.submitting.set(false))).subscribe({
+      next: () => {
+        const success = action.type === 'REVERSE'
+          ? 'Quitação desfeita. A despesa voltou a ficar pendente.'
+          : 'Despesa cancelada e removida da lista ativa.';
+        this.lifecycleAction.set(null);
+        this.message.set(success);
+        this.loadDetail(action.expense.id);
+        this.load();
+      },
+      error: error => {
+        if (error instanceof HttpErrorResponse && error.status === 409) {
+          this.errorMessage.set('A despesa mudou antes da confirmação. Consulte os dados atuais e tente novamente; nenhuma alteração foi sobrescrita.');
+          this.loadDetail(action.expense.id);
+        } else this.handleError(error, 'Não foi possível concluir a operação. O motivo foi preservado para nova tentativa.');
+      },
+    });
+  }
+
+  loadDetail(id: string): void {
+    this.expensesApi.get(id).subscribe({
+      next: expense => this.detail.set(expense),
+      error: error => this.handleError(error, 'Não foi possível consultar o histórico da despesa.'),
+    });
+  }
+
+  historyLabel(type: string): string {
+    return ({ EXPENSE_PAID: 'Quitação registrada', PAYMENT_REVERSED: 'Quitação desfeita',
+      EXPENSE_CORRECTED: 'Despesa corrigida', EXPENSE_CANCELLED: 'Despesa cancelada' } as Record<string, string>)[type] ?? type;
   }
 
   toggleDirection(): void {
