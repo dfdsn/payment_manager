@@ -27,6 +27,14 @@ export interface InvitationPreview {
   authenticatedAsInvitee: boolean;
 }
 
+export interface SpaceMember {
+  userId: string;
+  displayName: string;
+  email: string;
+  role: 'ADMINISTRATOR' | 'GUEST';
+  currentUser: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AccountAccessService {
   private readonly http = inject(HttpClient);
@@ -94,6 +102,23 @@ export class AccountAccessService {
     return this.withCsrf(() => this.http.post<void>('/api/v1/invitations/accept', {
       token, displayName: displayName || null, password: password || null,
     }));
+  }
+
+  members() {
+    return this.http.get<SpaceMember[]>('/api/v1/identity/members');
+  }
+
+  removeMember(userId: string) {
+    return this.withCsrf(() => this.http.delete<void>(`/api/v1/identity/members/${userId}`));
+  }
+
+  transferAdministration(userId: string) {
+    return this.withCsrf(() => this.http.post<void>(
+      `/api/v1/identity/members/${userId}/administration-transfer`, {}));
+  }
+
+  leaveSpace() {
+    return this.withCsrf(() => this.http.post<void>('/api/v1/identity/membership/leave', {}));
   }
 
   private withCsrf<T>(operation: () => import('rxjs').Observable<T>) {

@@ -1,8 +1,8 @@
 # Progresso de implementação — account_Manager
 
-Versão 1.0 • Atualizado em 24/09/2026.
+Versão 1.0 • Atualizado em 25/09/2026.
 
-**Estado atual: H01.3 concluída em 24/09/2026.** H01.1 a H01.3 estão concluídas. Convite/aceite, gates locais e entrega/consumo Gmail real foram aprovados na branch `h01-3-invite-member`; P04 foi encerrada.
+**Estado atual: H01.4 e o escopo de identidade do E01 concluídos em 25/09/2026.** H01.1 a H01.4 estão concluídas. Papéis, saída/remoção, transferência administrativa, revogação de sessões, concorrência e auditoria foram aprovados sem antecipar os módulos financeiros e de WhatsApp.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 24/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 3 de 46 concluídas; 11 épicos ainda não concluídos. |
-| Critérios do PRD | CA-01 a CA-32 não executados. |
+| Histórias | 4 de 46 concluídas; E01 concluído em seu escopo, 10 épicos ainda não concluídos. |
+| Critérios do PRD | CA-01 aprovado. CA-02/CA-03 parcialmente validados na identidade e mantidos para revalidação transversal; CA-04 a CA-32 não executados. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | H01.4 — Aplicar papéis e gerenciar saída. |
+| Próxima ação | H02.1 — Cadastrar e listar uma despesa avulsa. |
 
 ## Estados permitidos
 
@@ -45,7 +45,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H01.1 | Configurar administrador e espaço | Concluído | Concorrência/reinício em PostgreSQL, CI Java 21 e E2E full-stack pela interface aprovados. Evidência: `docs/evidencias/H01.1.md`. |
 | H01.2 | Entrar, confirmar email e recuperar acesso | Concluído | 41 unitários, 4 ITs PostgreSQL, JaCoCo, PIT 90%, 11 frontend, E2E full-stack e entrega Gmail real de confirmação/recuperação aprovados. Evidência: `docs/evidencias/H01.2.md`. |
 | H01.3 | Convidar e aceitar o segundo membro | Concluído | 52 unitários, 7 ITs PostgreSQL, JaCoCo, PIT 78%, 17 frontend, E2E Mailpit e entrega/aceite Gmail real aprovados. Evidência: `docs/evidencias/H01.3.md`. |
-| H01.4 | Aplicar papéis e gerenciar saída | Não iniciado | — |
+| H01.4 | Aplicar papéis e gerenciar saída | Concluído | 65 testes Java, 10 ITs PostgreSQL, JaCoCo 94,93%/80,52%, PIT 80%, 20 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H01.4.md`. |
 | H02.1 | Cadastrar e listar uma despesa avulsa | Não iniciado | — |
 | H02.2 | Quitar e identificar quem pagou | Não iniciado | — |
 | H02.3 | Corrigir com proteção contra conflito | Não iniciado | — |
@@ -93,7 +93,10 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 
 | Verificação | Estado inicial | Evidência ao executar |
 |---|---|---|
-| CA-01 a CA-32 do PRD | Não executados | Registrar resultado individual, cenário, ambiente e evidência; não inferir aprovação a partir de cobertura. |
+| CA-01 — configuração, login e convite | Aprovado | E2E full-stack H01.1–H01.4, ITs PostgreSQL e entregas Gmail reais cobrem fechamento do setup, identidade destinatária, expiração, revogação e reenvio. |
+| CA-02 — uso pelos dois perfis | Em validação transversal | Matriz e bloqueio administrativo por API aprovados; manipulação de despesas e ausência de WhatsApp serão executadas em E02/E08. |
+| CA-03 — saída/remoção e transferência | Em validação transversal | Revogação, histórico de associação, vaga e transferência aprovados; responsabilidades/anexos/novo consentimento serão revalidados em E03/E04/E08. |
+| CA-04 a CA-32 do PRD | Não executados | Registrar resultado individual, cenário, ambiente e evidência; não inferir aprovação a partir de cobertura. |
 | Email real | Não executado | Confirmação, convite, reset, expiração/reenvio; sem expor tokens. |
 | WhatsApp real | Não executado | Entrega ao administrador, ausência para convidado, agrupamento, quitação/falha/retomada. |
 | Groq real | Não executado | Extração por imagem, revisão, cota concorrente, retenção e fallback manual. |
@@ -183,6 +186,25 @@ Condição de conclusão ou desbloqueio: satisfeita em 24/09/2026 com gates loca
 Próximo passo: H01.4 — aplicar papéis e gerenciar saída.
 ```
 
+## Registro H01.4
+
+```text
+História / objetivo: H01.4 — Aplicar papéis e gerenciar saída.
+Estado / responsável / data: Concluído / desenvolvimento / 25/09/2026.
+Requisitos e critérios de aceite relacionados: RF-ACC-08 a RF-ACC-11; matriz de permissões; CA-02/CA-03; autorização no backend, remoção/saída, transferência, histórico, vaga e sessões.
+Decisões e pendências aplicáveis: T07 registrada. P09 permanece aberta para encerramento/exclusão definitiva. E03/E04/E08 revalidarão responsabilidades, anexos e consentimento WhatsApp quando seus módulos existirem.
+Branch / commit / PR: branch `h01-4-membership-lifecycle`, base `02310b8`; entrega registrada no Git ao final da execução, sem publicação de imagens, deploy ou PR.
+Arquivos e comportamento alterados: identity em aplicação/portas/infra/API; V5; tela Angular de membros; serviço frontend; E2E; OpenAPI, README, decisões e evidência H01.4.
+Migrações e impacto sobre dados: V5 adiciona encerramento auditável à associação e eventos de ciclo de membro. V1–V5 aplicadas em PostgreSQL 17.6 efêmero/Testcontainers e Compose descartável; nenhuma migração anterior foi editada e nenhum banco compartilhado foi alterado.
+Testes executados: 65 unitários/HTTP/ArchUnit; 10 ITs Failsafe (3 específicos H01.4); 20 Vitest; build Angular; 1 E2E full-stack. Todos finais aprovados, sem ignorados/falhas/erros. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V5 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 393/414 linhas (94,93%) e 124/154 branches (80,52%); PIT 80% (126/157), 93% das linhas mutadas cobertas e força 88%; gates mantidos.
+Validação manual / integração real: E2E Chromium em Nginx/backend/PostgreSQL/Mailpit comprovou transferência nos dois sentidos, atualização de permissões, saída, sessão revogada e vaga para novo convite. Mailpit foi apenas captura local; H01.4 não exigiu novo envio externo.
+Limitações e cenários não executados: despesas/responsabilidades/anexos/WhatsApp ainda não existem; somente identidade histórica e contrato de eventos foram concluídos. CA-02/CA-03 continuam parcialmente em validação nesses efeitos transversais. Encerramento do espaço/exclusão não foi implementado.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H01.4.md e este arquivo.
+Condição de conclusão ou desbloqueio: H01.4 e a demonstração própria do E01 satisfeitas em 25/09/2026; integrações futuras explicitamente diferidas conforme backlog.
+Próximo passo: H02.1 — cadastrar e listar uma despesa avulsa.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -230,3 +252,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 24/09/2026 | H01.3 iniciada após leitura integral dos contratos. H01.2 foi preservada no commit local `985cfd5` e a branch `h01-3-invite-member` foi criada. Regras derivadas: aceite cria/confirmar conta nova pelo token entregue ao email; conta confirmada preexistente precisa autenticar com a mesma identidade; vínculo ativo prévio, terceiro membro e substituição implícita de convite são recusados. |
 | 24/09/2026 | H01.3 implementada nas quatro camadas e UI com V4, token hash/uso único/sete dias, autorização administrativa, papel GUEST, limite/lock concorrente, reenvio/revogação e recuperação após falha SMTP. Regressão: 52 unitários, 7 ITs PostgreSQL 17.6, JaCoCo 93,68%/80%, PIT 78%, 17 frontend, build e E2E full-stack Mailpit aprovados. História permanece em validação externa somente por P04/Gmail real. |
 | 24/09/2026 | Convite Gmail real entregue e aceito com SMTP AUTH/STARTTLS e validação TLS ativa. PostgreSQL descartável confirmou 1 convite consumido, 2 membros ativos, 1 GUEST confirmado e 1 espaço. Credencial, CA exportada, contêineres e volumes foram removidos. P04 e H01.3 concluídas; próximo passo H01.4. |
+| 25/09/2026 | H01.4 implementou matriz de papéis, remoção/saída, transferência atômica, revogação JDBC, associação histórica e eventos V5. Regressão final: 65 Java, 10 ITs PostgreSQL, JaCoCo 94,93%/80,52%, PIT 80%, 20 frontend, build e E2E aprovados. H01.4 e o escopo próprio do E01 concluídos; parcelas transversais de CA-02/CA-03 seguem para E02/E03/E04/E08. |

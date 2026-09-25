@@ -338,6 +338,81 @@ paths:
           description: Sessão pertence a identidade diferente da destinatária.
         "409":
           description: Destinatário já associado ou espaço sem vaga.
+  /identity/members:
+    get:
+      operationId: listActiveSpaceMembers
+      summary: Lista os membros ativos e seus papéis no espaço da sessão
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Associações ativas do mesmo espaço.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SpaceMember"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /identity/members/{userId}:
+    delete:
+      operationId: removeGuestMember
+      summary: Encerra a associação do convidado e revoga todas as suas sessões
+      description: Preserva usuário e associação inativa para referências históricas e libera uma vaga.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Convidado removido e sessões revogadas.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Membro ativo não encontrado neste espaço.
+        "409":
+          description: Associação ou papel mudou durante a operação.
+  /identity/members/{userId}/administration-transfer:
+    post:
+      operationId: transferSpaceAdministration
+      summary: Transfere atomicamente a administração ao convidado ativo
+      description: O antigo administrador passa a convidado. Consentimento e número de WhatsApp não são transferidos.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Papéis trocados e evento durável registrado.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Convidado ativo não encontrado neste espaço.
+        "409":
+          description: Papéis mudaram concorrentemente ou destino inválido.
+  /identity/membership/leave:
+    post:
+      operationId: leaveCurrentSpace
+      summary: Permite ao convidado sair voluntariamente e revoga suas sessões
+      description: Administrador deve transferir a administração antes; encerramento de espaço não faz parte deste contrato.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "204":
+          description: Associação encerrada, histórico preservado e sessões revogadas.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Usuário ainda é administrador ou associação mudou concorrentemente.
 components:
   securitySchemes:
     sessionCookie:
@@ -381,7 +456,32 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/GenericEmailResponse"
+  parameters:
+    MemberUserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
+    SpaceMember:
+      type: object
+      required: [userId, displayName, email, role, currentUser]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [ADMINISTRATOR, GUEST]
+        currentUser:
+          type: boolean
     InvitationRequest:
       type: object
       additionalProperties: false

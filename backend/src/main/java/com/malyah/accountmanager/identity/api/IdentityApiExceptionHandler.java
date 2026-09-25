@@ -25,10 +25,13 @@ import com.malyah.accountmanager.identity.application.InvitationLoginRequiredExc
 import com.malyah.accountmanager.identity.application.InvitationTargetUnavailableException;
 import com.malyah.accountmanager.identity.application.NoPendingInvitationException;
 import com.malyah.accountmanager.identity.application.SpaceMemberLimitReachedException;
+import com.malyah.accountmanager.identity.application.ManagedMemberNotFoundException;
+import com.malyah.accountmanager.identity.application.MembershipAdministratorRequiredException;
+import com.malyah.accountmanager.identity.application.MembershipConflictException;
 
 @RestControllerAdvice(assignableTypes = {
         InitialSetupController.class, AuthenticatedUserContextController.class, AuthenticationController.class,
-        InvitationController.class
+        InvitationController.class, MembershipController.class
 })
 class IdentityApiExceptionHandler {
 
@@ -120,6 +123,21 @@ class IdentityApiExceptionHandler {
     ResponseEntity<ApiError> invitationEmailDelivery(InvitationEmailDeliveryException exception) {
         return response(HttpStatus.SERVICE_UNAVAILABLE, "INVITATION_EMAIL_DELIVERY_FAILED",
                 exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(MembershipAdministratorRequiredException.class)
+    ResponseEntity<ApiError> membershipAdministratorRequired(MembershipAdministratorRequiredException exception) {
+        return response(HttpStatus.FORBIDDEN, "MEMBERSHIP_ADMIN_REQUIRED", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(ManagedMemberNotFoundException.class)
+    ResponseEntity<ApiError> memberNotFound(ManagedMemberNotFoundException exception) {
+        return response(HttpStatus.NOT_FOUND, "ACTIVE_MEMBER_NOT_FOUND", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(MembershipConflictException.class)
+    ResponseEntity<ApiError> membershipConflict(MembershipConflictException exception) {
+        return response(HttpStatus.CONFLICT, "MEMBERSHIP_CONFLICT", exception.getMessage(), List.of());
     }
 
     private ResponseEntity<ApiError> response(

@@ -8,10 +8,30 @@
       @if (errorMessage()) { <div class="error-summary" role="alert">{{ errorMessage() }}</div> }
       @if (message()) { <div class="success-summary" role="status">{{ message() }}</div> }
 
-      @if (mode === 'manage' && context()?.role === 'GUEST') {
-        <p>Somente o administrador pode convidar ou revogar membros.</p>
-        <p class="links"><a routerLink="/entrar">Voltar</a></p>
-      } @else if (mode === 'manage' && context()?.role === 'ADMINISTRATOR' && state(); as invitation) {
+      @if (mode === 'manage' && context(); as current) {
+        <h2>Membros ativos</h2>
+        <div class="member-list">
+          @for (member of members(); track member.userId) {
+            <article class="member-row">
+              <p><strong>{{ member.displayName }}</strong> — {{ member.role === 'ADMINISTRATOR' ? 'Administrador' : 'Convidado' }}
+                @if (member.currentUser) { <span>(você)</span> }
+              </p>
+              @if (current.role === 'ADMINISTRATOR' && member.role === 'GUEST') {
+                <div class="actions">
+                  <button matButton="outlined" type="button" (click)="transfer(member)" [disabled]="submitting()">Transferir administração</button>
+                  <button matButton="outlined" type="button" (click)="remove(member)" [disabled]="submitting()">Remover membro</button>
+                </div>
+              }
+            </article>
+          }
+        </div>
+        @if (current.role === 'GUEST') {
+          <p>Como convidado, você acessa os dados compartilhados, mas não gerencia membros nem configurações gerais.</p>
+          <button matButton="outlined" type="button" (click)="leave()" [disabled]="submitting()">Sair deste espaço</button>
+        }
+      }
+
+      @if (mode === 'manage' && context()?.role === 'ADMINISTRATOR' && state(); as invitation) {
         @if (invitation.pending) {
           <p>Há um convite pendente para <strong>{{ invitation.invitedEmail }}</strong>, válido até {{ invitation.expiresAt }}.</p>
           <p>O convidado poderá ver todo o histórico deste espaço ao aceitar.</p>
@@ -19,7 +39,7 @@
             <button matButton="filled" type="button" (click)="resend()" [disabled]="submitting()">Reenviar e substituir link</button>
             <button matButton="outlined" type="button" (click)="revoke()" [disabled]="submitting()">Revogar convite</button>
           </div>
-        } @else {
+        } @else if (members().length < 2) {
           <p>O convidado terá acesso ao histórico completo deste espaço e não terá privilégios administrativos.</p>
           <form [formGroup]="inviteForm" (ngSubmit)="invite()" novalidate>
             <mat-form-field appearance="outline">
@@ -30,7 +50,8 @@
             <button matButton="filled" type="submit" [disabled]="submitting()">Enviar convite</button>
           </form>
         }
-      } @else if (mode === 'accept' && preview(); as invitation) {
+      }
+      @if (mode === 'accept' && preview(); as invitation) {
         <p>Você foi convidado para o espaço <strong>{{ invitation.spaceName }}</strong> como membro convidado.</p>
         <p>Ao aceitar, você terá acesso ao histórico completo do espaço.</p>
         @if (invitation.loginRequired && !invitation.authenticatedAsInvitee) {

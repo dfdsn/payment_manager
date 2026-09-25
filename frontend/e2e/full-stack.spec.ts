@@ -7,6 +7,7 @@ const guestEmail = 'guest@example.com';
 const guestPassword = 'senha convidada 2026';
 
 test('runs setup, email confirmation, login, reset and session revocation against real services', async ({ browser, page }) => {
+  test.setTimeout(60_000);
   await page.goto('/configuracao-inicial');
   await page.getByLabel('Segredo temporário').fill('local-only-setup-secret-change-me');
   await page.getByLabel('Nome do administrador').fill('Diego');
@@ -61,7 +62,32 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(guestPage.getByText(/Você entrou em/)).toContainText('Minha casa');
   await expect(guestPage.getByText(/como convidado/)).toBeVisible();
   await guestPage.goto('/membros');
-  await expect(guestPage.getByText(/Somente o administrador/)).toBeVisible();
+  await expect(guestPage.getByText(/Como convidado/)).toBeVisible();
+
+  await page.reload();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Transferir administração' }).click();
+  await expect(page.getByText(/Administração transferida/)).toBeVisible();
+  await expect(page.getByText(/Como convidado/)).toBeVisible();
+
+  await guestPage.reload();
+  await expect(guestPage.getByRole('button', { name: 'Transferir administração' })).toBeVisible();
+  guestPage.once('dialog', dialog => dialog.accept());
+  await guestPage.getByRole('button', { name: 'Transferir administração' }).click();
+  await expect(guestPage.getByText(/Administração transferida/)).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Remover membro' })).toBeVisible();
+  await guestPage.reload();
+  guestPage.once('dialog', dialog => dialog.accept());
+  await guestPage.getByRole('button', { name: 'Sair deste espaço' }).click();
+  await expect(guestPage.getByRole('region', { name: 'Entrar' })).toBeVisible();
+  const guestRevokedStatus = await guestPage.evaluate(async () => (await fetch('/api/v1/identity/me', {
+    credentials: 'include', headers: { 'X-User-Activity': 'true' },
+  })).status);
+  expect(guestRevokedStatus).toBe(401);
+  await page.reload();
+  await expect(page.getByLabel('Email do convidado')).toBeVisible();
   await guestContext.close();
 
   const recoveryContext = await browser.newContext();

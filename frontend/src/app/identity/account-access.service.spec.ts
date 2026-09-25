@@ -57,4 +57,18 @@ describe('AccountAccessService', () => {
     expect(preview.request.method).toBe('GET');
     preview.flush({});
   });
+
+  it('uses protected membership endpoints for transfer, removal and voluntary exit', () => {
+    service.transferAdministration('guest-id').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    http.expectOne({ method: 'POST', url: '/api/v1/identity/members/guest-id/administration-transfer' }).flush(null);
+
+    service.removeMember('guest-id').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    http.expectOne({ method: 'DELETE', url: '/api/v1/identity/members/guest-id' }).flush(null);
+
+    service.leaveSpace().subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    http.expectOne({ method: 'POST', url: '/api/v1/identity/membership/leave' }).flush(null);
+  });
 });

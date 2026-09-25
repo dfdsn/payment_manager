@@ -39,6 +39,9 @@ import com.malyah.accountmanager.identity.application.InvitationService;
 import com.malyah.accountmanager.identity.application.InvitationUseCase;
 import com.malyah.accountmanager.identity.application.port.InvitationEmailSender;
 import com.malyah.accountmanager.identity.application.port.InvitationRepository;
+import com.malyah.accountmanager.identity.application.MembershipManagementService;
+import com.malyah.accountmanager.identity.application.MembershipManagementUseCase;
+import com.malyah.accountmanager.identity.application.port.MembershipRepository;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "spring.datasource.url")
@@ -105,6 +108,24 @@ class IdentityConfiguration {
     @Bean
     InvitationRepository invitationRepository(JdbcTemplate jdbcTemplate) {
         return new JdbcInvitationRepository(jdbcTemplate);
+    }
+
+    @Bean
+    MembershipRepository membershipRepository(JdbcTemplate jdbcTemplate) {
+        return new JdbcMembershipRepository(jdbcTemplate);
+    }
+
+    @Bean
+    MembershipManagementUseCase membershipManagementUseCase(
+            MembershipRepository repository,
+            SessionRevoker sessionRevoker,
+            IdentifierGenerator identifierGenerator,
+            Clock applicationClock,
+            PlatformTransactionManager transactionManager) {
+        var service = new MembershipManagementService(
+                repository, sessionRevoker, identifierGenerator, applicationClock);
+        return new TransactionalMembershipManagementUseCase(
+                service, new TransactionTemplate(transactionManager));
     }
 
     @Bean

@@ -27,6 +27,7 @@ import com.malyah.accountmanager.identity.application.InvalidCredentialsExceptio
 import com.malyah.accountmanager.identity.application.InvalidOrExpiredAccessTokenException;
 import com.malyah.accountmanager.identity.application.LoginUseCase;
 import com.malyah.accountmanager.identity.application.InvitationUseCase;
+import com.malyah.accountmanager.identity.application.MembershipManagementUseCase;
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
 
 import jakarta.servlet.http.Cookie;
@@ -57,6 +58,9 @@ class AuthenticationHttpTest {
 
     @MockitoBean
     private InvitationUseCase invitationUseCase;
+
+    @MockitoBean
+    private MembershipManagementUseCase membershipManagementUseCase;
 
     @Test
     void logsInWithRotatedPersistentServerSessionAndLogsOut() throws Exception {

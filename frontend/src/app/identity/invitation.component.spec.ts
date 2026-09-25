@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, Router } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { HttpErrorResponse } from '@angular/common/http';
 import { AccountAccessService } from './account-access.service';
@@ -10,13 +10,16 @@ describe('InvitationComponent', () => {
   const access = {
     context: vi.fn(), currentInvitation: vi.fn(), invite: vi.fn(), resendInvitation: vi.fn(),
     revokeInvitation: vi.fn(), previewInvitation: vi.fn(), acceptInvitation: vi.fn(),
+    members: vi.fn(), removeMember: vi.fn(), transferAdministration: vi.fn(), leaveSpace: vi.fn(),
   };
+  const router = { navigateByUrl: vi.fn() };
 
   async function configure(mode: 'manage' | 'accept', token = '') {
     await TestBed.configureTestingModule({
       imports: [InvitationComponent],
       providers: [
         { provide: AccountAccessService, useValue: access },
+        { provide: Router, useValue: router },
         { provide: ActivatedRoute, useValue: { snapshot: {
           data: { mode }, queryParamMap: convertToParamMap(token ? { token } : {}),
         } } },
@@ -26,7 +29,10 @@ describe('InvitationComponent', () => {
     fixture.detectChanges();
   }
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    access.members.mockReturnValue(of([]));
+  });
 
   it('allows an administrator to invite a second member', async () => {
     access.context.mockReturnValue(of({ role: 'ADMINISTRATOR' }));
@@ -101,5 +107,38 @@ describe('InvitationComponent', () => {
 
     expect(fixture.nativeElement.textContent).toContain('Entre com o email destinatário');
     expect(fixture.nativeElement.querySelector('form')).toBeNull();
+  });
+
+  it('lets the administrator remove a guest while preserving the history message', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    access.context.mockReturnValue(of({ role: 'ADMINISTRATOR' }));
+    access.members.mockReturnValue(of([
+      { userId: 'admin', displayName: 'Admin', email: 'admin@example.com', role: 'ADMINISTRATOR', currentUser: true },
+      { userId: 'guest', displayName: 'Pessoa', email: 'guest@example.com', role: 'GUEST', currentUser: false },
+    ]));
+    access.currentInvitation.mockReturnValue(of({ pending: false, invitedEmail: null, expiresAt: null }));
+    access.removeMember.mockReturnValue(of(void 0));
+    await configure('manage');
+
+    fixture.componentInstance.remove(fixture.componentInstance.members()[1]);
+    fixture.detectChanges();
+
+    expect(access.removeMember).toHaveBeenCalledWith('guest');
+    expect(fixture.nativeElement.textContent).toContain('histórico foi preservado');
+  });
+
+  it('allows a guest to leave and returns to login', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    access.context.mockReturnValue(of({ role: 'GUEST' }));
+    access.members.mockReturnValue(of([
+      { userId: 'guest', displayName: 'Pessoa', email: 'guest@example.com', role: 'GUEST', currentUser: true },
+    ]));
+    access.leaveSpace.mockReturnValue(of(void 0));
+    await configure('manage');
+
+    fixture.componentInstance.leave();
+
+    expect(access.leaveSpace).toHaveBeenCalled();
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/entrar');
   });
 });

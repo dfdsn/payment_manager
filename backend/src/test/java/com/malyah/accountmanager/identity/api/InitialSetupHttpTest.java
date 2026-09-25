@@ -33,6 +33,7 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQu
 import com.malyah.accountmanager.identity.domain.SpaceRole;
 import com.malyah.accountmanager.identity.application.AccountAccessUseCase;
 import com.malyah.accountmanager.identity.application.LoginUseCase;
+import com.malyah.accountmanager.identity.application.MembershipManagementUseCase;
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
 @SpringBootTest(properties = {
         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration"
@@ -60,6 +61,9 @@ class InitialSetupHttpTest {
 
     @MockitoBean
     private SessionRevoker sessionRevoker;
+
+    @MockitoBean
+    private MembershipManagementUseCase membershipManagementUseCase;
 
     @Test
     void exposesStatusAndCsrfCookieWithoutAuthentication() throws Exception {

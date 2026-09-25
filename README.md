@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica PREP-01 a PREP-04 e as histórias H01.1–H01.3 estão validadas. Confirmação, recuperação e convite também foram entregues e consumidos por Gmail real. Despesas ainda não foram iniciadas.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica PREP-01 a PREP-04 e o épico E01 (H01.1–H01.4) estão validados. Confirmação, recuperação e convite também foram entregues e consumidos por Gmail real. Despesas ainda não foram iniciadas.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. A V1 contém a baseline, a V2 cria usuário, espaço, associação, bloqueio persistente e tabelas JDBC da sessão, e a V3 adiciona tokens de acesso de uso único.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites e V5 registra encerramento e eventos auditáveis da associação.
 
 ## Pré-requisitos
 
@@ -98,7 +98,7 @@ APP_SETUP_SECRET=substitua-por-um-segredo-temporario-aleatorio \
 cd ..
 ```
 
-Resultado esperado: Flyway aplica V1, V2 e `V3__account_access.sql` (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
+Resultado esperado: Flyway aplica V1–V5 (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
 
 ### 3. Backend
 
@@ -137,7 +137,7 @@ Acesse `http://localhost:8080`. Essa composição é apenas local, usa build e c
 ### Administração inicial
 
 1. Gere um segredo temporário aleatório e informe-o ao backend em `APP_SETUP_SECRET`. Não o reutilize como senha do administrador.
-2. Execute as migrações V1–V4 antes do runtime, conforme os passos anteriores.
+2. Execute as migrações V1–V5 antes do runtime, conforme os passos anteriores.
 3. Abra o frontend, preencha nome, email, senha, nome do espaço e o segredo temporário. A senha deve ter de 12 caracteres a 72 bytes UTF-8 e conter ao menos uma letra e um número.
 4. A criação de usuário, espaço, papel `ADMINISTRATOR` e fechamento do setup ocorre em uma única transação. O espaço começa com moeda `BRL`, idioma `pt-BR` e fuso `America/Sao_Paulo`.
 5. Ao receber sucesso, remova `APP_SETUP_SECRET` e reinicie o backend. A linha de controle no PostgreSQL mantém o setup fechado mesmo após reinício ou troca do segredo. Uma nova tentativa retorna conflito e não cria registros extras.
@@ -161,6 +161,14 @@ As sessões expiram após sete dias sem atividade humana e sempre após 30 dias 
 4. Após aceitar, entre em `/entrar`. O contexto deve mostrar o mesmo espaço com papel `GUEST`; `/membros` informa que o convidado não pode gerenciar membros.
 
 O espaço aceita no máximo dois membros ativos e cada usuário só pode ter uma associação ativa. O aceite bloqueia o espaço no PostgreSQL e as constraints impedem duplicação mesmo em requisições concorrentes. Se o SMTP falhar depois da gravação, a API informa que o convite foi preservado e a tela oferece reenvio explícito; essa nova tentativa substitui o token anterior. Mailpit é somente captura local. Entrega Gmail real do convite deve ser registrada separadamente, sem expor destinatário, credencial ou token.
+
+### Papéis, transferência e saída
+
+Em `/membros`, ambos veem as associações ativas e o papel atual. O administrador pode remover o convidado ou transferir-lhe a administração; o convidado não acessa essas operações nem por chamada direta à API. A transferência troca os dois papéis atomicamente e não encerra sessões: a autorização é recalculada no banco a cada operação, de modo que sessões abertas recebem imediatamente o novo papel.
+
+O convidado pode usar “Sair deste espaço”. Remoção ou saída marca a associação como inativa, preserva usuário e referências históricas, grava evento de auditoria e remove todas as sessões JDBC desse usuário na mesma transação. A vaga fica disponível para novo convite. O administrador não pode sair enquanto mantiver esse papel: transfira antes. Encerramento do espaço/exclusão definitiva continua fora deste fluxo e depende de P09.
+
+A V5 mantém eventos duráveis `MEMBER_LEFT`, `MEMBER_REMOVED` e `ADMINISTRATION_TRANSFERRED`. E03/E04 usarão esse contrato para retirar responsabilidades futuras sem apagar autoria, e E08 exigirá novo consentimento/número do novo administrador; esses módulos ainda não existem e não são apresentados como integrações já validadas.
 
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
@@ -187,6 +195,12 @@ Somente para persistência e concorrência dos convites da H01.3:
 
 ```powershell
 & .\backend\scripts\run-integration-tests.ps1 -Tests InvitationPostgresIT
+```
+
+Somente para papéis, saída, revogação e concorrência da H01.4:
+
+```powershell
+& .\backend\scripts\run-integration-tests.ps1 -Tests MembershipPostgresIT,FlywayPostgresIT
 ```
 
 De outro diretório, use o caminho absoluto do checkout:
@@ -217,7 +231,7 @@ cd backend
 ```
 
 - `test`: JUnit/Spring e ArchUnit; não executa classes `*IT`.
-- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V4, atomicidade concorrente do setup/aceite, tokens e revogações persistidos.
+- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V5, atomicidade concorrente do setup/aceite/associação, tokens, papéis e revogações persistidos.
 - `-Pmutation`: PIT sobre domínio/aplicação. `-DskipITs` evita criar PostgreSQL novamente; não elimina unitários nem gates.
 - JaCoCo: linhas ≥80% e branches ≥70% em domínio/aplicação.
 - PIT: mutação ≥70% e cobertura de linhas ≥80% no código mutado.
@@ -245,7 +259,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele cria o administrador pela UI, lê os links no Mailpit, confirma, testa credencial inválida/válida, convida/reenvia/aceita o segundo membro, comprova o papel `GUEST`, redefine a senha, comprova revogação e rejeita reutilização de tokens. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele cria o administrador pela UI, lê os links no Mailpit, confirma, testa credencial inválida/válida, convida/reenvia/aceita o segundo membro, transfere a administração nos dois sentidos, executa a saída voluntária, comprova revogação e vaga para novo convite, redefine a senha e rejeita reutilização de tokens. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -329,4 +343,4 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H01.1 a H01.3 estão concluídas, inclusive com entrega e consumo Gmail real. A próxima história recomendada é **H01.4 — Aplicar papéis e gerenciar saída**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H01.1 a H01.4 e o épico E01 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.1 — Cadastrar e listar uma despesa avulsa**.

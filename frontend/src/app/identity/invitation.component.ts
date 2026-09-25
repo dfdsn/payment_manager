@@ -5,11 +5,11 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { ApiError } from './initial-setup.service';
 import {
-  AccountAccessService, AuthenticatedUserContext, InvitationPreview, InvitationState,
+  AccountAccessService, AuthenticatedUserContext, InvitationPreview, InvitationState, SpaceMember,
 } from './account-access.service';
 
 type InvitationMode = 'manage' | 'accept';
@@ -24,6 +24,7 @@ export class InvitationComponent implements OnInit {
   private readonly formBuilder = inject(FormBuilder);
   private readonly access = inject(AccountAccessService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 
   readonly mode = this.route.snapshot.data['mode'] as InvitationMode;
   readonly token = this.route.snapshot.queryParamMap.get('token') ?? '';
@@ -34,6 +35,7 @@ export class InvitationComponent implements OnInit {
   readonly context = signal<AuthenticatedUserContext | null>(null);
   readonly state = signal<InvitationState | null>(null);
   readonly preview = signal<InvitationPreview | null>(null);
+  readonly members = signal<SpaceMember[]>([]);
 
   readonly inviteForm = this.formBuilder.nonNullable.group({
     email: ['', [Validators.required, Validators.email]],
@@ -91,6 +93,42 @@ export class InvitationComponent implements OnInit {
     });
   }
 
+  remove(member: SpaceMember): void {
+    if (this.submitting() || !window.confirm(`Remover ${member.displayName} deste espaço?`)) return;
+    this.start();
+    this.access.removeMember(member.userId).pipe(finalize(() => this.submitting.set(false))).subscribe({
+      next: () => {
+        this.message.set('Membro removido. O histórico foi preservado e o acesso foi revogado.');
+        this.loadMembers();
+        this.refreshState();
+      },
+      error: error => this.handleError(error, 'Não foi possível remover o membro.'),
+    });
+  }
+
+  transfer(member: SpaceMember): void {
+    if (this.submitting() || !window.confirm(`Transferir a administração para ${member.displayName}?`)) return;
+    this.start();
+    this.access.transferAdministration(member.userId)
+      .pipe(finalize(() => this.submitting.set(false)))
+      .subscribe({
+        next: () => {
+          this.message.set('Administração transferida. Seu perfil agora é convidado.');
+          this.loadManagement();
+        },
+        error: error => this.handleError(error, 'Não foi possível transferir a administração.'),
+      });
+  }
+
+  leave(): void {
+    if (this.submitting() || !window.confirm('Sair deste espaço? Seu acesso será encerrado.')) return;
+    this.start();
+    this.access.leaveSpace().pipe(finalize(() => this.submitting.set(false))).subscribe({
+      next: () => void this.router.navigateByUrl('/entrar'),
+      error: error => this.handleError(error, 'Não foi possível sair do espaço.'),
+    });
+  }
+
   accept(): void {
     const preview = this.preview();
     if (!preview || this.submitting()) return;
@@ -116,9 +154,17 @@ export class InvitationComponent implements OnInit {
     this.access.context().subscribe({
       next: context => {
         this.context.set(context);
+        this.loadMembers();
         if (context.role === 'ADMINISTRATOR') this.refreshState();
       },
       error: error => this.handleError(error, 'Entre como administrador para gerenciar membros.'),
+    });
+  }
+
+  private loadMembers(): void {
+    this.access.members().subscribe({
+      next: members => this.members.set(members),
+      error: error => this.handleError(error, 'Não foi possível consultar os membros.'),
     });
   }
 

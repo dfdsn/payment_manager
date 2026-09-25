@@ -30,6 +30,7 @@ import com.malyah.accountmanager.identity.application.InvitationIdentityMismatch
 import com.malyah.accountmanager.identity.application.InvitationPreview;
 import com.malyah.accountmanager.identity.application.InvitationUseCase;
 import com.malyah.accountmanager.identity.application.LoginUseCase;
+import com.malyah.accountmanager.identity.application.MembershipManagementUseCase;
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
 import com.malyah.accountmanager.identity.infrastructure.security.SessionLifetimeFilter;
 
@@ -44,6 +45,7 @@ class InvitationHttpTest {
     @MockitoBean private LoginUseCase loginUseCase;
     @MockitoBean private AccountAccessUseCase accountAccessUseCase;
     @MockitoBean private SessionRevoker sessionRevoker;
+    @MockitoBean private MembershipManagementUseCase membershipManagementUseCase;
     @MockitoBean private InitialSetupUseCase initialSetupUseCase;
     @MockitoBean private AuthenticatedUserContextQuery contextQuery;
 
