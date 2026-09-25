@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H01.3.
+  description: Contrato versionado dos endpoints implementados até H02.1.
 servers:
   - url: /api/v1
 paths:
@@ -413,6 +413,90 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           description: Usuário ainda é administrador ou associação mudou concorrentemente.
+  /expenses:
+    post:
+      operationId: createOneOffExpense
+      summary: Cadastra uma despesa avulsa pendente ou já paga
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID preservado ao repetir a mesma intenção após falha de resposta.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpenseRequest"
+      responses:
+        "201":
+          description: Despesa criada; Location identifica o recurso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+        "200":
+          description: Repetição da mesma chave e payload; retorna a despesa original sem duplicar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: A chave já foi utilizada com outro payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listExpenses
+      summary: Lista somente as despesas do espaço ativo do usuário
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [REFERENCE_DATE, AMOUNT, DESCRIPTION]
+            default: REFERENCE_DATE
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: ASC
+      responses:
+        "200":
+          description: Página com ordenação estável e atraso calculado no fuso do espaço.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpensePage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 components:
   securitySchemes:
     sessionCookie:
@@ -445,7 +529,7 @@ components:
           schema:
             $ref: "#/components/schemas/ApiError"
     Forbidden:
-      description: Principal autenticado sem papel administrativo no espaço.
+      description: Principal autenticado sem associação ativa ou sem o papel exigido no espaço.
       content:
         application/json:
           schema:
@@ -465,6 +549,80 @@ components:
         type: string
         format: uuid
   schemas:
+    CreateExpenseRequest:
+      type: object
+      additionalProperties: false
+      required: [description, amount, status]
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 200
+        amount:
+          type: string
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          example: "150.00"
+        status:
+          type: string
+          enum: [PENDING, PAID]
+        dueDate:
+          type: [string, "null"]
+          format: date
+          description: Obrigatório para PENDING; opcional para PAID.
+        paymentDate:
+          type: [string, "null"]
+          format: date
+          description: Obrigatório para PAID e ausente para PENDING.
+        notes:
+          type: [string, "null"]
+          maxLength: 2000
+    Expense:
+      type: object
+      required: [id, origin, description, amount, currency, status, referenceDate, overdue,
+        createdByUserId, createdByDisplayName, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        origin: { const: ONE_OFF }
+        description: { type: string }
+        amount:
+          type: string
+          pattern: '^\d+\.\d{2}$'
+        currency: { const: BRL }
+        status: { type: string, enum: [PENDING, PAID] }
+        dueDate: { type: [string, "null"], format: date }
+        paymentDate: { type: [string, "null"], format: date }
+        paidAmount:
+          type: [string, "null"]
+          pattern: '^\d+\.\d{2}$'
+        referenceDate: { type: string, format: date }
+        overdue:
+          type: boolean
+          description: Somente PENDING com vencimento anterior à data local do espaço.
+        categoryName:
+          type: [string, "null"]
+          description: Nulo até categorias serem implementadas; interface mostra Sem categoria.
+        responsibleUserId: { type: [string, "null"], format: uuid }
+        notes: { type: [string, "null"] }
+        createdByUserId: { type: string, format: uuid }
+        createdByDisplayName: { type: string }
+        paidByUserId: { type: [string, "null"], format: uuid }
+        paidByDisplayName: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 0 }
+    ExpensePage:
+      type: object
+      required: [content, page, size, totalElements, totalPages, sort, direction]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/Expense"
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1, maximum: 100 }
+        totalElements: { type: integer, format: int64, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+        sort: { type: string, enum: [REFERENCE_DATE, AMOUNT, DESCRIPTION] }
+        direction: { type: string, enum: [ASC, DESC] }
     SpaceMember:
       type: object
       required: [userId, displayName, email, role, currentUser]

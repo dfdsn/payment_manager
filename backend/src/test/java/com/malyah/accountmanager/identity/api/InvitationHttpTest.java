@@ -32,6 +32,7 @@ import com.malyah.accountmanager.identity.application.InvitationUseCase;
 import com.malyah.accountmanager.identity.application.LoginUseCase;
 import com.malyah.accountmanager.identity.application.MembershipManagementUseCase;
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
+import com.malyah.accountmanager.expenses.application.ExpenseUseCase;
 import com.malyah.accountmanager.identity.infrastructure.security.SessionLifetimeFilter;
 
 @SpringBootTest(properties = {
@@ -46,6 +47,7 @@ class InvitationHttpTest {
     @MockitoBean private AccountAccessUseCase accountAccessUseCase;
     @MockitoBean private SessionRevoker sessionRevoker;
     @MockitoBean private MembershipManagementUseCase membershipManagementUseCase;
+    @MockitoBean private ExpenseUseCase expenseUseCase;
     @MockitoBean private InitialSetupUseCase initialSetupUseCase;
     @MockitoBean private AuthenticatedUserContextQuery contextQuery;
 

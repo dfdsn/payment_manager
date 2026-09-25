@@ -11,6 +11,7 @@ import com.malyah.accountmanager.identity.application.LoginUseCase;
 import com.malyah.accountmanager.identity.application.InvitationUseCase;
 import com.malyah.accountmanager.identity.application.MembershipManagementUseCase;
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
+import com.malyah.accountmanager.expenses.application.ExpenseUseCase;
 
 @SpringBootTest(properties = {
         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration"
@@ -37,6 +38,9 @@ class AccountManagerApplicationTest {
 
     @MockitoBean
     private SessionRevoker sessionRevoker;
+
+    @MockitoBean
+    private ExpenseUseCase expenseUseCase;
 
     @Test
     void startsSpringContext() {

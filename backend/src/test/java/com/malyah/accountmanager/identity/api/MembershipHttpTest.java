@@ -36,6 +36,7 @@ import com.malyah.accountmanager.identity.application.MembershipManagementUseCas
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
 import com.malyah.accountmanager.identity.domain.SpaceRole;
 import com.malyah.accountmanager.identity.infrastructure.security.SessionLifetimeFilter;
+import com.malyah.accountmanager.expenses.application.ExpenseUseCase;
 
 @SpringBootTest(properties = {
         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration"
@@ -52,6 +53,7 @@ class MembershipHttpTest {
     @MockitoBean private InitialSetupUseCase initialSetupUseCase;
     @MockitoBean private AuthenticatedUserContextQuery contextQuery;
     @MockitoBean private InvitationUseCase invitationUseCase;
+    @MockitoBean private ExpenseUseCase expenseUseCase;
 
     @Test
     void protectsMemberDataAndAdministrativeMutationsAtTheApi() throws Exception {

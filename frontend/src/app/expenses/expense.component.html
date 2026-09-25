@@ -1,0 +1,130 @@
+<section class="expenses-container" aria-labelledby="expenses-title">
+  <header class="page-header">
+    <div>
+      <h1 id="expenses-title">Despesas</h1>
+      <p>Cadastre contas pendentes ou despesas que já foram pagas.</p>
+    </div>
+    <a routerLink="/entrar">Voltar ao início</a>
+  </header>
+
+  <mat-card appearance="outlined" class="expense-form-card">
+    <mat-card-header>
+      <mat-card-title>Adicionar despesa</mat-card-title>
+      <mat-card-subtitle>Categoria e responsável serão opcionais quando esses módulos estiverem disponíveis.</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      @if (errorMessage()) { <div class="error-summary" role="alert">{{ errorMessage() }}</div> }
+      @if (message()) { <div class="success-summary" role="status">{{ message() }}</div> }
+      <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+        <mat-form-field appearance="outline" class="wide-field">
+          <mat-label>Descrição</mat-label>
+          <input matInput formControlName="description" maxlength="200" autocomplete="off" />
+          @if (form.controls.description.invalid && form.controls.description.touched) {
+            <mat-error>Informe uma descrição com até 200 caracteres.</mat-error>
+          }
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Valor</mat-label>
+          <span matTextPrefix>R$&nbsp;</span>
+          <input matInput inputmode="decimal" formControlName="amount" placeholder="0,00" autocomplete="off" />
+          <mat-hint>De R$ 0,01 a R$ 99.999.999,99.</mat-hint>
+          @if (form.controls.amount.invalid && form.controls.amount.touched) {
+            <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error>
+          }
+        </mat-form-field>
+
+        <label class="select-field">Situação
+          <select formControlName="status">
+            <option value="PENDING">Pendente</option>
+            <option value="PAID">Já paga</option>
+          </select>
+        </label>
+
+        @if (form.controls.status.value === 'PENDING') {
+          <mat-form-field appearance="outline">
+            <mat-label>Vencimento</mat-label>
+            <input matInput type="date" formControlName="dueDate" />
+            @if (form.controls.dueDate.invalid && form.controls.dueDate.touched) {
+              <mat-error>Informe o vencimento.</mat-error>
+            }
+          </mat-form-field>
+        } @else {
+          <mat-form-field appearance="outline">
+            <mat-label>Vencimento (opcional)</mat-label>
+            <input matInput type="date" formControlName="dueDate" />
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Data do pagamento</mat-label>
+            <input matInput type="date" formControlName="paymentDate" />
+            @if (form.controls.paymentDate.invalid && form.controls.paymentDate.touched) {
+              <mat-error>Informe a data do pagamento.</mat-error>
+            }
+          </mat-form-field>
+        }
+
+        <mat-form-field appearance="outline" class="wide-field">
+          <mat-label>Observação (opcional)</mat-label>
+          <textarea matInput formControlName="notes" maxlength="2000" rows="3"></textarea>
+        </mat-form-field>
+
+        <button matButton="filled" type="submit" [disabled]="submitting()">
+          {{ submitting() ? 'Salvando…' : 'Salvar despesa' }}
+        </button>
+      </form>
+    </mat-card-content>
+  </mat-card>
+
+  <section aria-labelledby="expense-list-title" class="expense-list-section">
+    <div class="list-header">
+      <div>
+        <h2 id="expense-list-title">Lançamentos</h2>
+        <p>{{ totalElements() }} {{ totalElements() === 1 ? 'despesa' : 'despesas' }}</p>
+      </div>
+      <div class="sort-controls">
+        <label class="select-field compact">Ordenar por
+          <select [value]="sort()" (change)="changeSort($any($event.target).value)">
+            <option value="REFERENCE_DATE">Data de referência</option>
+            <option value="AMOUNT">Valor</option>
+            <option value="DESCRIPTION">Descrição</option>
+          </select>
+        </label>
+        <button matButton="outlined" type="button" (click)="toggleDirection()">
+          {{ direction() === 'ASC' ? 'Crescente' : 'Decrescente' }}
+        </button>
+      </div>
+    </div>
+
+    @if (loading()) {
+      <p role="status">Carregando despesas…</p>
+    } @else if (expenses().length === 0) {
+      <div class="empty-state" role="status">Nenhuma despesa cadastrada neste espaço.</div>
+    } @else {
+      <div class="expense-grid">
+        @for (expense of expenses(); track expense.id) {
+          <mat-card appearance="outlined" class="expense-row">
+            <mat-card-content>
+              <div class="expense-title-line">
+                <h3>{{ expense.description }}</h3>
+                <strong>{{ formatCurrency(expense.amount) }}</strong>
+              </div>
+              <p>
+                <span class="status-label">{{ expense.status === 'PAID' ? 'Paga' : (expense.overdue ? 'Atrasada' : 'Pendente') }}</span>
+                — referência {{ formatDate(expense.referenceDate) }}
+              </p>
+              <p>Categoria: {{ expense.categoryName ?? 'Sem categoria' }} · Responsável: Não definido</p>
+              @if (expense.status === 'PAID') {
+                <p>Pagamento em {{ formatDate(expense.paymentDate) }} por {{ expense.paidByDisplayName }}.</p>
+              }
+            </mat-card-content>
+          </mat-card>
+        }
+      </div>
+      <nav class="pagination" aria-label="Paginação de despesas">
+        <button matButton="outlined" type="button" (click)="previous()" [disabled]="page() === 0">Anterior</button>
+        <span>Página {{ page() + 1 }} de {{ totalPages() }}</span>
+        <button matButton="outlined" type="button" (click)="next()" [disabled]="page() + 1 >= totalPages()">Próxima</button>
+      </nav>
+    }
+  </section>
+</section>

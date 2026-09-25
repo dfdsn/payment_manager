@@ -36,7 +36,16 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
 
-  await page.getByRole('link', { name: 'Convidar ou gerenciar o segundo membro' }).click();
+  await page.getByRole('link', { name: 'Cadastrar e consultar despesas' }).click();
+  await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Energia');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('150,25');
+  await page.getByLabel('Vencimento').fill('2026-09-24');
+  await page.getByRole('button', { name: 'Salvar despesa' }).click();
+  await expect(page.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
+  await expect(page.getByText('Energia')).toBeVisible();
+  await expect(page.getByText('Atrasada')).toBeVisible();
+
+  await page.goto('/membros');
   await page.getByLabel('Email do convidado').fill(guestEmail);
   await page.getByRole('button', { name: 'Enviar convite' }).click();
   await expect(page.getByText('Convite criado e envio solicitado.')).toBeVisible();
@@ -61,6 +70,16 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await guestPage.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(guestPage.getByText(/Você entrou em/)).toContainText('Minha casa');
   await expect(guestPage.getByText(/como convidado/)).toBeVisible();
+  await guestPage.getByRole('link', { name: 'Cadastrar e consultar despesas' }).click();
+  await expect(guestPage.getByText('Energia')).toBeVisible();
+  await guestPage.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Mercado');
+  await guestPage.getByRole('textbox', { name: 'Valor', exact: true }).fill('25,50');
+  await guestPage.getByLabel('Situação').selectOption('PAID');
+  await guestPage.getByLabel('Data do pagamento').fill('2026-09-25');
+  await guestPage.getByRole('button', { name: 'Salvar despesa' }).click();
+  await expect(guestPage.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
+  await expect(guestPage.getByText('Mercado')).toBeVisible();
+  await expect(guestPage.getByText('Paga', { exact: true })).toBeVisible();
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();
 

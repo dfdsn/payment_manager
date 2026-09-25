@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica PREP-01 a PREP-04 e o épico E01 (H01.1–H01.4) estão validados. Confirmação, recuperação e convite também foram entregues e consumidos por Gmail real. Despesas ainda não foram iniciadas.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e a H02.1 estão validados. Ambos os papéis podem cadastrar e listar despesas avulsas pendentes ou já pagas; quitação posterior de uma pendência começa somente na H02.2.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites e V5 registra encerramento e eventos auditáveis da associação.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites, V5 registra o ciclo da associação e V6 adiciona despesas avulsas e idempotência.
 
 ## Pré-requisitos
 
@@ -98,7 +98,7 @@ APP_SETUP_SECRET=substitua-por-um-segredo-temporario-aleatorio \
 cd ..
 ```
 
-Resultado esperado: Flyway aplica V1–V5 (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
+Resultado esperado: Flyway aplica V1–V6 (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
 
 ### 3. Backend
 
@@ -137,7 +137,7 @@ Acesse `http://localhost:8080`. Essa composição é apenas local, usa build e c
 ### Administração inicial
 
 1. Gere um segredo temporário aleatório e informe-o ao backend em `APP_SETUP_SECRET`. Não o reutilize como senha do administrador.
-2. Execute as migrações V1–V5 antes do runtime, conforme os passos anteriores.
+2. Execute as migrações V1–V6 antes do runtime, conforme os passos anteriores.
 3. Abra o frontend, preencha nome, email, senha, nome do espaço e o segredo temporário. A senha deve ter de 12 caracteres a 72 bytes UTF-8 e conter ao menos uma letra e um número.
 4. A criação de usuário, espaço, papel `ADMINISTRATOR` e fechamento do setup ocorre em uma única transação. O espaço começa com moeda `BRL`, idioma `pt-BR` e fuso `America/Sao_Paulo`.
 5. Ao receber sucesso, remova `APP_SETUP_SECRET` e reinicie o backend. A linha de controle no PostgreSQL mantém o setup fechado mesmo após reinício ou troca do segredo. Uma nova tentativa retorna conflito e não cria registros extras.
@@ -169,6 +169,16 @@ Em `/membros`, ambos veem as associações ativas e o papel atual. O administrad
 O convidado pode usar “Sair deste espaço”. Remoção ou saída marca a associação como inativa, preserva usuário e referências históricas, grava evento de auditoria e remove todas as sessões JDBC desse usuário na mesma transação. A vaga fica disponível para novo convite. O administrador não pode sair enquanto mantiver esse papel: transfira antes. Encerramento do espaço/exclusão definitiva continua fora deste fluxo e depende de P09.
 
 A V5 mantém eventos duráveis `MEMBER_LEFT`, `MEMBER_REMOVED` e `ADMINISTRATION_TRANSFERRED`. E03/E04 usarão esse contrato para retirar responsabilidades futuras sem apagar autoria, e E08 exigirá novo consentimento/número do novo administrador; esses módulos ainda não existem e não são apresentados como integrações já validadas.
+
+### Cadastrar e listar despesa avulsa
+
+1. Entre como administrador ou convidado e abra `/despesas` pelo link “Cadastrar e consultar despesas”. A API sempre deriva o espaço da associação ativa; o cliente não escolhe `spaceId`.
+2. Para uma conta pendente, informe descrição, valor, situação `Pendente` e vencimento. Para uma despesa já paga, selecione `Já paga`, informe a data do pagamento e, opcionalmente, o vencimento. O cadastro pago usa inicialmente o mesmo valor da cobrança e o usuário atual como pagador; alterar/quitar depois pertence à H02.2.
+3. Valores aceitam vírgula na interface, mas a API usa string decimal canônica, por exemplo `"150.25"`. A faixa é R$ 0,01 a R$ 99.999.999,99, com até duas casas. Zero e negativos são recusados.
+4. A lista mostra `Pendente`, `Atrasada` ou `Paga`, “Sem categoria” e responsável não definido. Atraso usa a data local do espaço: no próprio vencimento ainda não há atraso.
+5. Ordene por data de referência, valor ou descrição. A paginação usa 20 itens por padrão e aceita no máximo 100 por requisição.
+
+O frontend cria um `Idempotency-Key` UUID para cada nova intenção e preserva a chave e os campos enquanto a tela continua aberta após falha. Repetir a mesma chave com o mesmo payload retorna o lançamento original; usar a mesma chave com conteúdo diferente retorna 409. Uma chave nova permite cadastrar duas despesas legítimas com dados iguais. Os registros de idempotência permanecem duráveis; a retenção/limpeza operacional continua dentro de P08 e não enfraquece a unicidade.
 
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
@@ -203,6 +213,12 @@ Somente para papéis, saída, revogação e concorrência da H01.4:
 & .\backend\scripts\run-integration-tests.ps1 -Tests MembershipPostgresIT,FlywayPostgresIT
 ```
 
+Somente para persistência, isolamento, paginação e idempotência da H02.1:
+
+```powershell
+& .\backend\scripts\run-integration-tests.ps1 -Tests ExpensePostgresIT,FlywayPostgresIT
+```
+
 De outro diretório, use o caminho absoluto do checkout:
 
 ```powershell
@@ -231,7 +247,7 @@ cd backend
 ```
 
 - `test`: JUnit/Spring e ArchUnit; não executa classes `*IT`.
-- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V5, atomicidade concorrente do setup/aceite/associação, tokens, papéis e revogações persistidos.
+- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V6, identidade e despesas, incluindo idempotência concorrente, isolamento por espaço e constraints monetárias.
 - `-Pmutation`: PIT sobre domínio/aplicação. `-DskipITs` evita criar PostgreSQL novamente; não elimina unitários nem gates.
 - JaCoCo: linhas ≥80% e branches ≥70% em domínio/aplicação.
 - PIT: mutação ≥70% e cobertura de linhas ≥80% no código mutado.
@@ -259,7 +275,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele cria o administrador pela UI, lê os links no Mailpit, confirma, testa credencial inválida/válida, convida/reenvia/aceita o segundo membro, transfere a administração nos dois sentidos, executa a saída voluntária, comprova revogação e vaga para novo convite, redefine a senha e rejeita reutilização de tokens. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar uma pendente pelo administrador, compartilhá-la com o convidado e cadastrar uma já paga pelo convidado. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -343,4 +359,4 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H01.1 a H01.4 e o épico E01 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.1 — Cadastrar e listar uma despesa avulsa**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01 e H02.1 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.2 — Quitar e identificar quem pagou**.
