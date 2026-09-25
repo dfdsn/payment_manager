@@ -1,0 +1,82 @@
+<section class="access-container" aria-labelledby="access-title">
+  <mat-card appearance="outlined">
+    <mat-card-header>
+      <mat-card-title id="access-title">
+        @switch (mode) {
+          @case ('login') { Entrar }
+          @case ('confirm') { Confirmar email }
+          @case ('forgot') { Recuperar acesso }
+          @case ('reset') { Redefinir senha }
+        }
+      </mat-card-title>
+      <mat-card-subtitle>Acesso seguro ao seu espaço familiar.</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      @if (errorMessage()) { <div class="error-summary" role="alert">{{ errorMessage() }}</div> }
+      @if (message()) { <div class="success-summary" role="status">{{ message() }}</div> }
+
+      @if (mode === 'login' && context(); as user) {
+        <div class="session-summary">
+          <h2>Olá, {{ user.displayName }}</h2>
+          <p>Você entrou em <strong>{{ user.spaceName }}</strong> como {{ user.role === 'ADMINISTRATOR' ? 'administrador' : 'convidado' }}.</p>
+          <p><a routerLink="/despesas">Cadastrar e consultar despesas</a></p>
+          @if (user.role === 'ADMINISTRATOR') { <p><a routerLink="/membros">Convidar ou gerenciar o segundo membro</a></p> }
+          <div class="actions">
+            <button matButton="outlined" type="button" (click)="logout(false)" [disabled]="submitting()">Sair deste dispositivo</button>
+            <button matButton="outlined" type="button" (click)="logout(true)" [disabled]="submitting()">Encerrar todas as sessões</button>
+          </div>
+        </div>
+      } @else if (mode === 'login') {
+        <form [formGroup]="loginForm" (ngSubmit)="submitLogin()" novalidate>
+          <mat-form-field appearance="outline">
+            <mat-label>Email</mat-label>
+            <input matInput type="email" formControlName="email" autocomplete="email" />
+            @if (loginForm.controls.email.invalid && loginForm.controls.email.touched) { <mat-error>Informe um email válido.</mat-error> }
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Senha</mat-label>
+            <input matInput type="password" formControlName="password" autocomplete="current-password" />
+            @if (loginForm.controls.password.invalid && loginForm.controls.password.touched) { <mat-error>Informe a senha.</mat-error> }
+          </mat-form-field>
+          <button matButton="filled" type="submit" [disabled]="submitting()">{{ submitting() ? 'Entrando…' : 'Entrar' }}</button>
+        </form>
+        <nav class="links" aria-label="Ajuda de acesso">
+          <a routerLink="/recuperar-acesso">Esqueci minha senha</a>
+          <a routerLink="/confirmar-email">Reenviar confirmação de email</a>
+          <a routerLink="/configuracao-inicial">Configuração inicial</a>
+        </nav>
+      } @else if (mode === 'confirm' && token) {
+        <p>Confirme o endereço associado a este link. Links expirados, reenviados ou já usados são recusados.</p>
+        <button matButton="filled" type="button" (click)="confirmEmail()" [disabled]="submitting()">Confirmar meu email</button>
+        <p class="links"><a routerLink="/entrar">Voltar para entrar</a></p>
+      } @else if (mode === 'confirm' || mode === 'forgot') {
+        <p>Informe o email. A resposta é sempre a mesma para não revelar quais contas existem.</p>
+        <form [formGroup]="emailForm" (ngSubmit)="submitEmailRequest()" novalidate>
+          <mat-form-field appearance="outline">
+            <mat-label>Email</mat-label>
+            <input matInput type="email" formControlName="email" autocomplete="email" />
+            @if (emailForm.controls.email.invalid && emailForm.controls.email.touched) { <mat-error>Informe um email válido.</mat-error> }
+          </mat-form-field>
+          <button matButton="filled" type="submit" [disabled]="submitting()">
+            {{ submitting() ? 'Solicitando…' : (mode === 'confirm' ? 'Enviar confirmação' : 'Enviar recuperação') }}
+          </button>
+        </form>
+        <p class="links"><a routerLink="/entrar">Voltar para entrar</a></p>
+      } @else if (mode === 'reset' && token) {
+        <form [formGroup]="resetForm" (ngSubmit)="resetPassword()" novalidate>
+          <mat-form-field appearance="outline">
+            <mat-label>Nova senha</mat-label>
+            <input matInput type="password" formControlName="newPassword" autocomplete="new-password" />
+            <mat-hint>Mínimo de 12 caracteres, com uma letra e um número.</mat-hint>
+            @if (resetForm.controls.newPassword.invalid && resetForm.controls.newPassword.touched) { <mat-error>A senha não atende à política.</mat-error> }
+          </mat-form-field>
+          <button matButton="filled" type="submit" [disabled]="submitting()">Redefinir senha</button>
+        </form>
+        <p class="links"><a routerLink="/entrar">Voltar para entrar</a></p>
+      } @else {
+        <div class="error-summary" role="alert">O link não contém um token válido.</div>
+        <p class="links"><a routerLink="/recuperar-acesso">Solicitar outro link</a></p>
+      }
+    </mat-card-content>
+  </mat-card>
+</section>

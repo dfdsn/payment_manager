@@ -1,8 +1,8 @@
 # Progresso de implementação — account_Manager
 
-Versão 1.0 • Atualizado em 24/09/2026.
+Versão 1.0 • Atualizado em 25/09/2026.
 
-**Estado atual: H01.1 em validação em 24/09/2026.** Implementação, contexto protegido, 25 unitários, 2 integrações PostgreSQL, frontend, arquitetura, JaCoCo e PIT foram aprovados. A validação PostgreSQL 17.6/concorrência/reinício está concluída; faltam JDK 21/CI e smoke full-stack pela interface. O bloqueio Docker anterior era restrição do sandbox do Codex, não indisponibilidade do Docker Desktop.
+**Estado atual: H02.1 concluída em 25/09/2026.** E01 permanece concluído e E02 está em andamento. O primeiro fluxo financeiro entrega cadastro idempotente e listagem paginada de despesa avulsa; quitação posterior de pendência continua reservada à H02.2.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 24/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 0 de 46 concluídas; 11 épicos ainda não concluídos. |
-| Critérios do PRD | CA-01 a CA-32 não executados. |
-| Provedores e infraestrutura | Pendências P00–P09 em `decisoes-pendentes.md`. |
-| Próxima ação | Repetir gates em JDK 21/CI e executar smoke full-stack pela interface; depois concluir H01.1 e iniciar H01.2. |
+| Histórias | 5 de 46 concluídas; E01 concluído e E02 em andamento. |
+| Critérios do PRD | CA-01 aprovado. CA-02 agora comprova uso de despesas pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro pendente/pago aprovado e aguarda a quitação da H02.2. |
+| Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
+| Próxima ação | Implementar e validar H02.2 — Quitar e identificar quem pagou. |
 
 ## Estados permitidos
 
@@ -31,10 +31,10 @@ Não representa novo épico funcional. Pode ser dividida em PRs pequenos sem ini
 
 | ID | Entrega | Estado | Evidência necessária |
 |---|---|---|---|
-| PREP-01 | Provar compatibilidade e fixar versões | Em validação | Testcontainers/PostgreSQL 17.6, unitários, ArchUnit, JaCoCo, PIT, frontend, build, audit e smoke aprovados. JDK 21/CI real pendentes. Evidência: `docs/evidencias/PREP-01.md`. |
-| PREP-02 | Estruturar repositório e execução local | Em validação | Wrappers/lockfile, camadas, Flyway, Compose PostgreSQL/Mailpit e comandos criados; V1/V2 aplicadas em PostgreSQL real. Execução full-stack completa ainda pendente. |
-| PREP-03 | Configurar CI e gates | Em validação | Workflows de CI/release, relatórios e limites implementados; PIT reprovou e depois aprovou sem reduzir gates. Execução em PR pendente por ausência de Git/remoto. |
-| PREP-04 | Preparar operação e documentação inicial | Em validação | Duas imagens, Compose image-only, migration explícita, README, scripts e guia P01–P09 preparados. Docker/VPS/publicação/backup/restauração não executados. |
+| PREP-01 | Provar compatibilidade e fixar versões | Concluído | CI `36038781176` em Java 21/Node 24.18 e repetições locais aprovaram Testcontainers/PostgreSQL 17.6, unitários, ArchUnit, JaCoCo, PIT, frontend, build, audit e smoke. P00 encerrada. |
+| PREP-02 | Estruturar repositório e execução local | Concluído | Wrappers/lockfile, camadas, Flyway, Compose PostgreSQL/Mailpit e comandos validados; E2E full-stack aplicou V1–V3 e exercitou UI/backend/banco/email local. |
+| PREP-03 | Configurar CI e gates | Concluído | Workflows e limites implementados; CI real do commit `737f46a` aprovada. Proteção de branch continua uma configuração do repositório a conferir, sem impedir a base técnica. |
+| PREP-04 | Preparar operação e documentação inicial | Concluído | Duas imagens, Compose image-only, migration explícita, README, scripts e guia P01–P09 preparados. Publicação, VPS, backup e restauração continuam corretamente não executados e dependentes de P01/P02/P06/P07. |
 
 ## Histórias do MVP
 
@@ -42,11 +42,11 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 
 | História | Entrega | Estado | Evidências |
 |---|---|---|---|
-| H01.1 | Configurar administrador e espaço | Em validação | Fluxo/contexto implementados. 25 unitários e 2 ITs PostgreSQL sem skip/falha/erro, 5 frontend, smoke, JaCoCo 100%/94,23% e PIT 90,32% aprovados. Falta JDK 21/CI e smoke full-stack real. Evidência: `docs/evidencias/H01.1.md`. |
-| H01.2 | Entrar, confirmar email e recuperar acesso | Não iniciado | — |
-| H01.3 | Convidar e aceitar o segundo membro | Não iniciado | — |
-| H01.4 | Aplicar papéis e gerenciar saída | Não iniciado | — |
-| H02.1 | Cadastrar e listar uma despesa avulsa | Não iniciado | — |
+| H01.1 | Configurar administrador e espaço | Concluído | Concorrência/reinício em PostgreSQL, CI Java 21 e E2E full-stack pela interface aprovados. Evidência: `docs/evidencias/H01.1.md`. |
+| H01.2 | Entrar, confirmar email e recuperar acesso | Concluído | 41 unitários, 4 ITs PostgreSQL, JaCoCo, PIT 90%, 11 frontend, E2E full-stack e entrega Gmail real de confirmação/recuperação aprovados. Evidência: `docs/evidencias/H01.2.md`. |
+| H01.3 | Convidar e aceitar o segundo membro | Concluído | 52 unitários, 7 ITs PostgreSQL, JaCoCo, PIT 78%, 17 frontend, E2E Mailpit e entrega/aceite Gmail real aprovados. Evidência: `docs/evidencias/H01.3.md`. |
+| H01.4 | Aplicar papéis e gerenciar saída | Concluído | 65 testes Java, 10 ITs PostgreSQL, JaCoCo 94,93%/80,52%, PIT 80%, 20 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H01.4.md`. |
+| H02.1 | Cadastrar e listar uma despesa avulsa | Concluído | 77 testes Java, 14 ITs PostgreSQL, JaCoCo 95,38%/84,26%, PIT 80%, 27 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H02.1.md`. |
 | H02.2 | Quitar e identificar quem pagou | Não iniciado | — |
 | H02.3 | Corrigir com proteção contra conflito | Não iniciado | — |
 | H02.4 | Desfazer quitação e cancelar | Não iniciado | — |
@@ -93,7 +93,11 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 
 | Verificação | Estado inicial | Evidência ao executar |
 |---|---|---|
-| CA-01 a CA-32 do PRD | Não executados | Registrar resultado individual, cenário, ambiente e evidência; não inferir aprovação a partir de cobertura. |
+| CA-01 — configuração, login e convite | Aprovado | E2E full-stack H01.1–H01.4, ITs PostgreSQL e entregas Gmail reais cobrem fechamento do setup, identidade destinatária, expiração, revogação e reenvio. |
+| CA-02 — uso pelos dois perfis | Em validação transversal | Matriz/bloqueio administrativo e cadastro/listagem da mesma despesa pelos dois papéis aprovados; ausência de WhatsApp será executada em E08. |
+| CA-03 — saída/remoção e transferência | Em validação transversal | Revogação, histórico de associação, vaga e transferência aprovados; responsabilidades/anexos/novo consentimento serão revalidados em E03/E04/E08. |
+| CA-04 — avulsa pendente/paga | Em validação transversal | Cadastro pendente e já pago, atraso e pagador inicial aprovados; quitação posterior de uma pendência e seu reflexo no histórico/dashboard dependem de H02.2/E06. |
+| CA-05 a CA-32 do PRD | Não executados | Registrar resultado individual, cenário, ambiente e evidência; não inferir aprovação a partir de cobertura. |
 | Email real | Não executado | Confirmação, convite, reset, expiração/reenvio; sem expor tokens. |
 | WhatsApp real | Não executado | Entrega ao administrador, ausência para convidado, agrupamento, quitação/falha/retomada. |
 | Groq real | Não executado | Extração por imagem, revisão, cota concorrente, retenção e fallback manual. |
@@ -130,19 +134,95 @@ Não incluir credenciais, números pessoais ou dados financeiros reais nas evid�
 
 ```text
 História / objetivo: H01.1 — Configurar administrador e espaço.
-Estado / responsável / data: Em validação / desenvolvimento / 24/09/2026.
+Estado / responsável / data: Concluído / desenvolvimento / 24/09/2026.
 Requisitos e critérios de aceite relacionados: RF-ACC-01; D11; setup único, atômico e persistente; defaults BRL/pt-BR/America/Sao_Paulo; responsividade, validação e proteção CSRF.
-Decisões e pendências aplicáveis: T04 registrada. Persistência real aprovada; P00 permanece somente por JDK 21/CI. Nenhuma conta externa é necessária.
-Branch / commit / PR: não disponível; o diretório recebido não contém .git.
+Decisões e pendências aplicáveis: T04 registrada. P00 encerrada; nenhuma conta externa é necessária.
+Branch / commit / PR: base `737f46a` em `main`; CI `36038781176`; trabalho posterior na branch local `h01-2-auth-access`.
 Arquivos e comportamento alterados: módulo identity em domínio/aplicação/infraestrutura/API; configuração de segurança; UI Angular; Compose/entrypoint; README e guias.
 Migrações e impacto sobre dados: V2 cria identity_users, family_spaces, space_memberships, installation_state e tabelas Spring Session. V1/V2 aplicadas em bancos PostgreSQL 17.6 efêmeros do Testcontainers; nenhum dado compartilhado alterado.
-Testes executados: 25 JUnit/Mockito/Spring/ArchUnit aprovados; InitialSetupPostgresIT e FlywayPostgresIT aprovados (2/0/0/0); 5 Vitest aprovados; build Angular aprovado; 1 smoke Playwright aprovado com APIs explicitamente interceptadas; 3 Compose válidos.
+Testes executados: 25 JUnit/Mockito/Spring/ArchUnit e 2 ITs originais aprovados; CI Java 21/Node 24.18 verde; E2E full-stack posterior repetiu setup desde banco vazio pela interface. A suíte atual, já com H01.2, mantém H01.1 verde em 41 unitários e 4 ITs.
 Cobertura e mutação aplicáveis: JaCoCo 100% linhas e 94,23% branches; PIT 90,32% (28/31), todos acima dos gates.
-Validação manual / integração real: persistência/concorrência/reinício executados em PostgreSQL 17.6 real. O smoke Playwright ainda usa interceptação e não representa integração full-stack.
-Limitações e cenários não executados: JDK local é 23 compilando release 21; CI/PR e smoke full-stack pela interface não executados. npm audit não repetiu por instalação global quebrada; PREP-01 já o aprovou e dependências não mudaram.
+Validação manual / integração real: persistência/concorrência/reinício executados em PostgreSQL 17.6 real; E2E full-stack executado com V1–V3, frontend, backend e Mailpit. CI confirmou JDK 21.
+Limitações e cenários não executados: nenhuma limitação material restante para os critérios da H01.1. O processo webServer do smoke interceptado ainda não encerra sozinho no Windows, sem invalidar a asserção nem o E2E full-stack.
 Documentação atualizada: README.md, docs/openapi.yaml, docs/guias/operacao.md, docs/decisoes-pendentes.md, docs/evidencias/H01.1.md e este arquivo.
-Condição de conclusão ou desbloqueio: gates em JDK 21/CI e smoke full-stack real de setup. Disputa concorrente e reinício já foram aprovados no IT PostgreSQL.
-Próximo passo: concluir JDK 21/CI e smoke full-stack; então H01.2 — entrar, confirmar email e recuperar acesso.
+Condição de conclusão ou desbloqueio: satisfeita em 24/09/2026.
+Próximo passo: H01.2 — entrar, confirmar email e recuperar acesso.
+```
+
+## Registro H01.2
+
+```text
+História / objetivo: H01.2 — Entrar, confirmar email e recuperar acesso.
+Estado / responsável / data: Concluído / desenvolvimento + Diego na validação Gmail / 24/09/2026.
+Requisitos e critérios de aceite relacionados: RF-ACC-02 a RF-ACC-04; D09, D10 e D12; sessão JDBC; confirmação; recuperação de uso único; expiração; revogação; entrega real de email.
+Decisões e pendências aplicáveis: T05 registrada. A parte de confirmação/recuperação de P04 foi validada; P04 segue aberta para o convite de H01.3. P08 continua aberta para parâmetros de rate limiting e não recebeu default silencioso.
+Branch / commit / PR: branch local h01-2-auth-access, base 737f46a; sem commit/PR novo nesta execução.
+Arquivos e comportamento alterados: identity nas camadas domínio/aplicação/infra/API; segurança e sessão; V3; SMTP/entrypoint/Compose; telas Angular e E2E; OpenAPI, README e evidência H01.2.
+Migrações e impacto sobre dados: V3 cria tokens de acesso com finalidade, hash, expiração, consumo e revogação. V1–V3 aplicadas em bancos efêmeros PostgreSQL 17.6 e no Compose descartável; nenhum banco compartilhado foi alterado.
+Testes executados: 41 unitários/HTTP/ArchUnit (0/0/0); 4 ITs Failsafe (0 ignorados/falhas/erros); 11 Vitest; build Angular; 1 E2E full-stack aprovado; smoke interceptado com asserção verde e processo interrompido depois; Compose full-local saudável.
+Cobertura e mutação aplicáveis: JaCoCo 99,48% linhas (192/193) e 89,02% branches (73/82) em domínio/aplicação; PIT 90% (56/62), linhas mutadas 99% (153/154).
+Validação manual / integração real: PostgreSQL 17.6, Spring Session JDBC e SMTP Mailpit reais locais. O E2E confirmou setup, confirmação, login inválido/válido, reset, revogação, token reutilizado e logout global. Gmail real confirmou entrega e consumo dos links de confirmação e recuperação; o reset terminou com 0 sessões residuais.
+Limitações e cenários não executados: convite Gmail pertence à H01.3. npm global do host continua quebrado; CLIs locais do lockfile executaram testes/build/E2E. A rede local usa inspeção TLS Avast; sua CA pública foi adicionada somente à imagem descartável do ensaio, sem desativar validação.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H01.1.md, docs/evidencias/H01.2.md e este arquivo.
+Condição de conclusão ou desbloqueio: satisfeita em 24/09/2026 com gates locais e entrega Gmail real de confirmação/recuperação.
+Próximo passo: H01.3 — convidar e aceitar o segundo membro, incluindo a validação do convite Gmail restante em P04.
+```
+
+## Registro H01.3
+
+```text
+História / objetivo: H01.3 — Convidar e aceitar o segundo membro.
+Estado / responsável / data: Concluído / desenvolvimento + Diego na validação Gmail / 24/09/2026.
+Requisitos e critérios de aceite relacionados: RF-ACC-05 a RF-ACC-07 e RF-ACC-11; D10/D12; administrador autorizado; email destinatário; sete dias; uso único; reenvio/revogação; máximo de dois membros; acesso GUEST ao mesmo espaço.
+Decisões e pendências aplicáveis: T06 registrada. P04 encerrada após entrega e aceite Gmail real; Mailpit continua tratado apenas como captura local.
+Branch / commit / PR: branch local `h01-3-invite-member`, base no commit local H01.2 `985cfd5`; sem publicação, deploy ou PR nesta execução.
+Arquivos e comportamento alterados: identity em aplicação/portas/infra/API; segurança; SMTP; V4; telas Angular de gestão/aceite; serviço frontend; E2E; OpenAPI, README, decisões e evidência H01.3.
+Migrações e impacto sobre dados: V4 cria space_invitations com FKs, hash único e um convite ativo por espaço. V1–V4 foram aplicadas somente em PostgreSQL 17.6 efêmero/Testcontainers e Compose descartável; nenhum banco compartilhado foi alterado.
+Testes executados: 52 unitários/HTTP/ArchUnit aprovados, 0 ignorados/falhas/erros; 7 ITs Failsafe aprovados, 0 ignorados/falhas/erros (3 específicos de convite); 17 Vitest; build Angular; 1 E2E full-stack aprovado. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V4 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 326/348 linhas (93,68%) e 112/140 branches (80%) em domínio/aplicação; PIT 78% (102/130), 91% de cobertura das linhas mutadas e força 87%; gates mantidos.
+Validação manual / integração real: Docker Desktop no contexto desktop-linux; fluxo local entre Chrome, Nginx, backend, PostgreSQL e Mailpit confirmou reenvio, link antigo recusado, aceite, mesmo espaço, papel GUEST e bloqueio de gestão. Em composição descartável separada, Gmail SMTP/STARTTLS entregou o convite e o destinatário o aceitou; PostgreSQL confirmou 1 convite consumido, 2 membros ativos, 1 GUEST confirmado e 1 espaço.
+Limitações e cenários não executados: nenhuma limitação material restante para H01.3. O npm global do host continua inconsistente; o CLI local do lockfile executou testes/build/E2E. A credencial, a CA exportada, contêineres e volumes descartáveis foram removidos após o ensaio Gmail.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H01.3.md e este arquivo.
+Condição de conclusão ou desbloqueio: satisfeita em 24/09/2026 com gates locais, PostgreSQL/Mailpit e entrega/aceite Gmail real.
+Próximo passo: H01.4 — aplicar papéis e gerenciar saída.
+```
+
+## Registro H01.4
+
+```text
+História / objetivo: H01.4 — Aplicar papéis e gerenciar saída.
+Estado / responsável / data: Concluído / desenvolvimento / 25/09/2026.
+Requisitos e critérios de aceite relacionados: RF-ACC-08 a RF-ACC-11; matriz de permissões; CA-02/CA-03; autorização no backend, remoção/saída, transferência, histórico, vaga e sessões.
+Decisões e pendências aplicáveis: T07 registrada. P09 permanece aberta para encerramento/exclusão definitiva. E03/E04/E08 revalidarão responsabilidades, anexos e consentimento WhatsApp quando seus módulos existirem.
+Branch / commit / PR: branch `h01-4-membership-lifecycle`, base `02310b8`; entrega registrada no Git ao final da execução, sem publicação de imagens, deploy ou PR.
+Arquivos e comportamento alterados: identity em aplicação/portas/infra/API; V5; tela Angular de membros; serviço frontend; E2E; OpenAPI, README, decisões e evidência H01.4.
+Migrações e impacto sobre dados: V5 adiciona encerramento auditável à associação e eventos de ciclo de membro. V1–V5 aplicadas em PostgreSQL 17.6 efêmero/Testcontainers e Compose descartável; nenhuma migração anterior foi editada e nenhum banco compartilhado foi alterado.
+Testes executados: 65 unitários/HTTP/ArchUnit; 10 ITs Failsafe (3 específicos H01.4); 20 Vitest; build Angular; 1 E2E full-stack. Todos finais aprovados, sem ignorados/falhas/erros. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V5 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 393/414 linhas (94,93%) e 124/154 branches (80,52%); PIT 80% (126/157), 93% das linhas mutadas cobertas e força 88%; gates mantidos.
+Validação manual / integração real: E2E Chromium em Nginx/backend/PostgreSQL/Mailpit comprovou transferência nos dois sentidos, atualização de permissões, saída, sessão revogada e vaga para novo convite. Mailpit foi apenas captura local; H01.4 não exigiu novo envio externo.
+Limitações e cenários não executados: despesas/responsabilidades/anexos/WhatsApp ainda não existem; somente identidade histórica e contrato de eventos foram concluídos. CA-02/CA-03 continuam parcialmente em validação nesses efeitos transversais. Encerramento do espaço/exclusão não foi implementado.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H01.4.md e este arquivo.
+Condição de conclusão ou desbloqueio: H01.4 e a demonstração própria do E01 satisfeitas em 25/09/2026; integrações futuras explicitamente diferidas conforme backlog.
+Próximo passo: H02.1 — cadastrar e listar uma despesa avulsa.
+```
+
+## Registro H02.1
+
+```text
+História / objetivo: H02.1 — Cadastrar e listar uma despesa avulsa.
+Estado / responsável / data: Concluído / desenvolvimento / 25/09/2026.
+Requisitos e critérios de aceite relacionados: RF-DES-01, parcela inicial de RF-DES-10, RF-WEB-04 a RF-WEB-06, D16–D18 e CA-02/CA-04; cadastro pendente/pago, autorização, isolamento, paginação, ordenação e idempotência.
+Decisões e pendências aplicáveis: T08 registrada. P08 permanece aberta somente para retenção/limpeza operacional da idempotência; a proteção durável atual está ativa. Categoria/responsável seguem para E03 e quitação posterior para H02.2.
+Branch / commit / PR: branch `h02-1-single-expense`, base `b2c8497`; entrega registrada no Git ao final da execução, sem publicação de imagens, deploy ou PR.
+Arquivos e comportamento alterados: novo módulo expenses nas quatro camadas; V6; rota/tela Angular `/despesas`; integração na navegação e E2E; OpenAPI, README, decisões e evidência H02.1.
+Migrações e impacto sobre dados: V6 cria despesas avulsas e reservas/resultados de idempotência, com NUMERIC, versão, auditoria e constraints. V1–V6 aplicadas em PostgreSQL 17.6 efêmero/Testcontainers e Compose descartável; nenhuma migração anterior foi editada e nenhum banco compartilhado foi alterado.
+Testes executados: 77 unitários/HTTP/ArchUnit; 14 ITs Failsafe (4 específicos H02.1); 27 Vitest; build Angular; 1 E2E full-stack. Todos finais aprovados, sem ignorados/falhas/erros. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V6 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 516/541 linhas (95,38%) e 182/216 branches (84,26%); PIT 80% (163/203), 94% das linhas mutadas cobertas e força 87%; gates mantidos.
+Validação manual / integração real: E2E Chromium em Nginx/backend/PostgreSQL/Mailpit comprovou administrador criando pendente vencida, convidado lendo-a e criando lançamento pago. Mailpit foi apenas captura local; H02.1 não introduziu entrega externa.
+Limitações e cenários não executados: quitação posterior, correção/histórico, cancelamento, lote, categorias e responsáveis seguem nas histórias definidas. Android/Edge reais continuam no aceite transversal. Retenção de idempotência permanece em P08.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H02.1.md e este arquivo.
+Condição de conclusão ou desbloqueio: critérios executáveis da H02.1 satisfeitos em 25/09/2026, sem antecipar H02.2.
+Próximo passo: H02.2 — quitar e identificar quem pagou.
 ```
 
 ## Registro de release: modelo
@@ -184,3 +264,13 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 24/09/2026 | Contrato OpenAPI 3.1 criado para os endpoints efetivamente implementados em H01.1, incluindo segredo de setup, CSRF, sessão, schemas e erros aplicáveis. Nenhum endpoint futuro foi inventado. |
 | 24/09/2026 | Diagnóstico fora do sandbox confirmou Docker Desktop 4.50.0/Engine 28.5.1, cliente Windows no contexto `desktop-linux` e servidor Linux/amd64 sobre WSL2. Dentro do sandbox, `.docker/config.json` e o named pipe retornam `Access is denied`; a indisponibilidade anterior era do isolamento. |
 | 24/09/2026 | Novo `backend/scripts/run-integration-tests.ps1` validado: no sandbox preservou o erro Docker e saiu 1 antes do Maven; pela execução oficial autorizada gerou relatórios novos e aprovou 25 unitários e 2 ITs (0 ignorados/falhas/erros), PostgreSQL 17.6 `postgres:17.6-alpine`, V1/V2 e `BUILD SUCCESS`. |
+| 24/09/2026 | GitHub Actions `36038781176` do commit `737f46a` aprovou backend/Testcontainers/JaCoCo/PIT em Temurin 21 e frontend/audit/build/smoke em Node 24.18.0. O E2E full-stack local repetido desde banco vazio encerrou H01.1 e P00. |
+| 24/09/2026 | H01.2 implementou confirmação, login, sessão JDBC, logout, recuperação, tokens de uso único, expiração e revogação. O E2E revelou a modularização do Boot 4: `flyway-core`/`spring-session-jdbc` sem seus starters não ativavam auto-configuração; os starters oficiais foram adotados e a execução limpa passou. |
+| 24/09/2026 | Gates finais H01.2: 41 unitários sem skip/falha/erro; 4 ITs Failsafe sem skip/falha/erro em PostgreSQL 17.6 e V1–V3; JaCoCo aprovado; PIT 90%; 11 testes frontend e build aprovados; E2E full-stack 1/1 aprovado com Mailpit. H01.2 permanece em validação exclusivamente por P04/Gmail real. |
+| 24/09/2026 | Revisão final da H01.2 passou a exigir `operationId` também nos 401 testados e atualizou o guia operacional para V1–V3 e SMTP Gmail via Docker secret. O primeiro recheck foi bloqueado no sandbox por PKIX; na execução autorizada, uma expectativa nova usou o código incorreto, foi corrigida para `AUTHENTICATION_REQUIRED` e o `verify -DskipITs` repetido terminou com 41 testes, 0 ignorados/falhas/erros, JaCoCo/ArchUnit aprovados e `BUILD SUCCESS`. |
+| 24/09/2026 | Validação Gmail real da H01.2 concluída: SMTP AUTH/STARTTLS saudável após confiar, somente na imagem descartável, a CA pública de inspeção Avast já confiada no Windows. Confirmação e recuperação chegaram à caixa externa e foram consumidas; banco confirmou email, tokens consumidos/não revogados e 0 sessões residuais. Segredo não foi versionado nem registrado. H01.2 concluída; convite real segue para H01.3/P04. |
+| 24/09/2026 | H01.3 iniciada após leitura integral dos contratos. H01.2 foi preservada no commit local `985cfd5` e a branch `h01-3-invite-member` foi criada. Regras derivadas: aceite cria/confirmar conta nova pelo token entregue ao email; conta confirmada preexistente precisa autenticar com a mesma identidade; vínculo ativo prévio, terceiro membro e substituição implícita de convite são recusados. |
+| 24/09/2026 | H01.3 implementada nas quatro camadas e UI com V4, token hash/uso único/sete dias, autorização administrativa, papel GUEST, limite/lock concorrente, reenvio/revogação e recuperação após falha SMTP. Regressão: 52 unitários, 7 ITs PostgreSQL 17.6, JaCoCo 93,68%/80%, PIT 78%, 17 frontend, build e E2E full-stack Mailpit aprovados. História permanece em validação externa somente por P04/Gmail real. |
+| 24/09/2026 | Convite Gmail real entregue e aceito com SMTP AUTH/STARTTLS e validação TLS ativa. PostgreSQL descartável confirmou 1 convite consumido, 2 membros ativos, 1 GUEST confirmado e 1 espaço. Credencial, CA exportada, contêineres e volumes foram removidos. P04 e H01.3 concluídas; próximo passo H01.4. |
+| 25/09/2026 | H01.4 implementou matriz de papéis, remoção/saída, transferência atômica, revogação JDBC, associação histórica e eventos V5. Regressão final: 65 Java, 10 ITs PostgreSQL, JaCoCo 94,93%/80,52%, PIT 80%, 20 frontend, build e E2E aprovados. H01.4 e o escopo próprio do E01 concluídos; parcelas transversais de CA-02/CA-03 seguem para E02/E03/E04/E08. |
+| 25/09/2026 | H02.1 implementou cadastro/listagem avulsa nas quatro camadas e UI, V6, autorização por associação, dinheiro decimal, datas, paginação, isolamento e idempotência concorrente. Regressão final: 77 Java, 14 ITs PostgreSQL, JaCoCo 95,38%/84,26%, PIT 80%, 27 frontend, build e E2E aprovados. H02.1 concluída; próximo passo H02.2. |

@@ -12,7 +12,7 @@ test('completes the protected initial setup and closes public registration', asy
       spaceId: 'space-id', spaceName: 'Minha casa', currency: 'BRL', locale: 'pt-BR', timeZone: 'America/Sao_Paulo',
     }) });
   });
-  await page.goto('/');
+  await page.goto('/configuracao-inicial');
   await page.getByLabel('Segredo temporário').fill('segredo-temporario');
   await page.getByLabel('Nome do administrador').fill('Diego');
   await page.getByLabel('Email').fill('diego@example.com');

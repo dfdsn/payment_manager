@@ -2,10 +2,144 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H01.1.
+  description: Contrato versionado dos endpoints implementados até H02.1.
 servers:
   - url: /api/v1
 paths:
+  /auth/csrf:
+    get:
+      operationId: issueCsrfToken
+      summary: Emite o cookie CSRF para uma operação mutável subsequente
+      responses:
+        "200":
+          description: Cookie XSRF-TOKEN emitido e nome do header retornado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [headerName]
+                properties:
+                  headerName:
+                    const: X-XSRF-TOKEN
+  /auth/login:
+    post:
+      operationId: login
+      summary: Autentica uma conta confirmada e cria uma sessão JDBC
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "204":
+          description: Sessão criada; o cookie SESSION é HttpOnly e SameSite=Lax.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Encerra a sessão atual
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "204":
+          description: Sessão atual invalidada.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/sessions:
+    delete:
+      operationId: revokeAllSessions
+      summary: Revoga todas as sessões JDBC da conta autenticada
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "204":
+          description: Todas as sessões da conta foram revogadas.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/email-confirmations:
+    post:
+      operationId: requestEmailConfirmation
+      summary: Solicita confirmação de email sem revelar se a conta existe
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailAccessRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/GenericEmailAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /auth/email-confirmations/confirm:
+    post:
+      operationId: confirmEmail
+      summary: Confirma o email com token de uso único válido por 24 horas
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccessTokenRequest"
+      responses:
+        "204":
+          description: Email confirmado e token consumido.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /auth/password-resets:
+    post:
+      operationId: requestPasswordReset
+      summary: Solicita recuperação sem revelar se a conta existe
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailAccessRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/GenericEmailAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /auth/password-resets/complete:
+    post:
+      operationId: completePasswordReset
+      summary: Redefine a senha com token de uso único válido por 30 minutos
+      description: O sucesso consome o token e revoga todas as sessões JDBC da conta.
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "204":
+          description: Senha redefinida, token consumido e sessões revogadas.
+        "400":
+          $ref: "#/components/responses/BadRequest"
   /setup/status:
     get:
       operationId: getInitialSetupStatus
@@ -65,6 +199,15 @@ paths:
       summary: Retorna identidade, papel e espaço do principal autenticado
       security:
         - sessionCookie: []
+      parameters:
+        - name: X-User-Activity
+          in: header
+          required: false
+          schema:
+            type: boolean
+          description: >-
+            Em GET, true registra atividade humana e renova somente a janela de
+            inatividade. A duração absoluta de 30 dias nunca é renovada.
       responses:
         "200":
           description: Associação ativa do usuário autenticado.
@@ -72,10 +215,288 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthenticatedUserContext"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: >-
-            Sem sessão autenticada (o filtro pode responder sem corpo) ou sem
-            associação ativa (ApiError com code ACTIVE_SPACE_ACCESS_NOT_FOUND).
+            Sessão válida, porém sem associação ativa (ApiError com code
+            ACTIVE_SPACE_ACCESS_NOT_FOUND).
+  /identity/invitations:
+    get:
+      operationId: getPendingInvitation
+      summary: Consulta o convite pendente do espaço administrado
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Estado do convite; somente administrador do espaço.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: inviteSecondMember
+      summary: Cria convite de uso único válido por sete dias
+      description: O envio SMTP ocorre após o commit; falha preserva o convite para reenvio explícito.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationRequest"
+      responses:
+        "201":
+          description: Convite persistido e envio solicitado.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Convite já pendente, destinatário indisponível ou espaço completo.
+        "503":
+          description: Convite persistido, mas a entrega SMTP falhou; pode ser reenviado.
+    delete:
+      operationId: revokeInvitation
+      summary: Revoga o convite pendente
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "204":
+          description: Convite revogado ou nenhum convite estava pendente.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /identity/invitations/resend:
+    post:
+      operationId: resendInvitation
+      summary: Substitui explicitamente o convite pendente e invalida o token anterior
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "202":
+          description: Novo token persistido e envio solicitado.
+        "404":
+          description: Não há convite válido pendente.
+        "503":
+          description: Novo convite persistido, mas a entrega SMTP falhou.
+  /invitations/preview:
+    get:
+      operationId: previewInvitation
+      summary: Valida o token e informa como a identidade destinatária deve aceitar
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 512
+      responses:
+        "200":
+          description: Convite utilizável; o token nunca é ecoado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationPreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /invitations/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Aceita o convite como segundo membro convidado
+      description: >-
+        Conta nova é criada com email confirmado pelo link. Conta já confirmada
+        precisa estar autenticada como o destinatário. A operação é serializada
+        por espaço, consome o token uma vez e respeita o limite de dois membros.
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationAcceptanceRequest"
+      responses:
+        "204":
+          description: Convite consumido e associação GUEST criada.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Conta existente confirmada precisa entrar antes de aceitar.
+        "403":
+          description: Sessão pertence a identidade diferente da destinatária.
+        "409":
+          description: Destinatário já associado ou espaço sem vaga.
+  /identity/members:
+    get:
+      operationId: listActiveSpaceMembers
+      summary: Lista os membros ativos e seus papéis no espaço da sessão
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Associações ativas do mesmo espaço.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SpaceMember"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /identity/members/{userId}:
+    delete:
+      operationId: removeGuestMember
+      summary: Encerra a associação do convidado e revoga todas as suas sessões
+      description: Preserva usuário e associação inativa para referências históricas e libera uma vaga.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Convidado removido e sessões revogadas.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Membro ativo não encontrado neste espaço.
+        "409":
+          description: Associação ou papel mudou durante a operação.
+  /identity/members/{userId}/administration-transfer:
+    post:
+      operationId: transferSpaceAdministration
+      summary: Transfere atomicamente a administração ao convidado ativo
+      description: O antigo administrador passa a convidado. Consentimento e número de WhatsApp não são transferidos.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Papéis trocados e evento durável registrado.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Convidado ativo não encontrado neste espaço.
+        "409":
+          description: Papéis mudaram concorrentemente ou destino inválido.
+  /identity/membership/leave:
+    post:
+      operationId: leaveCurrentSpace
+      summary: Permite ao convidado sair voluntariamente e revoga suas sessões
+      description: Administrador deve transferir a administração antes; encerramento de espaço não faz parte deste contrato.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "204":
+          description: Associação encerrada, histórico preservado e sessões revogadas.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Usuário ainda é administrador ou associação mudou concorrentemente.
+  /expenses:
+    post:
+      operationId: createOneOffExpense
+      summary: Cadastra uma despesa avulsa pendente ou já paga
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID preservado ao repetir a mesma intenção após falha de resposta.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpenseRequest"
+      responses:
+        "201":
+          description: Despesa criada; Location identifica o recurso.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+        "200":
+          description: Repetição da mesma chave e payload; retorna a despesa original sem duplicar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: A chave já foi utilizada com outro payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listExpenses
+      summary: Lista somente as despesas do espaço ativo do usuário
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [REFERENCE_DATE, AMOUNT, DESCRIPTION]
+            default: REFERENCE_DATE
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: ASC
+      responses:
+        "200":
+          description: Página com ordenação estável e atraso calculado no fuso do espaço.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpensePage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 components:
   securitySchemes:
     sessionCookie:
@@ -101,7 +522,223 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ApiError"
+    Unauthorized:
+      description: Sessão ausente/expirada ou credenciais inválidas, conforme o endpoint.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Forbidden:
+      description: Principal autenticado sem associação ativa ou sem o papel exigido no espaço.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    GenericEmailAccepted:
+      description: Resposta genérica; não confirma existência nem estado da conta.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/GenericEmailResponse"
+  parameters:
+    MemberUserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
+    CreateExpenseRequest:
+      type: object
+      additionalProperties: false
+      required: [description, amount, status]
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 200
+        amount:
+          type: string
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          example: "150.00"
+        status:
+          type: string
+          enum: [PENDING, PAID]
+        dueDate:
+          type: [string, "null"]
+          format: date
+          description: Obrigatório para PENDING; opcional para PAID.
+        paymentDate:
+          type: [string, "null"]
+          format: date
+          description: Obrigatório para PAID e ausente para PENDING.
+        notes:
+          type: [string, "null"]
+          maxLength: 2000
+    Expense:
+      type: object
+      required: [id, origin, description, amount, currency, status, referenceDate, overdue,
+        createdByUserId, createdByDisplayName, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        origin: { const: ONE_OFF }
+        description: { type: string }
+        amount:
+          type: string
+          pattern: '^\d+\.\d{2}$'
+        currency: { const: BRL }
+        status: { type: string, enum: [PENDING, PAID] }
+        dueDate: { type: [string, "null"], format: date }
+        paymentDate: { type: [string, "null"], format: date }
+        paidAmount:
+          type: [string, "null"]
+          pattern: '^\d+\.\d{2}$'
+        referenceDate: { type: string, format: date }
+        overdue:
+          type: boolean
+          description: Somente PENDING com vencimento anterior à data local do espaço.
+        categoryName:
+          type: [string, "null"]
+          description: Nulo até categorias serem implementadas; interface mostra Sem categoria.
+        responsibleUserId: { type: [string, "null"], format: uuid }
+        notes: { type: [string, "null"] }
+        createdByUserId: { type: string, format: uuid }
+        createdByDisplayName: { type: string }
+        paidByUserId: { type: [string, "null"], format: uuid }
+        paidByDisplayName: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer, format: int64, minimum: 0 }
+    ExpensePage:
+      type: object
+      required: [content, page, size, totalElements, totalPages, sort, direction]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/Expense"
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1, maximum: 100 }
+        totalElements: { type: integer, format: int64, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
+        sort: { type: string, enum: [REFERENCE_DATE, AMOUNT, DESCRIPTION] }
+        direction: { type: string, enum: [ASC, DESC] }
+    SpaceMember:
+      type: object
+      required: [userId, displayName, email, role, currentUser]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [ADMINISTRATOR, GUEST]
+        currentUser:
+          type: boolean
+    InvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+    InvitationAcceptanceRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          maxLength: 512
+        displayName:
+          type: [string, "null"]
+          minLength: 2
+          maxLength: 100
+          description: Obrigatório somente para conta nova.
+        password:
+          type: [string, "null"]
+          format: password
+          minLength: 12
+          maxLength: 72
+          description: Obrigatória somente para conta nova; máximo real de 72 bytes UTF-8.
+    InvitationState:
+      type: object
+      required: [pending]
+      properties:
+        pending:
+          type: boolean
+        invitedEmail:
+          type: [string, "null"]
+          format: email
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    InvitationPreview:
+      type: object
+      required: [spaceName, existingAccount, loginRequired, authenticatedAsInvitee]
+      properties:
+        spaceName:
+          type: string
+        existingAccount:
+          type: boolean
+        loginRequired:
+          type: boolean
+        authenticatedAsInvitee:
+          type: boolean
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    EmailAccessRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    AccessTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: Token opaco; somente o hash SHA-256 é persistido.
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 72
+          description: Até 72 bytes UTF-8, contendo ao menos uma letra e um número.
+    GenericEmailResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: Texto deliberadamente genérico contra enumeração de contas.
     SetupStatus:
       type: object
       required: [status]

@@ -1,0 +1,117 @@
+package com.malyah.accountmanager.expenses.application;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
+
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.UUID;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import com.malyah.accountmanager.expenses.application.port.ExpenseRepository;
+import com.malyah.accountmanager.expenses.domain.ExpenseStatus;
+import com.malyah.accountmanager.identity.application.AuthenticatedUserContext;
+import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
+import com.malyah.accountmanager.identity.domain.SpaceRole;
+
+class ExpenseServiceTest {
+    private static final UUID EXPENSE = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final UUID SPACE = UUID.fromString("00000000-0000-0000-0000-000000000002");
+    private static final UUID USER = UUID.fromString("00000000-0000-0000-0000-000000000003");
+    private static final UUID KEY = UUID.fromString("00000000-0000-0000-0000-000000000004");
+    private static final Instant NOW = Instant.parse("2026-09-25T13:00:00Z");
+
+    private ExpenseRepository repository;
+    private ExpenseService service;
+
+    @BeforeEach
+    void setUp() {
+        repository = mock(ExpenseRepository.class);
+        AuthenticatedUserContextQuery context = email -> new AuthenticatedUserContext(
+                USER, "Pessoa", email, SPACE, "Casa", SpaceRole.GUEST, "BRL", "pt-BR", "America/Sao_Paulo");
+        service = new ExpenseService(repository, context, () -> EXPENSE, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    void createsPendingExpenseForAuthenticatedSpaceAndMapsCanonicalMoney() {
+        var stored = stored(ExpenseStatus.PENDING, LocalDate.of(2026, 9, 24), null);
+        given(repository.createIdempotently(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(stored, false));
+
+        var result = service.create("guest@example.com", new CreateOneOffExpenseCommand(
+                "Energia", "150", ExpenseStatus.PENDING, LocalDate.of(2026, 9, 24), null, null, KEY));
+
+        assertThat(result.replayed()).isFalse();
+        assertThat(result.expense().amount()).isEqualTo("150.00");
+        assertThat(result.expense().currency()).isEqualTo("BRL");
+        assertThat(result.expense().overdue()).isTrue();
+        assertThat(result.expense().categoryName()).isNull();
+        assertThat(result.expense().responsibleUserId()).isNull();
+    }
+
+    @Test
+    void mapsPaidExpenseAndIdempotentReplay() {
+        var stored = stored(ExpenseStatus.PAID, null, LocalDate.of(2026, 9, 25));
+        given(repository.createIdempotently(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(stored, true));
+
+        var result = service.create("guest@example.com", new CreateOneOffExpenseCommand(
+                "Mercado", "150.00", ExpenseStatus.PAID, null, LocalDate.of(2026, 9, 25), "Pago", KEY));
+
+        assertThat(result.replayed()).isTrue();
+        assertThat(result.expense().paymentDate()).isEqualTo(LocalDate.of(2026, 9, 25));
+        assertThat(result.expense().paidAmount()).isEqualTo("150.00");
+        assertThat(result.expense().paidByUserId()).isEqualTo(USER);
+        assertThat(result.expense().overdue()).isFalse();
+    }
+
+    @Test
+    void listsStablePageAndCalculatesTotalPages() {
+        given(repository.findBySpace(SPACE, new ExpenseListQuery(1, 2, ExpenseSort.AMOUNT, SortDirection.DESC)))
+                .willReturn(new StoredExpensePage(List.of(
+                        stored(ExpenseStatus.PENDING, LocalDate.of(2026, 9, 25), null)), 5));
+
+        var page = service.list("guest@example.com",
+                new ExpenseListQuery(1, 2, ExpenseSort.AMOUNT, SortDirection.DESC));
+
+        assertThat(page.totalPages()).isEqualTo(3);
+        assertThat(page.totalElements()).isEqualTo(5);
+        assertThat(page.content()).singleElement().satisfies(expense -> assertThat(expense.overdue()).isFalse());
+    }
+
+    @Test
+    void rejectsMissingKeyAndInvalidPagination() {
+        assertThatThrownBy(() -> service.create("guest@example.com", new CreateOneOffExpenseCommand(
+                "Conta", "1.00", ExpenseStatus.PENDING, LocalDate.now(), null, null, null)))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+        assertInvalidQuery(new ExpenseListQuery(-1, 20, ExpenseSort.REFERENCE_DATE, SortDirection.ASC));
+        assertInvalidQuery(new ExpenseListQuery(0, 0, ExpenseSort.REFERENCE_DATE, SortDirection.ASC));
+        assertInvalidQuery(new ExpenseListQuery(0, 101, ExpenseSort.REFERENCE_DATE, SortDirection.ASC));
+        assertInvalidQuery(new ExpenseListQuery(0, 20, null, SortDirection.ASC));
+        assertInvalidQuery(new ExpenseListQuery(0, 20, ExpenseSort.REFERENCE_DATE, null));
+        assertThatThrownBy(() -> service.list("guest@example.com", null))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
+    private void assertInvalidQuery(ExpenseListQuery query) {
+        assertThatThrownBy(() -> service.list("guest@example.com", query))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
+    private StoredExpense stored(ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate) {
+        return new StoredExpense(EXPENSE, SPACE, status == ExpenseStatus.PAID ? "Mercado" : "Energia",
+                new BigDecimal("150.00"), status, dueDate, paymentDate,
+                status == ExpenseStatus.PAID ? new BigDecimal("150.00") : null,
+                null, USER, "Pessoa", status == ExpenseStatus.PAID ? USER : null,
+                status == ExpenseStatus.PAID ? "Pessoa" : null, NOW, 0);
+    }
+}

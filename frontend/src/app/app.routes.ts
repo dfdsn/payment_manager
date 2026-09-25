@@ -1,7 +1,18 @@
 import { Routes } from '@angular/router';
 import { InitialSetupComponent } from './identity/initial-setup.component';
+import { AccountAccessComponent } from './identity/account-access.component';
+import { InvitationComponent } from './identity/invitation.component';
+import { ExpenseComponent } from './expenses/expense.component';
 
 export const routes: Routes = [
-  { path: '', component: InitialSetupComponent },
-  { path: '**', redirectTo: '' },
+  { path: '', redirectTo: 'entrar', pathMatch: 'full' },
+  { path: 'entrar', component: AccountAccessComponent, data: { mode: 'login' } },
+  { path: 'confirmar-email', component: AccountAccessComponent, data: { mode: 'confirm' } },
+  { path: 'recuperar-acesso', component: AccountAccessComponent, data: { mode: 'forgot' } },
+  { path: 'redefinir-senha', component: AccountAccessComponent, data: { mode: 'reset' } },
+  { path: 'membros', component: InvitationComponent, data: { mode: 'manage' } },
+  { path: 'despesas', component: ExpenseComponent },
+  { path: 'aceitar-convite', component: InvitationComponent, data: { mode: 'accept' } },
+  { path: 'configuracao-inicial', component: InitialSetupComponent },
+  { path: '**', redirectTo: 'entrar' },
 ];

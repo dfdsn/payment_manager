@@ -1,0 +1,74 @@
+import { TestBed } from '@angular/core/testing';
+import { provideHttpClient, withXsrfConfiguration } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { AccountAccessService } from './account-access.service';
+
+describe('AccountAccessService', () => {
+  let service: AccountAccessService;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(withXsrfConfiguration({ cookieName: 'XSRF-TOKEN', headerName: 'X-XSRF-TOKEN' })),
+        provideHttpClientTesting(),
+      ],
+    });
+    service = TestBed.inject(AccountAccessService);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  it('obtains CSRF before posting credentials', () => {
+    service.login('admin@example.com', 'senha').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    const login = http.expectOne('/api/v1/auth/login');
+    expect(login.request.method).toBe('POST');
+    expect(login.request.body).toEqual({ email: 'admin@example.com', password: 'senha' });
+    login.flush(null);
+  });
+
+  it('marks context lookup as explicit human activity', () => {
+    service.context().subscribe();
+    const context = http.expectOne('/api/v1/identity/me');
+    expect(context.request.headers.get('X-User-Activity')).toBe('true');
+    context.flush({});
+  });
+
+  it('uses the public generic recovery endpoint without exposing tokens', () => {
+    service.requestPasswordReset('person@example.com').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    const reset = http.expectOne('/api/v1/auth/password-resets');
+    expect(reset.request.body).toEqual({ email: 'person@example.com' });
+    reset.flush({ message: 'Resposta genérica' });
+  });
+
+  it('uses CSRF for invitation mutations and never sends a raw token in preview path', () => {
+    service.invite('guest@example.com').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    const invite = http.expectOne('/api/v1/identity/invitations');
+    expect(invite.request.body).toEqual({ email: 'guest@example.com' });
+    invite.flush(null);
+
+    service.previewInvitation('opaque-token').subscribe();
+    const preview = http.expectOne(request => request.url === '/api/v1/invitations/preview');
+    expect(preview.request.params.get('token')).toBe('opaque-token');
+    expect(preview.request.method).toBe('GET');
+    preview.flush({});
+  });
+
+  it('uses protected membership endpoints for transfer, removal and voluntary exit', () => {
+    service.transferAdministration('guest-id').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    http.expectOne({ method: 'POST', url: '/api/v1/identity/members/guest-id/administration-transfer' }).flush(null);
+
+    service.removeMember('guest-id').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    http.expectOne({ method: 'DELETE', url: '/api/v1/identity/members/guest-id' }).flush(null);
+
+    service.leaveSpace().subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    http.expectOne({ method: 'POST', url: '/api/v1/identity/membership/leave' }).flush(null);
+  });
+});
