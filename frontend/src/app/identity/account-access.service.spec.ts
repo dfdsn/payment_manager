@@ -43,4 +43,18 @@ describe('AccountAccessService', () => {
     expect(reset.request.body).toEqual({ email: 'person@example.com' });
     reset.flush({ message: 'Resposta genérica' });
   });
+
+  it('uses CSRF for invitation mutations and never sends a raw token in preview path', () => {
+    service.invite('guest@example.com').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({ headerName: 'X-XSRF-TOKEN' });
+    const invite = http.expectOne('/api/v1/identity/invitations');
+    expect(invite.request.body).toEqual({ email: 'guest@example.com' });
+    invite.flush(null);
+
+    service.previewInvitation('opaque-token').subscribe();
+    const preview = http.expectOne(request => request.url === '/api/v1/invitations/preview');
+    expect(preview.request.params.get('token')).toBe('opaque-token');
+    expect(preview.request.method).toBe('GET');
+    preview.flush({});
+  });
 });

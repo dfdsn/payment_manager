@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H01.2.
+  description: Contrato versionado dos endpoints implementados até H01.3.
 servers:
   - url: /api/v1
 paths:
@@ -221,6 +221,123 @@ paths:
           description: >-
             Sessão válida, porém sem associação ativa (ApiError com code
             ACTIVE_SPACE_ACCESS_NOT_FOUND).
+  /identity/invitations:
+    get:
+      operationId: getPendingInvitation
+      summary: Consulta o convite pendente do espaço administrado
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Estado do convite; somente administrador do espaço.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: inviteSecondMember
+      summary: Cria convite de uso único válido por sete dias
+      description: O envio SMTP ocorre após o commit; falha preserva o convite para reenvio explícito.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationRequest"
+      responses:
+        "201":
+          description: Convite persistido e envio solicitado.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Convite já pendente, destinatário indisponível ou espaço completo.
+        "503":
+          description: Convite persistido, mas a entrega SMTP falhou; pode ser reenviado.
+    delete:
+      operationId: revokeInvitation
+      summary: Revoga o convite pendente
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "204":
+          description: Convite revogado ou nenhum convite estava pendente.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /identity/invitations/resend:
+    post:
+      operationId: resendInvitation
+      summary: Substitui explicitamente o convite pendente e invalida o token anterior
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      responses:
+        "202":
+          description: Novo token persistido e envio solicitado.
+        "404":
+          description: Não há convite válido pendente.
+        "503":
+          description: Novo convite persistido, mas a entrega SMTP falhou.
+  /invitations/preview:
+    get:
+      operationId: previewInvitation
+      summary: Valida o token e informa como a identidade destinatária deve aceitar
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 512
+      responses:
+        "200":
+          description: Convite utilizável; o token nunca é ecoado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationPreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /invitations/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Aceita o convite como segundo membro convidado
+      description: >-
+        Conta nova é criada com email confirmado pelo link. Conta já confirmada
+        precisa estar autenticada como o destinatário. A operação é serializada
+        por espaço, consome o token uma vez e respeita o limite de dois membros.
+      security:
+        - xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationAcceptanceRequest"
+      responses:
+        "204":
+          description: Convite consumido e associação GUEST criada.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Conta existente confirmada precisa entrar antes de aceitar.
+        "403":
+          description: Sessão pertence a identidade diferente da destinatária.
+        "409":
+          description: Destinatário já associado ou espaço sem vaga.
 components:
   securitySchemes:
     sessionCookie:
@@ -252,6 +369,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ApiError"
+    Forbidden:
+      description: Principal autenticado sem papel administrativo no espaço.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
     GenericEmailAccepted:
       description: Resposta genérica; não confirma existência nem estado da conta.
       content:
@@ -259,6 +382,58 @@ components:
           schema:
             $ref: "#/components/schemas/GenericEmailResponse"
   schemas:
+    InvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+    InvitationAcceptanceRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          maxLength: 512
+        displayName:
+          type: [string, "null"]
+          minLength: 2
+          maxLength: 100
+          description: Obrigatório somente para conta nova.
+        password:
+          type: [string, "null"]
+          format: password
+          minLength: 12
+          maxLength: 72
+          description: Obrigatória somente para conta nova; máximo real de 72 bytes UTF-8.
+    InvitationState:
+      type: object
+      required: [pending]
+      properties:
+        pending:
+          type: boolean
+        invitedEmail:
+          type: [string, "null"]
+          format: email
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    InvitationPreview:
+      type: object
+      required: [spaceName, existingAccount, loginRequired, authenticatedAsInvitee]
+      properties:
+        spaceName:
+          type: string
+        existingAccount:
+          type: boolean
+        loginRequired:
+          type: boolean
+        authenticatedAsInvitee:
+          type: boolean
     LoginRequest:
       type: object
       additionalProperties: false

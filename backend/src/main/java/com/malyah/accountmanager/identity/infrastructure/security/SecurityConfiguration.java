@@ -30,11 +30,12 @@ public class SecurityConfiguration {
 
         http
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(HttpMethod.GET, "/setup/status", "/actuator/health", "/auth/csrf").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/setup/status", "/actuator/health", "/auth/csrf", "/invitations/preview").permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/setup", "/auth/login", "/auth/email-confirmations",
                                 "/auth/email-confirmations/confirm", "/auth/password-resets",
-                                "/auth/password-resets/complete").permitAll()
+                                "/auth/password-resets/complete", "/invitations/accept").permitAll()
                         .anyRequest().authenticated())
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfRepository)

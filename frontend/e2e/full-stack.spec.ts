@@ -3,6 +3,8 @@ import { expect, request as playwrightRequest, test } from '@playwright/test';
 const email = 'admin@example.com';
 const initialPassword = 'frase segura 2026';
 const newPassword = 'nova senha segura 2026';
+const guestEmail = 'guest@example.com';
+const guestPassword = 'senha convidada 2026';
 
 test('runs setup, email confirmation, login, reset and session revocation against real services', async ({ browser, page }) => {
   await page.goto('/configuracao-inicial');
@@ -32,6 +34,35 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByLabel('Senha').fill(initialPassword);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
+
+  await page.getByRole('link', { name: 'Convidar ou gerenciar o segundo membro' }).click();
+  await page.getByLabel('Email do convidado').fill(guestEmail);
+  await page.getByRole('button', { name: 'Enviar convite' }).click();
+  await expect(page.getByText('Convite criado e envio solicitado.')).toBeVisible();
+  const oldInvitationLink = await mailLink('aceitar-convite');
+  await page.getByRole('button', { name: 'Reenviar e substituir link' }).click();
+  await expect(page.getByText(/link anterior deixou de funcionar/)).toBeVisible();
+  const invitationLink = await mailLink('aceitar-convite', oldInvitationLink);
+
+  const guestContext = await browser.newContext();
+  const guestPage = await guestContext.newPage();
+  await guestPage.goto(oldInvitationLink);
+  await expect(guestPage.getByText(/inválido, expirou, já foi utilizado ou foi substituído/)).toBeVisible();
+  await guestPage.goto(invitationLink);
+  await expect(guestPage.getByText(/histórico completo/)).toBeVisible();
+  await guestPage.getByLabel('Seu nome').fill('Pessoa Convidada');
+  await guestPage.getByLabel('Senha').fill(guestPassword);
+  await guestPage.getByRole('button', { name: 'Criar conta e aceitar' }).click();
+  await expect(guestPage.getByText(/Convite aceito/)).toBeVisible();
+  await guestPage.goto('/entrar');
+  await guestPage.getByRole('textbox', { name: 'Email', exact: true }).fill(guestEmail);
+  await guestPage.getByLabel('Senha').fill(guestPassword);
+  await guestPage.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(guestPage.getByText(/Você entrou em/)).toContainText('Minha casa');
+  await expect(guestPage.getByText(/como convidado/)).toBeVisible();
+  await guestPage.goto('/membros');
+  await expect(guestPage.getByText(/Somente o administrador/)).toBeVisible();
+  await guestContext.close();
 
   const recoveryContext = await browser.newContext();
   const recoveryPage = await recoveryContext.newPage();
@@ -69,7 +100,10 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByRole('region', { name: 'Entrar' })).toBeVisible();
 });
 
-async function mailLink(path: 'confirmar-email' | 'redefinir-senha'): Promise<string> {
+async function mailLink(
+  path: 'confirmar-email' | 'redefinir-senha' | 'aceitar-convite',
+  excluded = '',
+): Promise<string> {
   const mailpit = await playwrightRequest.newContext({ baseURL: 'http://127.0.0.1:8025' });
   try {
     let link = '';
@@ -82,7 +116,7 @@ async function mailLink(path: 'confirmar-email' | 'redefinir-senha'): Promise<st
         if (!response.ok()) continue;
         const body = await response.json() as { Text?: string };
         const match = body.Text?.match(new RegExp(`http://localhost:8080/${path}\\?token=[A-Za-z0-9_-]+`));
-        if (match) {
+        if (match && match[0] !== excluded) {
           link = match[0];
           return link;
         }

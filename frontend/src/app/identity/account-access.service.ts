@@ -14,6 +14,19 @@ export interface AuthenticatedUserContext {
   timeZone: string;
 }
 
+export interface InvitationState {
+  pending: boolean;
+  invitedEmail: string | null;
+  expiresAt: string | null;
+}
+
+export interface InvitationPreview {
+  spaceName: string;
+  existingAccount: boolean;
+  loginRequired: boolean;
+  authenticatedAsInvitee: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AccountAccessService {
   private readonly http = inject(HttpClient);
@@ -55,6 +68,32 @@ export class AccountAccessService {
   resetPassword(token: string, newPassword: string) {
     return this.withCsrf(() => this.http.post<void>(
       `${this.endpoint}/password-resets/complete`, { token, newPassword }));
+  }
+
+  currentInvitation() {
+    return this.http.get<InvitationState>('/api/v1/identity/invitations');
+  }
+
+  invite(email: string) {
+    return this.withCsrf(() => this.http.post<void>('/api/v1/identity/invitations', { email }));
+  }
+
+  resendInvitation() {
+    return this.withCsrf(() => this.http.post<void>('/api/v1/identity/invitations/resend', {}));
+  }
+
+  revokeInvitation() {
+    return this.withCsrf(() => this.http.delete<void>('/api/v1/identity/invitations'));
+  }
+
+  previewInvitation(token: string) {
+    return this.http.get<InvitationPreview>('/api/v1/invitations/preview', { params: { token } });
+  }
+
+  acceptInvitation(token: string, displayName?: string, password?: string) {
+    return this.withCsrf(() => this.http.post<void>('/api/v1/invitations/accept', {
+      token, displayName: displayName || null, password: password || null,
+    }));
   }
 
   private withCsrf<T>(operation: () => import('rxjs').Observable<T>) {

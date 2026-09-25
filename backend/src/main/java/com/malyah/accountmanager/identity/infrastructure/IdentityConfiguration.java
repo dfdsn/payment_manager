@@ -35,6 +35,10 @@ import com.malyah.accountmanager.identity.application.port.CredentialsRepository
 import com.malyah.accountmanager.identity.application.port.PasswordVerifier;
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
 import com.malyah.accountmanager.identity.domain.PasswordPolicy;
+import com.malyah.accountmanager.identity.application.InvitationService;
+import com.malyah.accountmanager.identity.application.InvitationUseCase;
+import com.malyah.accountmanager.identity.application.port.InvitationEmailSender;
+import com.malyah.accountmanager.identity.application.port.InvitationRepository;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "spring.datasource.url")
@@ -96,6 +100,35 @@ class IdentityConfiguration {
             @Value("${app.public-base-url}") String publicBaseUrl,
             @Value("${app.mail.from}") String from) {
         return new SmtpAccessEmailSender(mailSender, publicBaseUrl, from);
+    }
+
+    @Bean
+    InvitationRepository invitationRepository(JdbcTemplate jdbcTemplate) {
+        return new JdbcInvitationRepository(jdbcTemplate);
+    }
+
+    @Bean
+    InvitationEmailSender invitationEmailSender(
+            JavaMailSender mailSender,
+            @Value("${app.public-base-url}") String publicBaseUrl,
+            @Value("${app.mail.from}") String from) {
+        return new SmtpInvitationEmailSender(mailSender, publicBaseUrl, from);
+    }
+
+    @Bean
+    InvitationUseCase invitationUseCase(
+            InvitationRepository repository,
+            AccessTokenCodec tokenCodec,
+            IdentifierGenerator identifierGenerator,
+            PasswordHasher passwordHasher,
+            PasswordPolicy passwordPolicy,
+            Clock applicationClock,
+            InvitationEmailSender emailSender,
+            PlatformTransactionManager transactionManager) {
+        var service = new InvitationService(
+                repository, tokenCodec, identifierGenerator, passwordHasher, passwordPolicy, applicationClock);
+        return new TransactionalInvitationUseCase(
+                service, emailSender, new TransactionTemplate(transactionManager));
     }
 
     @Bean

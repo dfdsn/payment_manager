@@ -26,6 +26,7 @@ import com.malyah.accountmanager.identity.infrastructure.security.SessionLifetim
 import com.malyah.accountmanager.identity.application.InitialSetupResult;
 import com.malyah.accountmanager.identity.application.InitialSetupStatus;
 import com.malyah.accountmanager.identity.application.InitialSetupUseCase;
+import com.malyah.accountmanager.identity.application.InvitationUseCase;
 import com.malyah.accountmanager.identity.application.SetupAlreadyCompletedException;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContext;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
@@ -41,6 +42,9 @@ class InitialSetupHttpTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @MockitoBean
+    private InvitationUseCase invitationUseCase;
 
     @MockitoBean
     private InitialSetupUseCase useCase;

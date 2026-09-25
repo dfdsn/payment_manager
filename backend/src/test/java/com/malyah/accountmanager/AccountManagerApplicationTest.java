@@ -8,6 +8,7 @@ import com.malyah.accountmanager.identity.application.InitialSetupUseCase;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.identity.application.AccountAccessUseCase;
 import com.malyah.accountmanager.identity.application.LoginUseCase;
+import com.malyah.accountmanager.identity.application.InvitationUseCase;
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
 
 @SpringBootTest(properties = {
@@ -26,6 +27,9 @@ class AccountManagerApplicationTest {
 
     @MockitoBean
     private LoginUseCase loginUseCase;
+
+    @MockitoBean
+    private InvitationUseCase invitationUseCase;
 
     @MockitoBean
     private SessionRevoker sessionRevoker;

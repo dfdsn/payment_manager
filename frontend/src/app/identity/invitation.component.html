@@ -1,0 +1,63 @@
+<section class="access-container" aria-labelledby="invitation-title">
+  <mat-card appearance="outlined">
+    <mat-card-header>
+      <mat-card-title id="invitation-title">{{ mode === 'manage' ? 'Segundo membro' : 'Aceitar convite' }}</mat-card-title>
+      <mat-card-subtitle>Compartilhe o espaço familiar com uma segunda pessoa.</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      @if (errorMessage()) { <div class="error-summary" role="alert">{{ errorMessage() }}</div> }
+      @if (message()) { <div class="success-summary" role="status">{{ message() }}</div> }
+
+      @if (mode === 'manage' && context()?.role === 'GUEST') {
+        <p>Somente o administrador pode convidar ou revogar membros.</p>
+        <p class="links"><a routerLink="/entrar">Voltar</a></p>
+      } @else if (mode === 'manage' && context()?.role === 'ADMINISTRATOR' && state(); as invitation) {
+        @if (invitation.pending) {
+          <p>Há um convite pendente para <strong>{{ invitation.invitedEmail }}</strong>, válido até {{ invitation.expiresAt }}.</p>
+          <p>O convidado poderá ver todo o histórico deste espaço ao aceitar.</p>
+          <div class="actions">
+            <button matButton="filled" type="button" (click)="resend()" [disabled]="submitting()">Reenviar e substituir link</button>
+            <button matButton="outlined" type="button" (click)="revoke()" [disabled]="submitting()">Revogar convite</button>
+          </div>
+        } @else {
+          <p>O convidado terá acesso ao histórico completo deste espaço e não terá privilégios administrativos.</p>
+          <form [formGroup]="inviteForm" (ngSubmit)="invite()" novalidate>
+            <mat-form-field appearance="outline">
+              <mat-label>Email do convidado</mat-label>
+              <input matInput type="email" formControlName="email" autocomplete="email" />
+              @if (inviteForm.controls.email.invalid && inviteForm.controls.email.touched) { <mat-error>Informe um email válido.</mat-error> }
+            </mat-form-field>
+            <button matButton="filled" type="submit" [disabled]="submitting()">Enviar convite</button>
+          </form>
+        }
+      } @else if (mode === 'accept' && preview(); as invitation) {
+        <p>Você foi convidado para o espaço <strong>{{ invitation.spaceName }}</strong> como membro convidado.</p>
+        <p>Ao aceitar, você terá acesso ao histórico completo do espaço.</p>
+        @if (invitation.loginRequired && !invitation.authenticatedAsInvitee) {
+          <p>Entre com o email destinatário do convite antes de aceitar.</p>
+          <a matButton="filled" [routerLink]="['/entrar']" [queryParams]="{ returnUrl }">Entrar com a conta convidada</a>
+        } @else if (invitation.existingAccount) {
+          @if (!invitation.loginRequired) { <p>Este link também confirmará o email da conta existente.</p> }
+          <button matButton="filled" type="button" (click)="accept()" [disabled]="submitting()">Aceitar convite</button>
+        } @else {
+          <p>O link recebido confirma o email destinatário. Crie sua senha para concluir o cadastro.</p>
+          <form [formGroup]="acceptForm" (ngSubmit)="accept()" novalidate>
+            <mat-form-field appearance="outline">
+              <mat-label>Seu nome</mat-label>
+              <input matInput formControlName="displayName" autocomplete="name" />
+              @if (acceptForm.controls.displayName.invalid && acceptForm.controls.displayName.touched) { <mat-error>Informe um nome entre 2 e 100 caracteres.</mat-error> }
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Senha</mat-label>
+              <input matInput type="password" formControlName="password" autocomplete="new-password" />
+              <mat-hint>Mínimo de 12 caracteres, com uma letra e um número.</mat-hint>
+              @if (acceptForm.controls.password.invalid && acceptForm.controls.password.touched) { <mat-error>A senha não atende à política.</mat-error> }
+            </mat-form-field>
+            <button matButton="filled" type="submit" [disabled]="submitting()">Criar conta e aceitar</button>
+          </form>
+        }
+      }
+      <p class="links"><a routerLink="/entrar">Voltar para entrar</a></p>
+    </mat-card-content>
+  </mat-card>
+</section>

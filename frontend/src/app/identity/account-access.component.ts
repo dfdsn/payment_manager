@@ -26,6 +26,7 @@ export class AccountAccessComponent {
 
   readonly mode = this.route.snapshot.data['mode'] as AccessMode;
   readonly token = this.route.snapshot.queryParamMap.get('token') ?? '';
+  readonly returnUrl = this.safeReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl'));
   readonly submitting = signal(false);
   readonly message = signal<string | null>(null);
   readonly errorMessage = signal<string | null>(null);
@@ -56,6 +57,9 @@ export class AccountAccessComponent {
       next: context => {
         this.context.set(context);
         this.loginForm.reset();
+        if (this.returnUrl) {
+          void this.router.navigateByUrl(this.returnUrl);
+        }
       },
       error: error => this.handleError(error, 'Não foi possível entrar.'),
     });
@@ -127,5 +131,9 @@ export class AccountAccessComponent {
   private handleError(error: HttpErrorResponse, fallback: string): void {
     const apiError = error.error as ApiError | undefined;
     this.errorMessage.set(apiError?.message ?? fallback);
+  }
+
+  private safeReturnUrl(value: string | null): string | null {
+    return value?.startsWith('/') && !value.startsWith('//') ? value : null;
   }
 }

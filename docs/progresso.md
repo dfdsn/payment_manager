@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 24/09/2026.
 
-**Estado atual: H01.2 concluída em 24/09/2026.** Além dos gates locais, confirmação e recuperação foram entregues por Gmail real, consumidas pela interface e confirmadas no PostgreSQL sem sessão residual. P04 permanece parcialmente aberta apenas para o convite externo de H01.3.
+**Estado atual: H01.3 concluída em 24/09/2026.** H01.1 a H01.3 estão concluídas. Convite/aceite, gates locais e entrega/consumo Gmail real foram aprovados na branch `h01-3-invite-member`; P04 foi encerrada.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 24/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 2 de 46 concluídas; 11 épicos ainda não concluídos. |
+| Histórias | 3 de 46 concluídas; 11 épicos ainda não concluídos. |
 | Critérios do PRD | CA-01 a CA-32 não executados. |
-| Provedores e infraestrutura | P00 encerrada. Gmail real validado para confirmação/recuperação; P04 continua aberta somente para o convite de H01.3. Demais P01–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | H01.3 — Convidar e aceitar o segundo membro, incluindo o convite Gmail real restante de P04. |
+| Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
+| Próxima ação | H01.4 — Aplicar papéis e gerenciar saída. |
 
 ## Estados permitidos
 
@@ -44,7 +44,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 |---|---|---|---|
 | H01.1 | Configurar administrador e espaço | Concluído | Concorrência/reinício em PostgreSQL, CI Java 21 e E2E full-stack pela interface aprovados. Evidência: `docs/evidencias/H01.1.md`. |
 | H01.2 | Entrar, confirmar email e recuperar acesso | Concluído | 41 unitários, 4 ITs PostgreSQL, JaCoCo, PIT 90%, 11 frontend, E2E full-stack e entrega Gmail real de confirmação/recuperação aprovados. Evidência: `docs/evidencias/H01.2.md`. |
-| H01.3 | Convidar e aceitar o segundo membro | Não iniciado | — |
+| H01.3 | Convidar e aceitar o segundo membro | Concluído | 52 unitários, 7 ITs PostgreSQL, JaCoCo, PIT 78%, 17 frontend, E2E Mailpit e entrega/aceite Gmail real aprovados. Evidência: `docs/evidencias/H01.3.md`. |
 | H01.4 | Aplicar papéis e gerenciar saída | Não iniciado | — |
 | H02.1 | Cadastrar e listar uma despesa avulsa | Não iniciado | — |
 | H02.2 | Quitar e identificar quem pagou | Não iniciado | — |
@@ -164,6 +164,25 @@ Condição de conclusão ou desbloqueio: satisfeita em 24/09/2026 com gates loca
 Próximo passo: H01.3 — convidar e aceitar o segundo membro, incluindo a validação do convite Gmail restante em P04.
 ```
 
+## Registro H01.3
+
+```text
+História / objetivo: H01.3 — Convidar e aceitar o segundo membro.
+Estado / responsável / data: Concluído / desenvolvimento + Diego na validação Gmail / 24/09/2026.
+Requisitos e critérios de aceite relacionados: RF-ACC-05 a RF-ACC-07 e RF-ACC-11; D10/D12; administrador autorizado; email destinatário; sete dias; uso único; reenvio/revogação; máximo de dois membros; acesso GUEST ao mesmo espaço.
+Decisões e pendências aplicáveis: T06 registrada. P04 encerrada após entrega e aceite Gmail real; Mailpit continua tratado apenas como captura local.
+Branch / commit / PR: branch local `h01-3-invite-member`, base no commit local H01.2 `985cfd5`; sem publicação, deploy ou PR nesta execução.
+Arquivos e comportamento alterados: identity em aplicação/portas/infra/API; segurança; SMTP; V4; telas Angular de gestão/aceite; serviço frontend; E2E; OpenAPI, README, decisões e evidência H01.3.
+Migrações e impacto sobre dados: V4 cria space_invitations com FKs, hash único e um convite ativo por espaço. V1–V4 foram aplicadas somente em PostgreSQL 17.6 efêmero/Testcontainers e Compose descartável; nenhum banco compartilhado foi alterado.
+Testes executados: 52 unitários/HTTP/ArchUnit aprovados, 0 ignorados/falhas/erros; 7 ITs Failsafe aprovados, 0 ignorados/falhas/erros (3 específicos de convite); 17 Vitest; build Angular; 1 E2E full-stack aprovado. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V4 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 326/348 linhas (93,68%) e 112/140 branches (80%) em domínio/aplicação; PIT 78% (102/130), 91% de cobertura das linhas mutadas e força 87%; gates mantidos.
+Validação manual / integração real: Docker Desktop no contexto desktop-linux; fluxo local entre Chrome, Nginx, backend, PostgreSQL e Mailpit confirmou reenvio, link antigo recusado, aceite, mesmo espaço, papel GUEST e bloqueio de gestão. Em composição descartável separada, Gmail SMTP/STARTTLS entregou o convite e o destinatário o aceitou; PostgreSQL confirmou 1 convite consumido, 2 membros ativos, 1 GUEST confirmado e 1 espaço.
+Limitações e cenários não executados: nenhuma limitação material restante para H01.3. O npm global do host continua inconsistente; o CLI local do lockfile executou testes/build/E2E. A credencial, a CA exportada, contêineres e volumes descartáveis foram removidos após o ensaio Gmail.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H01.3.md e este arquivo.
+Condição de conclusão ou desbloqueio: satisfeita em 24/09/2026 com gates locais, PostgreSQL/Mailpit e entrega/aceite Gmail real.
+Próximo passo: H01.4 — aplicar papéis e gerenciar saída.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -208,3 +227,6 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 24/09/2026 | Gates finais H01.2: 41 unitários sem skip/falha/erro; 4 ITs Failsafe sem skip/falha/erro em PostgreSQL 17.6 e V1–V3; JaCoCo aprovado; PIT 90%; 11 testes frontend e build aprovados; E2E full-stack 1/1 aprovado com Mailpit. H01.2 permanece em validação exclusivamente por P04/Gmail real. |
 | 24/09/2026 | Revisão final da H01.2 passou a exigir `operationId` também nos 401 testados e atualizou o guia operacional para V1–V3 e SMTP Gmail via Docker secret. O primeiro recheck foi bloqueado no sandbox por PKIX; na execução autorizada, uma expectativa nova usou o código incorreto, foi corrigida para `AUTHENTICATION_REQUIRED` e o `verify -DskipITs` repetido terminou com 41 testes, 0 ignorados/falhas/erros, JaCoCo/ArchUnit aprovados e `BUILD SUCCESS`. |
 | 24/09/2026 | Validação Gmail real da H01.2 concluída: SMTP AUTH/STARTTLS saudável após confiar, somente na imagem descartável, a CA pública de inspeção Avast já confiada no Windows. Confirmação e recuperação chegaram à caixa externa e foram consumidas; banco confirmou email, tokens consumidos/não revogados e 0 sessões residuais. Segredo não foi versionado nem registrado. H01.2 concluída; convite real segue para H01.3/P04. |
+| 24/09/2026 | H01.3 iniciada após leitura integral dos contratos. H01.2 foi preservada no commit local `985cfd5` e a branch `h01-3-invite-member` foi criada. Regras derivadas: aceite cria/confirmar conta nova pelo token entregue ao email; conta confirmada preexistente precisa autenticar com a mesma identidade; vínculo ativo prévio, terceiro membro e substituição implícita de convite são recusados. |
+| 24/09/2026 | H01.3 implementada nas quatro camadas e UI com V4, token hash/uso único/sete dias, autorização administrativa, papel GUEST, limite/lock concorrente, reenvio/revogação e recuperação após falha SMTP. Regressão: 52 unitários, 7 ITs PostgreSQL 17.6, JaCoCo 93,68%/80%, PIT 78%, 17 frontend, build e E2E full-stack Mailpit aprovados. História permanece em validação externa somente por P04/Gmail real. |
+| 24/09/2026 | Convite Gmail real entregue e aceito com SMTP AUTH/STARTTLS e validação TLS ativa. PostgreSQL descartável confirmou 1 convite consumido, 2 membros ativos, 1 GUEST confirmado e 1 espaço. Credencial, CA exportada, contêineres e volumes foram removidos. P04 e H01.3 concluídas; próximo passo H01.4. |
