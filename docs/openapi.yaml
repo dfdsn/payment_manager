@@ -413,6 +413,93 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           description: Usuário ainda é administrador ou associação mudou concorrentemente.
+  /categories:
+    get:
+      operationId: listCategories
+      summary: Lista categorias do espaço ativo
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: includeArchived
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Categorias do espaço, ordenadas por nome.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Category" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createCategory
+      summary: Cria uma categoria no espaço ativo
+      security: [{ sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryNameRequest" }
+      responses:
+        "201":
+          description: Categoria criada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: Nome já utilizado no espaço. }
+  /categories/{id}:
+    put:
+      operationId: renameCategory
+      summary: Renomeia uma categoria com controle otimista
+      security: [{ sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenameCategoryRequest" }
+      responses:
+        "200":
+          description: Categoria renomeada; despesas vinculadas passam a exibir o novo nome.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Categoria não encontrada no espaço ativo. }
+        "409": { description: Versão desatualizada, categoria arquivada ou nome duplicado. }
+  /categories/{id}/archive:
+    post:
+      operationId: archiveCategory
+      summary: Impede novas associações sem apagar referências existentes
+      security: [{ sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryVersionRequest" }
+      responses:
+        "200":
+          description: Categoria arquivada; histórico e despesas existentes preservados.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Categoria não encontrada no espaço ativo. }
+        "409": { description: Versão desatualizada ou categoria já arquivada. }
   /expenses:
     post:
       operationId: createOneOffExpense
@@ -747,6 +834,34 @@ components:
         type: string
         format: uuid
   schemas:
+    Category:
+      type: object
+      required: [id, name, archived, version, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 60 }
+        archived: { type: boolean }
+        version: { type: integer, format: int64, minimum: 0 }
+        updatedAt: { type: string, format: date-time }
+    CategoryNameRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+    RenameCategoryRequest:
+      allOf:
+        - $ref: "#/components/schemas/CategoryNameRequest"
+        - type: object
+          required: [version]
+          properties:
+            version: { type: integer, format: int64, minimum: 0 }
+    CategoryVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
     CreateExpenseRequest:
       type: object
       additionalProperties: false
@@ -785,6 +900,10 @@ components:
         paymentNotes:
           type: [string, "null"]
           maxLength: 2000
+        categoryId:
+          type: [string, "null"]
+          format: uuid
+          description: Categoria ativa do espaço; ausência representa Sem categoria.
     PaymentRequest:
       type: object
       additionalProperties: false
@@ -797,6 +916,10 @@ components:
         paymentDate: { type: string, format: date }
         paidByUserId: { type: string, format: uuid }
         paymentNotes: { type: [string, "null"], maxLength: 2000 }
+        categoryId:
+          type: [string, "null"]
+          format: uuid
+          description: Categoria ativa do espaço, ou a categoria arquivada já vinculada quando não houver troca.
     BatchPaymentRequest:
       type: object
       additionalProperties: false
@@ -899,9 +1022,10 @@ components:
         overdue:
           type: boolean
           description: Somente PENDING com vencimento anterior à data local do espaço.
+        categoryId: { type: [string, "null"], format: uuid }
         categoryName:
           type: [string, "null"]
-          description: Nulo até categorias serem implementadas; interface mostra Sem categoria.
+          description: Nome atual preservado para leitura; nulo é apresentado como Sem categoria.
         responsibleUserId: { type: [string, "null"], format: uuid }
         notes: { type: [string, "null"] }
         createdByUserId: { type: string, format: uuid }

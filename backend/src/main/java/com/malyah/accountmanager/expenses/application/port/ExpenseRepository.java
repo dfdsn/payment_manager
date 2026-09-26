@@ -10,8 +10,12 @@ import com.malyah.accountmanager.expenses.application.StoredExpensePage;
 import com.malyah.accountmanager.expenses.domain.OneOffExpense;
 
 public interface ExpenseRepository {
+    default StoredExpenseCreation createIdempotently(OneOffExpense expense, UUID actorUserId, UUID idempotencyKey,
+            String requestHash, Instant requestedAt) {
+        return createIdempotently(expense, actorUserId, idempotencyKey, requestHash, null, requestedAt);
+    }
     StoredExpenseCreation createIdempotently(
-            OneOffExpense expense, UUID actorUserId, UUID idempotencyKey, String requestHash, Instant requestedAt);
+            OneOffExpense expense, UUID actorUserId, UUID idempotencyKey, String requestHash, UUID categoryId, Instant requestedAt);
 
     StoredExpensePage findBySpace(UUID spaceId, ExpenseListQuery query);
 
@@ -22,7 +26,13 @@ public interface ExpenseRepository {
 
     StoredExpenseCreation correct(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command,
-            OneOffExpense corrected, Instant at);
+            OneOffExpense corrected, UUID categoryId, Instant at);
+
+    default StoredExpenseCreation correct(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command,
+            OneOffExpense corrected, Instant at) {
+        return correct(spaceId, actorId, command, corrected, null, at);
+    }
 
     StoredExpenseCreation settle(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.SettleExpenseCommand command,

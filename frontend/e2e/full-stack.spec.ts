@@ -36,10 +36,19 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
 
-  await page.getByRole('link', { name: 'Cadastrar e consultar despesas' }).click();
+  await page.goto('/categorias');
+  for (const initial of ['Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Educação', 'Lazer', 'Outros']) {
+    await expect(page.getByText(initial, { exact: true })).toBeVisible();
+  }
+  await page.getByLabel('Nova categoria').fill('Pets');
+  await page.getByRole('button', { name: 'Criar categoria' }).click();
+  await expect(page.getByText('Categoria criada.')).toBeVisible();
+
+  await page.goto('/despesas');
   await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Energia');
   await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('150,25');
   await page.getByLabel('Vencimento').fill('2026-09-24');
+  await page.getByLabel('Categoria (opcional)').selectOption({ label: 'Pets' });
   await page.getByRole('button', { name: 'Salvar despesa' }).click();
   await expect(page.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
   await expect(page.getByText('Energia')).toBeVisible();
@@ -72,6 +81,18 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(guestPage.getByText(/como convidado/)).toBeVisible();
   await guestPage.getByRole('link', { name: 'Cadastrar e consultar despesas' }).click();
   await expect(guestPage.getByText('Energia')).toBeVisible();
+  await guestPage.goto('/categorias');
+  const pets = guestPage.locator('mat-card').filter({ hasText: 'Pets' });
+  await pets.getByRole('button', { name: 'Renomear' }).click();
+  await guestPage.getByLabel('Novo nome').fill('Casa');
+  await guestPage.getByRole('button', { name: 'Salvar nome' }).click();
+  await expect(guestPage.getByText('Categoria renomeada.')).toBeVisible();
+  const house = guestPage.locator('mat-card').filter({ hasText: 'Casa' });
+  await house.getByRole('button', { name: 'Arquivar' }).click();
+  await expect(guestPage.getByText(/Despesas existentes foram preservadas/)).toBeVisible();
+  await guestPage.goto('/despesas');
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Energia' }).getByText(/Categoria: Casa/)).toBeVisible();
+  await expect(guestPage.getByLabel('Categoria (opcional)').getByRole('option', { name: 'Casa' })).toHaveCount(0);
   await guestPage.getByRole('button', { name: 'Quitar despesa' }).click();
   await guestPage.getByRole('textbox', { name: 'Valor efetivamente pago' }).fill('155,00');
   await guestPage.getByLabel('Data da quitação').fill('2026-09-25');

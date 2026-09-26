@@ -39,7 +39,7 @@ class ExpenseController {
             @Valid @RequestBody CreateExpenseRequest request) {
         var result = useCase.create(principal.getName(), new CreateOneOffExpenseCommand(
                 request.description(), request.amount(), request.status(), request.dueDate(), request.paymentDate(),
-                request.notes(), idempotencyKey, request.paidAmount(), request.paidByUserId(), request.paymentNotes()));
+                request.notes(), idempotencyKey, request.paidAmount(), request.paidByUserId(), request.paymentNotes(), request.categoryId()));
         if (result.replayed()) return ResponseEntity.ok(result.expense());
         return ResponseEntity.created(URI.create("/api/v1/expenses/" + result.expense().id()))
                 .body(result.expense());
@@ -68,7 +68,7 @@ class ExpenseController {
         return useCase.correct(principal.getName(), new com.malyah.accountmanager.expenses.application.CorrectExpenseCommand(
                 id, request.version(), request.status(), request.description(), request.amount(), request.dueDate(),
                 request.notes(), request.paidAmount(), request.paymentDate(), request.paidByUserId(),
-                request.paymentNotes(), key)).expense();
+                request.paymentNotes(), key, request.categoryId())).expense();
     }
 
     @PostMapping("/{id}/payment")
@@ -144,5 +144,6 @@ class ExpenseController {
             String paidAmount,
             java.time.LocalDate paymentDate,
             UUID paidByUserId,
-            @jakarta.validation.constraints.Size(max = 2000) String paymentNotes) { }
+            @jakarta.validation.constraints.Size(max = 2000) String paymentNotes,
+            UUID categoryId) { }
 }

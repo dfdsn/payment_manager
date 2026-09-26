@@ -20,6 +20,17 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQu
 @ConditionalOnProperty(name = "spring.datasource.url")
 class ExpensesConfiguration {
     @Bean
+    com.malyah.accountmanager.expenses.application.port.CategoryRepository categoryRepository(JdbcTemplate jdbcTemplate) {
+        return new JdbcCategoryRepository(jdbcTemplate);
+    }
+
+    @Bean
+    com.malyah.accountmanager.expenses.application.CategoryService categoryService(
+            com.malyah.accountmanager.expenses.application.port.CategoryRepository repository,
+            AuthenticatedUserContextQuery contextQuery, ExpenseIdentifierGenerator identifiers, Clock applicationClock) {
+        return new com.malyah.accountmanager.expenses.application.CategoryService(repository, contextQuery, identifiers, applicationClock);
+    }
+    @Bean
     ExpenseRepository expenseRepository(JdbcTemplate jdbcTemplate) {
         return new JdbcExpenseRepository(jdbcTemplate);
     }
@@ -36,8 +47,9 @@ class ExpensesConfiguration {
             ExpenseIdentifierGenerator identifiers,
             Clock applicationClock,
             PlatformTransactionManager transactionManager,
-            com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess) {
-        var service = new ExpenseService(repository, contextQuery, identifiers, applicationClock, memberAccess);
+            com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess,
+            com.malyah.accountmanager.expenses.application.port.CategoryRepository categories) {
+        var service = new ExpenseService(repository, contextQuery, identifiers, applicationClock, memberAccess, categories);
         return new TransactionalExpenseUseCase(service, new TransactionTemplate(transactionManager));
     }
 }

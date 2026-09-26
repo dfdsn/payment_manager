@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 25/09/2026.
 
-**Estado atual: H02.5 e E02 concluídos.** A quitação em lote foi validada como operação atômica, versionada, idempotente e auditável. E01 e E02 estão concluídos; a próxima história é H03.1.
+**Estado atual: H03.1 concluída.** Categorias do espaço foram validadas com referências preservadas, concorrência, autorização e auditoria. E01 e E02 estão concluídos; E03 está em andamento e a próxima história é H03.2.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 25/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 9 de 46 concluídas; E01 e E02 concluídos. |
+| Histórias | 10 de 46 concluídas; E01 e E02 concluídos, E03 em andamento. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | H03.1 — Gerenciar categorias; não iniciada nesta execução. |
+| Próxima ação | H03.2 — Atribuir responsável e consultar histórico; não iniciada nesta execução. |
 
 ## Estados permitidos
 
@@ -51,7 +51,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H02.3 | Corrigir com proteção contra conflito | Concluído | 85 testes Java, 23 ITs PostgreSQL, JaCoCo 95,77%/84,87%, PIT 81%, 33 frontend, build e E2E de conflito em duas páginas aprovados. Evidência: `docs/evidencias/H02.3.md`. |
 | H02.4 | Desfazer quitação e cancelar | Concluído | 91 Java, 28 ITs PostgreSQL (18 de despesas), JaCoCo 95,57%/85,55%, PIT 82%, 37 frontend, build e E2E aprovados. P10 encerrada com correção prévia do vencimento. Evidência: `docs/evidencias/H02.4.md`. |
 | H02.5 | Quitar vários lançamentos | Concluído | 97 Java, 34 ITs PostgreSQL (24 de despesas), JaCoCo 95,73%/85,64%, PIT 83%, 40 frontend, build e E2E atômico aprovados. Evidência: `docs/evidencias/H02.5.md`. |
-| H03.1 | Gerenciar categorias | Não iniciado | — |
+| H03.1 | Gerenciar categorias | Concluído | 100 Java, 36 ITs PostgreSQL (26 de despesas), JaCoCo 95,55%/85,86%, PIT 81%, 42 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H03.1.md`. |
 | H03.2 | Atribuir responsável e consultar histórico | Não iniciado | — |
 | H03.3 | Anexar e acessar documentos | Não iniciado | — |
 | H03.4 | Buscar e filtrar lançamentos | Não iniciado | — |
@@ -301,6 +301,25 @@ Condição de conclusão ou desbloqueio: critérios executáveis da H02.5 e o es
 Próximo passo: H03.1 — gerenciar categorias.
 ```
 
+## Registro H03.1
+
+```text
+História / objetivo: H03.1 — Gerenciar categorias.
+Estado / responsável / data: Concluído / desenvolvimento / 25/09/2026.
+Requisitos e critérios de aceite relacionados: RF-ORG-01, D16–D18, CA-02/CA-04; categorias iniciais, nome/duplicidade, ambos os papéis, associação opcional, arquivamento sem perda, versão, isolamento, auditoria e concorrência.
+Decisões e pendências aplicáveis: T13 registrada. Comparação usa trim + minúsculas e preserva acentos. Recorrências, relatórios, fechamentos e IA serão integrados em E04/E06/E07/E10, sem antecipação.
+Branch / commit / PR: branch `h03-1-manage-categories`, base H02.5 `2197873`; entrega não publicada, implantada ou aberta em PR.
+Arquivos e comportamento alterados: módulo expenses nas quatro camadas; V11; `/categories`; categoria opcional no cadastro/correção/leitura; tela `/categorias`; seletores e histórico de correção; E2E; OpenAPI, README, decisões e evidência H03.1.
+Migrações e impacto sobre dados: V11 cria categorias/eventos, semeia sete categorias para espaços existentes e futuros, adiciona FK opcional à despesa e campos históricos à correção. Despesas existentes permanecem sem categoria; V1–V10 não foram editadas.
+Testes executados: 100 unitários/HTTP/ArchUnit; 36 ITs Failsafe completos (26 de despesas) e repetição final selecionada de 27; 42 Vitest; build Angular; 1 E2E full-stack. Todos aprovados, sem ignorados/falhas/erros. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V11 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 708/741 linhas (95,55%) e 340/396 branches (85,86%); PIT 260/322 (81%), 93% das linhas mutadas e força 86%; gates mantidos.
+Validação manual / integração real: Testcontainers comprovou seeds, ambos os papéis, isolamento, duplicidade concorrente, versão e preservação após arquivo. E2E Chrome em Nginx/backend/PostgreSQL/Mailpit criou Pets, associou a Energia, renomeou para Casa por convidado, arquivou e confirmou que a despesa preservou Casa enquanto novas associações foram bloqueadas.
+Limitações e cenários futuros: categoria arquivada em recorrência ativa será tratada em E04. Relatórios/fechamentos/IA serão validados em E06/E07/E10. Mailpit foi somente captura local; H03.1 não envia email. Android/Edge reais continuam no aceite transversal.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H03.1.md e este arquivo.
+Condição de conclusão ou desbloqueio: critérios executáveis da H03.1 satisfeitos em 25/09/2026; integrações futuras explicitamente diferidas conforme backlog.
+Próximo passo: H03.2 — atribuir responsável e consultar histórico.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -353,3 +372,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 25/09/2026 | H02.2 implementou quitação integral nas quatro camadas e UI, V7, pagador distinto do autor, valor efetivo, auditoria/rollback, versão e idempotência concorrente. Regressão final: 81 Java, 19 ITs PostgreSQL, JaCoCo 95,58%/85,29%, PIT 80%, 30 frontend, build e E2E aprovados. H02.2 concluída; próximo passo H02.3. |
 | 25/09/2026 | H02.3 implementou correções pendentes/pagas nas quatro camadas e UI, V8, histórico antes/depois, versão, idempotência, concorrência/rollback e revisão manual do conflito. Regressão final: 85 Java, 23 ITs PostgreSQL, JaCoCo 95,77%/84,87%, PIT 81%, 33 frontend, build e E2E aprovados. H02.3 concluída; próximo passo H02.4. |
 | 25/09/2026 | H02.4 implementou reversão e cancelamento lógico com motivo, versão, idempotência, histórico imutável, concorrência e rollback. P10 foi encerrada exigindo correção prévia do vencimento para paga sem data. Regressão final: 91 Java, 28 ITs PostgreSQL, JaCoCo 95,57%/85,55%, PIT 82%, 37 frontend, build e E2E aprovados. H02.4 concluída; próximo passo H02.5. |
+| 25/09/2026 | H03.1 implementou categorias iniciais/opcionais, criação, renomeação e arquivamento pelos dois papéis, integração com despesas, isolamento, versão, concorrência e auditoria. Regressão final: 100 Java, 36 ITs PostgreSQL, JaCoCo 95,55%/85,86%, PIT 81%, 42 frontend, build e E2E aprovados. H03.1 concluída; próximo passo H03.2. |

@@ -1,0 +1,8 @@
+package com.malyah.accountmanager.expenses.application;
+import static org.assertj.core.api.Assertions.*; import static org.mockito.BDDMockito.*;
+import java.time.*; import java.util.*; import org.junit.jupiter.api.Test;
+import com.malyah.accountmanager.expenses.application.port.*; import com.malyah.accountmanager.identity.application.*; import com.malyah.accountmanager.identity.domain.SpaceRole;
+class CategoryServiceTest {
+ @Test void derivesSpaceAndActorForAllOperations(){var repo=mock(CategoryRepository.class);var context=mock(AuthenticatedUserContextQuery.class);var id=UUID.randomUUID();var user=UUID.randomUUID();var space=UUID.randomUUID();var now=Instant.parse("2026-09-25T15:00:00Z");given(context.findByEmail("a@b.com")).willReturn(new AuthenticatedUserContext(user,"A","a@b.com",space,"Casa",SpaceRole.GUEST,"BRL","pt-BR","America/Sao_Paulo"));var service=new CategoryService(repo,context,()->id,Clock.fixed(now,ZoneOffset.UTC));service.create("a@b.com"," Casa ");service.rename("a@b.com",id,0,"Lar");service.archive("a@b.com",id,1);then(repo).should().create(eq(id),eq(space),eq(user),argThat(n->n.value().equals("Casa")),eq(now));then(repo).should().rename(eq(space),eq(id),eq(user),eq(0L),argThat(n->n.value().equals("Lar")),eq(now));then(repo).should().archive(space,id,user,1,now);}
+ @Test void rejectsInvalidIdentityAndVersion(){var service=new CategoryService(mock(CategoryRepository.class),mock(AuthenticatedUserContextQuery.class),UUID::randomUUID,Clock.systemUTC());assertThatThrownBy(()->service.rename("x",null,0,"A")).isInstanceOf(ExpenseQueryValidationException.class);assertThatThrownBy(()->service.archive("x",UUID.randomUUID(),-1)).isInstanceOf(ExpenseQueryValidationException.class);}
+}

@@ -11,6 +11,7 @@ export const routes: Routes = [
   { path: 'redefinir-senha', component: AccountAccessComponent, data: { mode: 'reset' } },
   { path: 'membros', component: InvitationComponent, data: { mode: 'manage' } },
   { path: 'despesas', loadComponent: () => import('./expenses/expense.component').then(module => module.ExpenseComponent) },
+  { path: 'categorias', loadComponent: () => import('./expenses/category.component').then(module => module.CategoryComponent) },
   { path: 'aceitar-convite', component: InvitationComponent, data: { mode: 'accept' } },
   { path: 'configuracao-inicial', component: InitialSetupComponent },
   { path: '**', redirectTo: 'entrar' },

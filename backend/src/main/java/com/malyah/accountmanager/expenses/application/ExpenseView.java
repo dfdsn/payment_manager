@@ -20,6 +20,7 @@ public record ExpenseView(
         LocalDate referenceDate,
         boolean overdue,
         String categoryName,
+        UUID categoryId,
         UUID responsibleUserId,
         String notes,
         UUID createdByUserId,
@@ -34,7 +35,7 @@ public record ExpenseView(
             String notes, UUID createdByUserId, String createdByDisplayName, UUID paidByUserId,
             String paidByDisplayName, Instant createdAt, long version) {
         this(id, origin, description, amount, currency, status, dueDate, paymentDate, paidAmount, referenceDate,
-                overdue, categoryName, responsibleUserId, notes, createdByUserId, createdByDisplayName,
+                overdue, categoryName, null, responsibleUserId, notes, createdByUserId, createdByDisplayName,
                 paidByUserId, paidByDisplayName, createdAt, version, null, List.of());
     }
 
@@ -44,7 +45,7 @@ public record ExpenseView(
             String notes, UUID createdByUserId, String createdByDisplayName, UUID paidByUserId,
             String paidByDisplayName, Instant createdAt, long version, PaymentAudit paymentAudit) {
         this(id, origin, description, amount, currency, status, dueDate, paymentDate, paidAmount, referenceDate,
-                overdue, categoryName, responsibleUserId, notes, createdByUserId, createdByDisplayName,
+                overdue, categoryName, null, responsibleUserId, notes, createdByUserId, createdByDisplayName,
                 paidByUserId, paidByDisplayName, createdAt, version, paymentAudit, List.of());
     }
 }

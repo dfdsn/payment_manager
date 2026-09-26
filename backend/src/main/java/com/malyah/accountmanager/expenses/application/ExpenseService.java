@@ -26,17 +26,26 @@ public final class ExpenseService {
     private final ExpenseIdentifierGenerator identifiers;
     private final Clock clock;
     private final com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess;
+    private final com.malyah.accountmanager.expenses.application.port.CategoryRepository categories;
 
     public ExpenseService(
             ExpenseRepository repository,
             AuthenticatedUserContextQuery contextQuery,
             ExpenseIdentifierGenerator identifiers,
-            Clock clock, com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess) {
+            Clock clock, com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess,
+            com.malyah.accountmanager.expenses.application.port.CategoryRepository categories) {
         this.repository = repository;
         this.contextQuery = contextQuery;
         this.identifiers = identifiers;
         this.clock = clock;
         this.memberAccess = memberAccess;
+        this.categories = categories;
+    }
+
+    public ExpenseService(ExpenseRepository repository, AuthenticatedUserContextQuery contextQuery,
+            ExpenseIdentifierGenerator identifiers, Clock clock,
+            com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess) {
+        this(repository, contextQuery, identifiers, clock, memberAccess, null);
     }
 
     public ExpenseCreationResult create(String actorEmail, CreateOneOffExpenseCommand command) {
@@ -53,12 +62,15 @@ public final class ExpenseService {
         if (payment == null && (command.paidAmount() != null || command.paidByUserId() != null || command.paymentNotes() != null))
             throw new com.malyah.accountmanager.expenses.domain.ExpenseValidationException("payment", "Despesa pendente não possui pagamento.");
         memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment == null ? null : payment.payerId());
+        if (categories != null) categories.requireSelectable(actor.spaceId(), command.categoryId());
         var expense = new OneOffExpense(
                 identifiers.next(), actor.spaceId(), command.description(), ExpenseAmount.parse(command.amount()),
                 command.status(), command.dueDate(), command.paymentDate(), null, command.notes(), actor.userId(),
                 clock.instant(), payment);
-        var stored = repository.createIdempotently(
-                expense, actor.userId(), command.idempotencyKey(), fingerprint(expense), clock.instant());
+        var stored = categories == null
+                ? repository.createIdempotently(expense, actor.userId(), command.idempotencyKey(), fingerprint(expense, null), clock.instant())
+                : repository.createIdempotently(expense, actor.userId(), command.idempotencyKey(),
+                        fingerprint(expense, command.categoryId()), command.categoryId(), clock.instant());
         return new ExpenseCreationResult(view(stored.expense(), actor.timeZone()), stored.replayed());
     }
 
@@ -121,10 +133,14 @@ public final class ExpenseService {
                     "payment", "Despesa pendente não possui pagamento.");
         }
         memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment == null ? null : payment.payerId());
+        if (categories != null && !Objects.equals(current.categoryId(), command.categoryId()))
+            categories.requireSelectable(actor.spaceId(), command.categoryId());
         var corrected = new OneOffExpense(current.id(), current.spaceId(), command.description(),
                 ExpenseAmount.parse(command.amount()), command.status(), command.dueDate(), paymentDate, null,
                 command.notes(), current.createdByUserId(), current.createdAt(), payment);
-        var result = repository.correct(actor.spaceId(), actor.userId(), command, corrected, clock.instant());
+        var result = categories == null
+                ? repository.correct(actor.spaceId(), actor.userId(), command, corrected, clock.instant())
+                : repository.correct(actor.spaceId(), actor.userId(), command, corrected, command.categoryId(), clock.instant());
         return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
     }
 
@@ -185,7 +201,7 @@ public final class ExpenseService {
                 expense.id(), "ONE_OFF", expense.description(), expense.amount().toPlainString(), "BRL",
                 expense.status(), expense.dueDate(), expense.paymentDate(),
                 expense.paidAmount() == null ? null : expense.paidAmount().toPlainString(),
-                referenceDate, overdue, null, null, expense.notes(), expense.createdByUserId(),
+                referenceDate, overdue, expense.categoryName(), expense.categoryId(), null, expense.notes(), expense.createdByUserId(),
                 expense.createdByDisplayName(), expense.paidByUserId(), expense.paidByDisplayName(),
                 expense.createdAt(), expense.version(), expense.paymentAudit(), history);
     }
@@ -196,10 +212,10 @@ public final class ExpenseService {
                     "Informe a despesa, versão e chave de repetição válidas.");
     }
 
-    private String fingerprint(OneOffExpense expense) {
+    private String fingerprint(OneOffExpense expense, UUID categoryId) {
         var canonical = String.join("\u001f",
                 expense.description(), expense.amount().canonical(), expense.status().name(),
-                value(expense.dueDate()), value(expense.paymentDate()), value(expense.notes()));
+                value(expense.dueDate()), value(expense.paymentDate()), value(expense.notes()), value(categoryId));
         var payment = expense.payment();
         // Keep the H02.1 fingerprint for unchanged/default creation requests, including retries after upgrade.
         if (payment != null && (!payment.amount().equals(expense.amount())

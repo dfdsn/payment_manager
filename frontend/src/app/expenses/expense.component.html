@@ -4,13 +4,13 @@
       <h1 id="expenses-title">Despesas</h1>
       <p>Cadastre contas pendentes ou despesas que já foram pagas.</p>
     </div>
-    <a routerLink="/entrar">Voltar ao início</a>
+    <div><a routerLink="/categorias">Gerenciar categorias</a> · <a routerLink="/entrar">Voltar ao início</a></div>
   </header>
 
   <mat-card appearance="outlined" class="expense-form-card">
     <mat-card-header>
       <mat-card-title>Adicionar despesa</mat-card-title>
-      <mat-card-subtitle>Categoria e responsável serão opcionais quando esses módulos estiverem disponíveis.</mat-card-subtitle>
+      <mat-card-subtitle>A categoria é opcional; sem escolha, será exibida como “Sem categoria”.</mat-card-subtitle>
     </mat-card-header>
     <mat-card-content>
       @if (errorMessage()) { <div class="error-summary" role="alert">{{ errorMessage() }}</div> }
@@ -38,6 +38,11 @@
           <select formControlName="status">
             <option value="PENDING">Pendente</option>
             <option value="PAID">Já paga</option>
+          </select>
+        </label>
+        <label class="select-field">Categoria (opcional)
+          <select formControlName="categoryId"><option value="">Sem categoria</option>
+            @for (category of categories(); track category.id) { @if (!category.archived) { <option [value]="category.id">{{category.name}}</option> } }
           </select>
         </label>
 
@@ -196,6 +201,15 @@
           <mat-form-field appearance="outline" class="wide-field"><mat-label>Observação corrigida</mat-label>
             <textarea matInput formControlName="notes" maxlength="2000"></textarea>
           </mat-form-field>
+          <label class="select-field">Categoria corrigida (opcional)
+            <select formControlName="categoryId"><option value="">Sem categoria</option>
+              @for (category of categories(); track category.id) {
+                @if (!category.archived || category.id === expense.categoryId) {
+                  <option [value]="category.id">{{category.name}}{{category.archived ? ' (arquivada)' : ''}}</option>
+                }
+              }
+            </select>
+          </label>
           @if (expense.status === 'PAID') {
             <mat-form-field appearance="outline"><mat-label>Valor pago corrigido</mat-label>
               <input matInput formControlName="paidAmount" inputmode="decimal" />

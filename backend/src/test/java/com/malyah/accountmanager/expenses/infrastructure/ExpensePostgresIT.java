@@ -55,6 +55,7 @@ class ExpensePostgresIT {
 
     private JdbcTemplate jdbc;
     private ExpenseUseCase useCase;
+    private com.malyah.accountmanager.expenses.application.CategoryService categoryService;
 
     @BeforeEach
     void reset() {
@@ -62,14 +63,56 @@ class ExpensePostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(10);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(11);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var context = new AuthenticatedUserContextService(contextRepository());
+        var categories = new JdbcCategoryRepository(jdbc);
+        categoryService = new com.malyah.accountmanager.expenses.application.CategoryService(categories, context,
+                UUID::randomUUID, Clock.fixed(NOW, ZoneOffset.UTC));
         var service = new ExpenseService(new JdbcExpenseRepository(jdbc), context, UUID::randomUUID,
-                Clock.fixed(NOW, ZoneOffset.UTC), new com.malyah.accountmanager.identity.infrastructure.JdbcFinancialMemberAccess(jdbc));
+                Clock.fixed(NOW, ZoneOffset.UTC), new com.malyah.accountmanager.identity.infrastructure.JdbcFinancialMemberAccess(jdbc), categories);
         useCase = new TransactionalExpenseUseCase(
                 service, new TransactionTemplate(new DataSourceTransactionManager(dataSource)));
+    }
+
+    @Test void managesInitialCategoriesAndPreservesReferencedExpensesAfterRenameAndArchive() {
+        assertThat(categoryService.list("admin@example.com", false)).extracting(c -> c.name())
+                .containsExactly("Alimentação", "Educação", "Lazer", "Moradia", "Outros", "Saúde", "Transporte");
+        var category = categoryService.create("guest@example.com", "  Condomínio  ");
+        var expense = useCase.create("admin@example.com", new CreateOneOffExpenseCommand("Água", "90",
+                ExpenseStatus.PENDING, LocalDate.of(2026, 10, 1), null, null, UUID.randomUUID(),
+                null, null, null, category.id())).expense();
+        assertThat(expense.categoryName()).isEqualTo("Condomínio");
+        var renamed = categoryService.rename("admin@example.com", category.id(), category.version(), "Casa");
+        assertThat(useCase.get("guest@example.com", expense.id()).categoryName()).isEqualTo("Casa");
+        var archived = categoryService.archive("guest@example.com", category.id(), renamed.version());
+        assertThat(archived.archived()).isTrue();
+        assertThat(useCase.get("admin@example.com", expense.id()).categoryName()).isEqualTo("Casa");
+        assertThat(categoryService.list("admin@example.com", false)).noneMatch(c -> c.id().equals(category.id()));
+        assertThat(categoryService.list("admin@example.com", true)).anyMatch(c -> c.id().equals(category.id()) && c.archived());
+        assertThatThrownBy(() -> useCase.create("admin@example.com", new CreateOneOffExpenseCommand("Luz", "80",
+                ExpenseStatus.PENDING, LocalDate.of(2026, 10, 2), null, null, UUID.randomUUID(),
+                null, null, null, category.id())))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.CategoryConflictException.class);
+        assertThat(jdbc.queryForObject("select count(*) from expense_category_events where category_id=?", Integer.class, category.id())).isEqualTo(3);
+    }
+
+    @Test void rejectsDuplicateForeignAndStaleCategoryChangesIncludingConcurrentCreation() throws Exception {
+        var first = categoryService.create("admin@example.com", "Pets");
+        assertThatThrownBy(() -> categoryService.create("guest@example.com", " pets "))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.CategoryConflictException.class);
+        assertThatThrownBy(() -> categoryService.rename("guest@example.com", first.id(), first.version() + 1, "Animais"))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.CategoryConflictException.class);
+        var foreign = jdbc.queryForObject("select id from expense_categories where space_id=? limit 1", UUID.class, OTHER_SPACE);
+        assertThatThrownBy(() -> categoryService.rename("admin@example.com", foreign, 0, "Inválida"))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.CategoryNotFoundException.class);
+        Callable<String> create = () -> { try { categoryService.create("admin@example.com", "Impostos"); return "CREATED"; }
+            catch (com.malyah.accountmanager.expenses.application.CategoryConflictException e) { return "CONFLICT"; } };
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            assertThat(executor.invokeAll(List.of(create, create)).stream().map(f -> { try{return f.get();}catch(Exception e){throw new AssertionError(e);} }).toList())
+                    .containsExactlyInAnyOrder("CREATED", "CONFLICT");
+        }
     }
 
     @Test

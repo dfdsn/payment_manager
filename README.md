@@ -220,6 +220,15 @@ Para testar a rejeição integral, abra a confirmação do lote e, em outra aba,
 
 Administrador e convidado ativos podem executar o lote no próprio espaço. O backend deriva espaço e autor da sessão, valida o pagador ativo, bloqueia os lançamentos em ordem estável e grava operação, pagamentos, versões, auditorias e correlação em uma transação PostgreSQL. Não há limite numérico arbitrário além do lote não vazio, pois os requisitos aprovados não definem outro limite. Pagamento parcial, rateio e múltiplos pagadores não fazem parte deste fluxo.
 
+### Gerenciar categorias
+
+1. Entre como administrador ou convidado e abra `/categorias`. Todo espaço recebe Moradia, Alimentação, Transporte, Saúde, Educação, Lazer e Outros; ambos os papéis podem criar, renomear e arquivar categorias do próprio espaço.
+2. O nome é obrigatório, tem até 60 caracteres e é comparado após remover espaços externos e converter para minúsculas. Assim, `Moradia` e ` moradia ` conflitam; acentos continuam significativos.
+3. No cadastro ou na correção de `/despesas`, selecione uma categoria ativa ou mantenha **Sem categoria**. O backend deriva o espaço da sessão e rejeita categoria arquivada ou pertencente a outro espaço.
+4. Renomear atualiza o nome apresentado pelas despesas vinculadas sem apagar a auditoria da alteração. Arquivar remove a categoria das novas seleções, mas as despesas antigas continuam mostrando a categoria. Não existe exclusão física nem reativação nesta história.
+
+Versões otimistas e constraints PostgreSQL tratam renomeações, arquivamentos e criações concorrentes sem sobrescrita ou duplicidade. Despesas existentes antes da V11 permanecem com categoria nula; nenhuma classificação arbitrária é aplicada. A substituição de uma categoria arquivada em recorrências será validada em E04; relatórios, fechamentos e sugestões de IA serão integrados em seus próprios épicos.
+
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
 ## Testes e gates
@@ -287,7 +296,7 @@ cd backend
 ```
 
 - `test`: JUnit/Spring e ArchUnit; não executa classes `*IT`.
-- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V10, identidade e despesas, incluindo lote atômico, quitação/correção/auditoria, conflitos otimistas, idempotência concorrente, isolamento por espaço e constraints monetárias.
+- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V11, identidade, despesas e categorias, incluindo lote atômico, quitação/correção/auditoria, conflitos otimistas, idempotência concorrente, isolamento por espaço e constraints duráveis.
 - `-Pmutation`: PIT sobre domínio/aplicação. `-DskipITs` evita criar PostgreSQL novamente; não elimina unitários nem gates.
 - JaCoCo: linhas ≥80% e branches ≥70% em domínio/aplicação.
 - PIT: mutação ≥70% e cobertura de linhas ≥80% no código mutado.
@@ -315,7 +324,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar com histórico, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de criar/usar/renomear/arquivar categoria, cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar com histórico, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -399,4 +408,4 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01 e E02 estão concluídos pelas evidências atuais. A próxima história recomendada é **H03.1 — Gerenciar categorias**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01, E02 e H03.1 estão concluídos pelas evidências atuais. A próxima história recomendada é **H03.2 — Atribuir responsável e consultar histórico**.

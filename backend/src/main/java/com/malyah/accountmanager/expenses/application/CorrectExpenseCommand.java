@@ -17,5 +17,12 @@ public record CorrectExpenseCommand(
         LocalDate paymentDate,
         UUID paidByUserId,
         String paymentNotes,
-        UUID idempotencyKey) {
+        UUID idempotencyKey,
+        UUID categoryId) {
+    public CorrectExpenseCommand(UUID expenseId, long version, ExpenseStatus status, String description,
+            String amount, LocalDate dueDate, String notes, String paidAmount, LocalDate paymentDate,
+            UUID paidByUserId, String paymentNotes, UUID idempotencyKey) {
+        this(expenseId, version, status, description, amount, dueDate, notes, paidAmount, paymentDate,
+                paidByUserId, paymentNotes, idempotencyKey, null);
+    }
 }

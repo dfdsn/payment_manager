@@ -5,6 +5,7 @@ import { ExpenseComponent } from './expense.component';
 import { ExpenseService } from './expense.service';
 import { provideRouter } from '@angular/router';
 import { AccountAccessService } from '../identity/account-access.service';
+import { CategoryService } from './category.service';
 
 describe('ExpenseComponent', () => {
   let fixture: ComponentFixture<ExpenseComponent>;
@@ -23,6 +24,7 @@ describe('ExpenseComponent', () => {
     await TestBed.configureTestingModule({
       imports: [ExpenseComponent],
       providers: [{ provide: ExpenseService, useValue: api }, provideRouter([]),
+        { provide: CategoryService, useValue: { list: () => of([]) } },
         { provide: AccountAccessService, useValue: {
           context: () => of({ userId: 'actor', timeZone: 'America/Sao_Paulo' }),
           members: () => of([{ userId: 'actor', displayName: 'Autor', currentUser: true }, { userId: 'payer', displayName: 'Outro', currentUser: false }]),
@@ -41,7 +43,7 @@ describe('ExpenseComponent', () => {
     api.create.mockReturnValue(of({ id: 'expense' }));
     fixture.componentInstance.form.setValue({
       description: 'Energia', amount: '150,25', status: 'PENDING',
-      dueDate: '2026-09-30', paymentDate: '', notes: '',
+      dueDate: '2026-09-30', paymentDate: '', notes: '', categoryId: '',
     });
 
     fixture.componentInstance.submit();
@@ -49,7 +51,7 @@ describe('ExpenseComponent', () => {
 
     expect(api.create).toHaveBeenCalledWith({
       description: 'Energia', amount: '150.25', status: 'PENDING',
-      dueDate: '2026-09-30', paymentDate: null, notes: null,
+      dueDate: '2026-09-30', paymentDate: null, notes: null, categoryId: null,
     }, 'first-key');
     expect(api.list).toHaveBeenCalledTimes(2);
     expect(fixture.nativeElement.textContent).toContain('Despesa cadastrada com sucesso.');
@@ -72,7 +74,7 @@ describe('ExpenseComponent', () => {
     })));
     fixture.componentInstance.form.setValue({
       description: 'Internet', amount: '99,90', status: 'PENDING',
-      dueDate: '2026-09-30', paymentDate: '', notes: 'tentar novamente',
+      dueDate: '2026-09-30', paymentDate: '', notes: 'tentar novamente', categoryId: '',
     });
 
     fixture.componentInstance.submit();
@@ -144,7 +146,7 @@ describe('ExpenseComponent', () => {
     component.confirmCorrection();
     expect(api.correct).toHaveBeenCalledWith('pending', {
       version: 4, status: 'PENDING', description: 'Energia corrigida', amount: '151.25',
-      dueDate: '2026-10-01', notes: null,
+      dueDate: '2026-10-01', notes: null, categoryId: null,
     }, 'next-key');
 
     component.openCorrection({ id: 'paid', status: 'PAID', version: 2, description: 'Mercado', amount: '25.50',
@@ -154,7 +156,7 @@ describe('ExpenseComponent', () => {
     component.confirmCorrection();
     expect(api.correct).toHaveBeenLastCalledWith('paid', {
       version: 2, status: 'PAID', description: 'Mercado', amount: '25.50', dueDate: null, notes: 'compra',
-      paidAmount: '27.00', paymentDate: '2026-09-26', paidByUserId: 'payer', paymentNotes: 'ajuste',
+      paidAmount: '27.00', paymentDate: '2026-09-26', paidByUserId: 'payer', paymentNotes: 'ajuste', categoryId: null,
     }, 'next-key');
   });
 

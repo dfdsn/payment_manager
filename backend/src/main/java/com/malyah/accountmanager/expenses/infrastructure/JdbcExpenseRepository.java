@@ -29,7 +29,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
 
     @Override
     public StoredExpenseCreation createIdempotently(
-            OneOffExpense expense, UUID actorUserId, UUID key, String requestHash, Instant requestedAt) {
+            OneOffExpense expense, UUID actorUserId, UUID key, String requestHash, UUID categoryId, Instant requestedAt) {
         var claimed = jdbc.update("""
                 insert into expense_idempotency_requests(
                     space_id, actor_user_id, operation, idempotency_key, request_hash, created_at
@@ -51,7 +51,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
             return new StoredExpenseCreation(findById(expense.spaceId(), existing.expenseId()), true);
         }
 
-        insert(expense);
+        insert(expense, categoryId);
         if (expense.payment() != null) recordPayment(expense.id(), expense.spaceId(), actorUserId, expense.payment(), requestedAt);
         jdbc.update("""
                 update expense_idempotency_requests
@@ -129,7 +129,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
     @Override
     public StoredExpenseCreation correct(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command,
-            OneOffExpense corrected, Instant at) {
+            OneOffExpense corrected, UUID categoryId, Instant at) {
         var hash = hashCorrection(command, corrected);
         int claimed = jdbc.update("""
                 insert into expense_idempotency_requests(space_id, actor_user_id, operation, idempotency_key, request_hash, created_at)
@@ -154,20 +154,21 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 current.status(), command.status(), current.version(), command.version()))
             throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
         var changedFields = changedFields(current, corrected);
+        if (!Objects.equals(current.categoryId(), categoryId)) changedFields.add("categoryId");
         if (changedFields.isEmpty())
             throw new com.malyah.accountmanager.expenses.application.ExpenseQueryValidationException(
                     "correction", "Informe ao menos uma alteração.");
 
         var payment = corrected.payment();
         jdbc.update("""
-                update expense_entries set description=?, charge_amount=?, due_date=?, reference_date=?, notes=?,
+                update expense_entries set description=?, charge_amount=?, due_date=?, reference_date=?, notes=?, category_id=?,
                     paid_amount=?, payment_date=?, paid_by_user_id=?, payment_notes=?, version=version+1
                 where id=? and space_id=? and version=? and status=?
                 """, corrected.description(), corrected.amount().value(), corrected.dueDate(), corrected.referenceDate(),
-                corrected.notes(), payment == null ? null : payment.amount().value(), corrected.paymentDate(),
+                corrected.notes(), categoryId, payment == null ? null : payment.amount().value(), corrected.paymentDate(),
                 payment == null ? null : payment.payerId(), payment == null ? null : payment.notes(),
                 command.expenseId(), spaceId, command.version(), command.status().name());
-        recordCorrection(current, corrected, actorId, at, String.join(",", changedFields));
+        recordCorrection(current, corrected, categoryId, actorId, at, String.join(",", changedFields));
         jdbc.update("""
                 update expense_idempotency_requests set expense_id=?, completed_at=?
                 where space_id=? and actor_user_id=? and operation='CORRECT_EXPENSE' and idempotency_key=?
@@ -448,21 +449,21 @@ final class JdbcExpenseRepository implements ExpenseRepository {
         } catch (java.security.NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
     }
 
-    private void insert(OneOffExpense expense) {
+    private void insert(OneOffExpense expense, UUID categoryId) {
         var paid = expense.status() == ExpenseStatus.PAID;
         jdbc.update("""
                 insert into expense_entries(
                     id, space_id, origin, description, charge_amount, charge_confirmed, status,
                     due_date, reference_date, notes, paid_amount, payment_date, paid_by_user_id,
                     payment_recorded_by_user_id, payment_recorded_at, payment_notes,
-                    created_by_user_id, created_at, version
-                ) values (?, ?, 'ONE_OFF', ?, ?, true, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    created_by_user_id, created_at, version, category_id
+                ) values (?, ?, 'ONE_OFF', ?, ?, true, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 """, expense.id(), expense.spaceId(), expense.description(), expense.amount().value(),
                 expense.status().name(), expense.dueDate(), expense.referenceDate(), expense.notes(),
                 paid ? expense.payment().amount().value() : null, expense.paymentDate(),
                 paid ? expense.payment().payerId() : null, paid ? expense.createdByUserId() : null,
                 paid ? Timestamp.from(expense.createdAt()) : null, paid ? expense.payment().notes() : null,
-                expense.createdByUserId(), Timestamp.from(expense.createdAt()));
+                expense.createdByUserId(), Timestamp.from(expense.createdAt()), categoryId);
     }
 
     private String hashCorrection(
@@ -471,7 +472,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
         var canonical = command.expenseId() + ":" + command.version() + ":" + command.status() + ":"
                 + encoded(corrected.description()) + corrected.amount().canonical() + ":"
                 + corrected.dueDate() + ":" + encoded(corrected.notes())
-                + (payment == null ? "NO_PAYMENT" : payment.canonical());
+                + (payment == null ? "NO_PAYMENT" : payment.canonical()) + ":" + command.categoryId();
         try {
             return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
                     .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
@@ -498,7 +499,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
         return changed;
     }
 
-    private void recordCorrection(StoredExpense current, OneOffExpense corrected, UUID actorId, Instant at,
+    private void recordCorrection(StoredExpense current, OneOffExpense corrected, UUID categoryId, UUID actorId, Instant at,
             String changedFields) {
         var payment = corrected.payment();
         jdbc.update("""
@@ -507,8 +508,10 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                     old_description, new_description, old_charge_amount, new_charge_amount,
                     old_due_date, new_due_date, old_notes, new_notes,
                     old_paid_amount, new_paid_amount, old_payment_date, new_payment_date,
-                    old_payer_user_id, new_payer_user_id, old_payment_notes, new_payment_notes)
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    old_payer_user_id, new_payer_user_id, old_payment_notes, new_payment_notes,
+                    old_category_id, new_category_id, old_category_name, new_category_name)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    (select name from expense_categories where id=?))
                 """, UUID.randomUUID(), current.id(), current.spaceId(), actorId, Timestamp.from(at),
                 current.version(), current.version() + 1, changedFields,
                 current.description(), corrected.description(), current.amount(), corrected.amount().value(),
@@ -517,7 +520,8 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 current.paymentDate(), payment == null ? null : payment.date(),
                 current.paidByUserId(), payment == null ? null : payment.payerId(),
                 current.paymentAudit() == null ? null : current.paymentAudit().notes(),
-                payment == null ? null : payment.notes());
+                payment == null ? null : payment.notes(), current.categoryId(), categoryId,
+                current.categoryName(), categoryId);
     }
 
     private String selectBase() {
@@ -525,11 +529,13 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 select e.id, e.space_id, e.description, e.charge_amount, e.status, e.due_date,
                        e.payment_date, e.paid_amount, e.notes, e.created_by_user_id,
                        creator.display_name, e.paid_by_user_id, payer.display_name, e.created_at, e.version,
-                       e.payment_recorded_by_user_id, recorder.display_name, e.payment_recorded_at, e.payment_notes
+                       e.payment_recorded_by_user_id, recorder.display_name, e.payment_recorded_at, e.payment_notes,
+                       e.category_id, category.name
                   from expense_entries e
                   join identity_users creator on creator.id = e.created_by_user_id
                   left join identity_users payer on payer.id = e.paid_by_user_id
                   left join identity_users recorder on recorder.id = e.payment_recorded_by_user_id
+                  left join expense_categories category on category.id = e.category_id and category.space_id = e.space_id
                 """;
     }
 
@@ -541,7 +547,8 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 rs.getObject(10, UUID.class), rs.getString(11), rs.getObject(12, UUID.class), rs.getString(13),
                 rs.getTimestamp(14).toInstant(), rs.getLong(15), rs.getObject(16) == null ? null :
                         new com.malyah.accountmanager.expenses.application.PaymentAudit(rs.getObject(16, UUID.class),
-                                rs.getString(17), rs.getTimestamp(18).toInstant(), rs.getString(19)));
+                                rs.getString(17), rs.getTimestamp(18).toInstant(), rs.getString(19)),
+                rs.getObject(20, UUID.class), rs.getString(21));
     }
 
     private record IdempotencyRecord(String requestHash, UUID expenseId) {

@@ -16,6 +16,7 @@ export interface CreateExpenseData {
   paidAmount?: string;
   paidByUserId?: string;
   paymentNotes?: string | null;
+  categoryId?: string | null;
 }
 
 export interface CorrectExpenseData {
@@ -29,6 +30,7 @@ export interface CorrectExpenseData {
   paymentDate?: string;
   paidByUserId?: string;
   paymentNotes?: string | null;
+  categoryId?: string | null;
 }
 
 export interface Expense {
@@ -45,6 +47,7 @@ export interface Expense {
   referenceDate: string;
   overdue: boolean;
   categoryName: string | null;
+  categoryId: string | null;
   responsibleUserId: string | null;
   notes: string | null;
   createdByDisplayName: string;

@@ -9,6 +9,7 @@ import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { ApiError } from '../identity/initial-setup.service';
 import { AccountAccessService, SpaceMember } from '../identity/account-access.service';
+import { Category, CategoryService } from './category.service';
 import {
   Expense, ExpenseService, ExpenseSort, ExpenseStatus, SortDirection,
 } from './expense.service';
@@ -26,6 +27,8 @@ export class ExpenseComponent implements OnInit {
   private readonly formBuilder = inject(FormBuilder);
   private readonly expensesApi = inject(ExpenseService);
   private readonly identity = inject(AccountAccessService);
+  private readonly categoryApi = inject(CategoryService);
+  readonly categories = signal<Category[]>([]);
   readonly members = signal<SpaceMember[]>([]);
   readonly settling = signal<Expense | null>(null);
   readonly editing = signal<Expense | null>(null);
@@ -50,6 +53,7 @@ export class ExpenseComponent implements OnInit {
     amount: ['', [Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]],
     dueDate: [''],
     notes: ['', Validators.maxLength(2000)],
+    categoryId: [''],
     paidAmount: ['', Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)],
     paymentDate: [''],
     paidByUserId: [''],
@@ -83,6 +87,7 @@ export class ExpenseComponent implements OnInit {
     dueDate: ['', Validators.required],
     paymentDate: [''],
     notes: ['', Validators.maxLength(2000)],
+    categoryId: [''],
   });
 
   ngOnInit(): void {
@@ -96,6 +101,7 @@ export class ExpenseComponent implements OnInit {
     this.identity.members().subscribe({ next: members => this.members.set(members),
       error: error => this.handleError(error, 'Não foi possível carregar os pagadores.') });
     this.form.controls.status.valueChanges.subscribe(status => this.updateDateRules(status));
+    this.loadCategories();
     this.load();
   }
 
@@ -119,6 +125,7 @@ export class ExpenseComponent implements OnInit {
       dueDate: value.dueDate || null,
       paymentDate: value.paymentDate || null,
       notes: value.notes.trim() || null,
+      categoryId: value.categoryId || null,
       ...(value.status === 'PAID' ? {
         paidAmount: this.paymentForm.controls.paidAmount.value.replace(',', '.'),
         paidByUserId: this.paymentForm.controls.paidByUserId.value,
@@ -129,7 +136,7 @@ export class ExpenseComponent implements OnInit {
         this.message.set('Despesa cadastrada com sucesso.');
         this.idempotencyKey = this.expensesApi.newIdempotencyKey();
         this.form.reset({
-          description: '', amount: '', status: 'PENDING', dueDate: '', paymentDate: '', notes: '',
+          description: '', amount: '', status: 'PENDING', dueDate: '', paymentDate: '', notes: '', categoryId: '',
         });
         this.page.set(0);
         this.load();
@@ -240,6 +247,7 @@ export class ExpenseComponent implements OnInit {
       description: expense.description, amount: expense.amount, dueDate: expense.dueDate ?? '',
       notes: expense.notes ?? '', paidAmount: expense.paidAmount ?? '', paymentDate: expense.paymentDate ?? '',
       paidByUserId: expense.paidByUserId ?? '', paymentNotes: expense.paymentAudit?.notes ?? '',
+      categoryId: expense.categoryId ?? '',
     });
     if (expense.status === 'PAID') {
       this.editForm.controls.paidAmount.setValidators([Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]);
@@ -268,6 +276,7 @@ export class ExpenseComponent implements OnInit {
     this.expensesApi.correct(expense.id, {
       version: expense.version, status: expense.status, description: value.description,
       amount: value.amount.replace(',', '.'), dueDate: value.dueDate || null, notes: value.notes.trim() || null,
+      categoryId: value.categoryId || null,
       ...(expense.status === 'PAID' ? {
         paidAmount: value.paidAmount.replace(',', '.'), paymentDate: value.paymentDate,
         paidByUserId: value.paidByUserId, paymentNotes: value.paymentNotes.trim() || null,
@@ -408,6 +417,11 @@ export class ExpenseComponent implements OnInit {
         },
         error: error => this.handleError(error, 'Não foi possível carregar as despesas.'),
       });
+  }
+
+  private loadCategories(): void {
+    this.categoryApi.list(true).subscribe({next: values => this.categories.set(values),
+      error: error => this.handleError(error, 'Não foi possível carregar as categorias.')});
   }
 
   private handleError(error: HttpErrorResponse, fallback: string): void {
