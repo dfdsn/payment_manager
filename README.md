@@ -229,6 +229,15 @@ Administrador e convidado ativos podem executar o lote no próprio espaço. O ba
 
 Versões otimistas e constraints PostgreSQL tratam renomeações, arquivamentos e criações concorrentes sem sobrescrita ou duplicidade. Despesas existentes antes da V11 permanecem com categoria nula; nenhuma classificação arbitrária é aplicada. A substituição de uma categoria arquivada em recorrências será validada em E04; relatórios, fechamentos e sugestões de IA serão integrados em seus próprios épicos.
 
+### Atribuir responsável e consultar histórico
+
+1. Em `/despesas`, escolha opcionalmente um **Responsável** ao cadastrar ou use **Corrigir despesa** para atribuir, trocar ou voltar a **Não definido**. Administrador e convidado ativos podem fazer isso; o servidor aceita somente membro ativo do mesmo espaço e exige a versão carregada.
+2. Responsável indica quem acompanha a conta. Ele não altera quem pode editar, não é o pagador e não substitui o autor da operação. A quitação continua exibindo separadamente pagador e usuário que a registrou.
+3. Use **Ver histórico** para consultar, em páginas de dez eventos, criação, correções, quitações, reversões e cancelamento. Correções mostram valores anterior e posterior disponíveis; autor e instante permanecem associados ao evento original. A interface converte o instante UTC para o fuso configurado no espaço.
+4. Se o responsável sair ou for removido, a associação atual é limpa na mesma transação da saída, a versão da despesa avança e o histórico registra quem executou a liberação. Autores e pagadores antigos não são reatribuídos. O aviso ao administrador será entregue pelo módulo de notificações de E08; o evento durável necessário já fica preservado.
+
+Despesas canceladas continuam imutáveis pelo fluxo de correção. A API paginada é `GET /api/v1/expenses/{id}/history?page=0&size=10` (máximo 100) e aplica a mesma autorização por associação/espaço do detalhe. Não são criados autores ou eventos retroativos sem evidência: a criação deriva do próprio registro persistido e as alterações vêm da auditoria existente.
+
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
 ## Testes e gates
@@ -296,7 +305,7 @@ cd backend
 ```
 
 - `test`: JUnit/Spring e ArchUnit; não executa classes `*IT`.
-- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V11, identidade, despesas e categorias, incluindo lote atômico, quitação/correção/auditoria, conflitos otimistas, idempotência concorrente, isolamento por espaço e constraints duráveis.
+- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V12, identidade, despesas, categorias, responsabilidade e histórico, incluindo lote atômico, quitação/correção/auditoria, conflitos otimistas, idempotência concorrente, isolamento por espaço e constraints duráveis.
 - `-Pmutation`: PIT sobre domínio/aplicação. `-DskipITs` evita criar PostgreSQL novamente; não elimina unitários nem gates.
 - JaCoCo: linhas ≥80% e branches ≥70% em domínio/aplicação.
 - PIT: mutação ≥70% e cobertura de linhas ≥80% no código mutado.
@@ -324,7 +333,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de criar/usar/renomear/arquivar categoria, cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar com histórico, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de criar/usar/renomear/arquivar categoria, atribuir responsável, consultar histórico, cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -408,4 +417,4 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01, E02 e H03.1 estão concluídos pelas evidências atuais. A próxima história recomendada é **H03.2 — Atribuir responsável e consultar histórico**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01, E02, H03.1 e H03.2 estão concluídos pelas evidências atuais. A próxima história recomendada é **H03.3 — Anexar e acessar documentos**.

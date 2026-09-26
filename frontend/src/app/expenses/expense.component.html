@@ -45,6 +45,11 @@
             @for (category of categories(); track category.id) { @if (!category.archived) { <option [value]="category.id">{{category.name}}</option> } }
           </select>
         </label>
+        <label class="select-field">Responsável (opcional)
+          <select formControlName="responsibleUserId"><option value="">Sem responsável</option>
+            @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+          </select>
+        </label>
 
         @if (form.controls.status.value === 'PENDING') {
           <mat-form-field appearance="outline">
@@ -210,6 +215,11 @@
               }
             </select>
           </label>
+          <label class="select-field">Responsável corrigido (opcional)
+            <select formControlName="responsibleUserId"><option value="">Sem responsável</option>
+              @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+            </select>
+          </label>
           @if (expense.status === 'PAID') {
             <mat-form-field appearance="outline"><mat-label>Valor pago corrigido</mat-label>
               <input matInput formControlName="paidAmount" inputmode="decimal" />
@@ -277,21 +287,32 @@
         <mat-card-subtitle>Situação atual: {{ selected.status === 'CANCELLED' ? 'Cancelada' : (selected.status === 'PAID' ? 'Paga' : 'Pendente') }} · versão {{ selected.version }}</mat-card-subtitle>
       </mat-card-header>
       <mat-card-content>
-        @if (selected.history.length === 0) {
+        @if (historyLoading()) {
+          <p role="status">Carregando histórico…</p>
+        } @else if (historyError()) {
+          <div class="error-summary" role="alert">{{ historyError() }}</div>
+        } @else if (history().length === 0) {
           <p>Nenhuma alteração histórica registrada.</p>
         } @else {
           <ol class="history-list">
-            @for (event of selected.history; track event.type + event.version) {
+            @for (event of history(); track event.type + event.version + event.occurredAt) {
               <li>
                 <strong>{{ historyLabel(event.type) }}</strong> por {{ event.actorDisplayName }}
-                <span>· versão {{ event.version }} · {{ event.occurredAt }}</span>
+                <span>· versão {{ event.version }} · {{ formatInstant(event.occurredAt) }}</span>
                 @if (event.reason) { <p>Motivo: {{ event.reason }}</p> }
                 @if (event.paidAmount) { <p>Pagamento preservado: {{ formatCurrency(event.paidAmount) }} em {{ formatDate(event.paymentDate) }} por {{ event.payerDisplayName }}.</p> }
-                @if (event.changedFields) { <p>Campos alterados: {{ event.changedFields }}.</p> }
+                @for (change of event.changes; track change.field) {
+                  <p>{{ historyField(change.field) }}: {{ historyValue(change.previousValue) }} → {{ historyValue(change.currentValue) }}.</p>
+                }
                 @if (event.batchOperationId) { <p>Operação em lote: {{ event.batchOperationId }}.</p> }
               </li>
             }
           </ol>
+          <nav class="pagination" aria-label="Paginação do histórico">
+            <button matButton="outlined" type="button" (click)="loadHistory(selected.id, historyPage() - 1)" [disabled]="historyPage() === 0">Histórico anterior</button>
+            <span>Página {{ historyPage() + 1 }} de {{ historyTotalPages() }}</span>
+            <button matButton="outlined" type="button" (click)="loadHistory(selected.id, historyPage() + 1)" [disabled]="historyPage() + 1 >= historyTotalPages()">Próximo histórico</button>
+          </nav>
         }
         <button matButton="outlined" type="button" (click)="detail.set(null)">Fechar histórico</button>
       </mat-card-content>
@@ -348,7 +369,7 @@
                 <span class="status-label">{{ expense.status === 'PAID' ? 'Paga' : (expense.overdue ? 'Atrasada' : 'Pendente') }}</span>
                 — referência {{ formatDate(expense.referenceDate) }}
               </p>
-              <p>Categoria: {{ expense.categoryName ?? 'Sem categoria' }} · Responsável: Não definido</p>
+              <p>Categoria: {{ expense.categoryName ?? 'Sem categoria' }} · Responsável: {{ expense.responsibleDisplayName ?? 'Não definido' }}</p>
               @if (expense.status === 'PAID') {
                 <p>Pagamento em {{ formatDate(expense.paymentDate) }} por {{ expense.paidByDisplayName }}.</p>
                 <p>Valor pago: {{ formatCurrency(expense.paidAmount!) }}</p>

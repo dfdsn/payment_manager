@@ -54,12 +54,13 @@ class MembershipPostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(11);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(12);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var repository = new JdbcMembershipRepository(jdbc);
         var service = new MembershipManagementService(
-                repository, new JdbcSessionRevoker(jdbc), UUID::randomUUID, Clock.fixed(NOW, ZoneOffset.UTC));
+                repository, new JdbcSessionRevoker(jdbc), UUID::randomUUID, Clock.fixed(NOW, ZoneOffset.UTC),
+                List.of(new com.malyah.accountmanager.expenses.infrastructure.JdbcMembershipDepartureHandler(jdbc)));
         useCase = new TransactionalMembershipManagementUseCase(
                 service, new TransactionTemplate(new DataSourceTransactionManager(dataSource)));
     }
@@ -67,6 +68,12 @@ class MembershipPostgresIT {
     @Test
     void removalRevokesOpenSessionsPreservesHistoryAndReleasesInvitationVacancy() {
         insertSession("guest-session", "guest@example.com");
+        var expense = UUID.randomUUID();
+        jdbc.update("""
+                insert into expense_entries(id, space_id, origin, description, charge_amount, charge_confirmed,
+                    status, due_date, reference_date, responsible_user_id, created_by_user_id, created_at, version)
+                values (?, ?, 'ONE_OFF', 'Internet', 120.00, true, 'PENDING', '2026-10-05', '2026-10-05', ?, ?, ?, 0)
+                """, expense, SPACE, GUEST, ADMIN, Timestamp.from(NOW.minusSeconds(30)));
 
         useCase.remove("admin@example.com", GUEST);
 
@@ -80,6 +87,13 @@ class MembershipPostgresIT {
                 "guest@example.com")).isZero();
         assertThat(jdbc.queryForObject("select event_type from membership_lifecycle_events", String.class))
                 .isEqualTo("MEMBER_REMOVED");
+        assertThat(jdbc.queryForObject("select responsible_user_id from expense_entries where id=?", UUID.class, expense))
+                .isNull();
+        assertThat(jdbc.queryForObject("select version from expense_entries where id=?", Long.class, expense)).isOne();
+        assertThat(jdbc.queryForObject("select old_responsible_name from expense_correction_events where expense_id=?",
+                String.class, expense)).isEqualTo("Convidado");
+        assertThat(jdbc.queryForObject("select actor_user_id from expense_correction_events where expense_id=?",
+                UUID.class, expense)).isEqualTo(ADMIN);
         assertThatThrownBy(() -> new AuthenticatedUserContextService(new JdbcAuthenticatedUserContextRepository(jdbc))
                 .findByEmail("guest@example.com"))
                 .isInstanceOf(AuthenticatedUserContextNotFoundException.class);

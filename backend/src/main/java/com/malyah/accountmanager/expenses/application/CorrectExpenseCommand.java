@@ -18,11 +18,19 @@ public record CorrectExpenseCommand(
         UUID paidByUserId,
         String paymentNotes,
         UUID idempotencyKey,
-        UUID categoryId) {
+        UUID categoryId,
+        UUID responsibleUserId) {
     public CorrectExpenseCommand(UUID expenseId, long version, ExpenseStatus status, String description,
             String amount, LocalDate dueDate, String notes, String paidAmount, LocalDate paymentDate,
             UUID paidByUserId, String paymentNotes, UUID idempotencyKey) {
         this(expenseId, version, status, description, amount, dueDate, notes, paidAmount, paymentDate,
-                paidByUserId, paymentNotes, idempotencyKey, null);
+                paidByUserId, paymentNotes, idempotencyKey, null, null);
+    }
+
+    public CorrectExpenseCommand(UUID expenseId, long version, ExpenseStatus status, String description,
+            String amount, LocalDate dueDate, String notes, String paidAmount, LocalDate paymentDate,
+            UUID paidByUserId, String paymentNotes, UUID idempotencyKey, UUID categoryId) {
+        this(expenseId, version, status, description, amount, dueDate, notes, paidAmount, paymentDate,
+                paidByUserId, paymentNotes, idempotencyKey, categoryId, null);
     }
 }

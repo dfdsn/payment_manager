@@ -320,6 +320,26 @@ Condição de conclusão ou desbloqueio: critérios executáveis da H03.1 satisf
 Próximo passo: H03.2 — atribuir responsável e consultar histórico.
 ```
 
+## Registro H03.2
+
+```text
+História / objetivo: H03.2 — Atribuir responsável e consultar histórico.
+Estado / responsável / data: Concluído / desenvolvimento / 25/09/2026.
+Requisitos e critérios de aceite relacionados: RF-ACC-09, RF-CON-04, RF-ALT-01, CA-02/CA-03/CA-04; responsabilidade opcional, elegibilidade, distinção de pagador/autor, saída, histórico autorizado/paginado e fuso.
+Decisões e pendências aplicáveis: T14 registrada. O aviso ao administrador após liberação da responsabilidade depende do módulo de notificações de E08; a evidência durável foi preparada sem simular entrega. Recorrências, parcelas, filtros, CSV e alertas serão integrados em E04–E06/E08.
+Branch / commit / PR: branch `h03-2-responsible-history`, base H03.1 `cbda94a`; entrega não publicada, implantada ou aberta em PR.
+Arquivos e comportamento alterados: módulo expenses nas quatro camadas; contrato público de saída no identity; V12; responsável opcional no cadastro/correção/leitura; GET paginado `/expenses/{id}/history`; limpeza transacional na saída; interface, E2E, OpenAPI, README, decisões e evidência H03.2.
+Migrações e impacto sobre dados: V12 adiciona FK anulável e campos históricos anterior/posterior. Despesas existentes permanecem sem responsável; V1–V11 não foram editadas. Nenhum autor/evento retroativo foi inventado.
+Testes executados: regressão final com 101 unitários/HTTP/ArchUnit; 32 ITs selecionados (28 despesas, 3 associação, 1 Flyway); 44 Vitest; build Angular; 1 E2E full-stack. Finais aprovados sem ignorados/falhas/erros. PostgreSQL `postgres:17.6-alpine`, Flyway V1–V12 e BUILD SUCCESS.
+Cobertura e mutação aplicáveis: JaCoCo 743/779 linhas (95,38%) e 352/414 branches (85,02%); PIT 262/348 (75%), 91% das linhas mutadas cobertas e força 85%; gates mantidos.
+Validação manual / integração real: Testcontainers comprovou atribuição/troca/remoção, membro inelegível ou alheio, isolamento, paginação, eventos de todo o ciclo e limpeza na saída preservando histórico. E2E Chrome em stack limpa atribuiu ao convidado, exibiu a mudança no histórico e manteve a regressão completa.
+Falhas de validação encontradas e corrigidas: a primeira execução PostgreSQL tentou bloquear o lado anulável de um LEFT JOIN e terminou com 27 testes de despesas e Flyway aprovados, porém 1 falha e 2 erros de associação. O lock passou a `FOR UPDATE OF e`. O novo teste concorrente também revelou que sua simulação direta de saída omitia os campos obrigatórios do contrato H01.4; o arranjo foi corrigido. A execução final gerou relatórios novos e aprovou 32/32. Execuções falhas não foram tratadas como aprovação.
+Limitações e cenários futuros: o aviso interno/WhatsApp ao administrador ainda não existe e será validado em E08; associação em recorrências/parcelas, filtros/CSV e alertas pertencem a E04–E06/E08. Mailpit foi apenas infraestrutura local; H03.2 não envia email. Android/Edge reais continuam no aceite transversal.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H03.2.md e este arquivo.
+Condição de conclusão ou desbloqueio: critérios executáveis da H03.2 satisfeitos em 25/09/2026; integrações futuras explicitamente diferidas conforme backlog.
+Próximo passo: H03.3 — anexar e acessar documentos.
+```
+
 ## Registro de release: modelo
 
 ```text

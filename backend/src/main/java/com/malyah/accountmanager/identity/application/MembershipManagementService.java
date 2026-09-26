@@ -17,16 +17,27 @@ public final class MembershipManagementService {
     private final SessionRevoker sessionRevoker;
     private final IdentifierGenerator identifiers;
     private final Clock clock;
+    private final java.util.List<MembershipDepartureHandler> departureHandlers;
 
     public MembershipManagementService(
             MembershipRepository repository,
             SessionRevoker sessionRevoker,
             IdentifierGenerator identifiers,
             Clock clock) {
+        this(repository, sessionRevoker, identifiers, clock, java.util.List.of());
+    }
+
+    public MembershipManagementService(
+            MembershipRepository repository,
+            SessionRevoker sessionRevoker,
+            IdentifierGenerator identifiers,
+            Clock clock,
+            java.util.List<MembershipDepartureHandler> departureHandlers) {
         this.repository = repository;
         this.sessionRevoker = sessionRevoker;
         this.identifiers = identifiers;
         this.clock = clock;
+        this.departureHandlers = java.util.List.copyOf(departureHandlers);
     }
 
     public List<ManagedMember> members(String rawActorEmail) {
@@ -44,6 +55,8 @@ public final class MembershipManagementService {
             throw new MembershipConflictException("O administrador não pode remover a si próprio.");
         }
         var now = clock.instant();
+        departureHandlers.forEach(handler -> handler.beforeMembershipEnds(
+                actor.spaceId(), member.userId(), actor.userId(), now));
         repository.endMembership(actor.spaceId(), member.userId(), actor.userId(), "ADMIN_REMOVAL", now);
         repository.append(event(actor, member, Type.MEMBER_REMOVED, actor.role(), null, now));
         sessionRevoker.revokeAll(member.normalizedEmail());
@@ -58,6 +71,8 @@ public final class MembershipManagementService {
                     "Transfira a administração antes de sair. O encerramento do espaço ainda não está disponível.");
         }
         var now = clock.instant();
+        departureHandlers.forEach(handler -> handler.beforeMembershipEnds(
+                actor.spaceId(), actor.userId(), actor.userId(), now));
         repository.endMembership(actor.spaceId(), actor.userId(), actor.userId(), "VOLUNTARY_EXIT", now);
         repository.append(event(actor, actor, Type.MEMBER_LEFT, null, null, now));
         sessionRevoker.revokeAll(actor.normalizedEmail());

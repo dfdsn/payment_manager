@@ -11,7 +11,7 @@ describe('ExpenseComponent', () => {
   let fixture: ComponentFixture<ExpenseComponent>;
   const api = {
     newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(), settle: vi.fn(), get: vi.fn(), correct: vi.fn(),
-    reversePayment: vi.fn(), cancel: vi.fn(), settleBatch: vi.fn(),
+    reversePayment: vi.fn(), cancel: vi.fn(), settleBatch: vi.fn(), history: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -21,6 +21,7 @@ describe('ExpenseComponent', () => {
       content: [], page: 0, size: 20, totalElements: 0, totalPages: 0,
       sort: 'REFERENCE_DATE', direction: 'ASC',
     }));
+    api.history.mockReturnValue(of({ content: [], page: 0, size: 10, totalElements: 0, totalPages: 0 }));
     await TestBed.configureTestingModule({
       imports: [ExpenseComponent],
       providers: [{ provide: ExpenseService, useValue: api }, provideRouter([]),
@@ -43,7 +44,7 @@ describe('ExpenseComponent', () => {
     api.create.mockReturnValue(of({ id: 'expense' }));
     fixture.componentInstance.form.setValue({
       description: 'Energia', amount: '150,25', status: 'PENDING',
-      dueDate: '2026-09-30', paymentDate: '', notes: '', categoryId: '',
+      dueDate: '2026-09-30', paymentDate: '', notes: '', categoryId: '', responsibleUserId: '',
     });
 
     fixture.componentInstance.submit();
@@ -51,7 +52,7 @@ describe('ExpenseComponent', () => {
 
     expect(api.create).toHaveBeenCalledWith({
       description: 'Energia', amount: '150.25', status: 'PENDING',
-      dueDate: '2026-09-30', paymentDate: null, notes: null, categoryId: null,
+      dueDate: '2026-09-30', paymentDate: null, notes: null, categoryId: null, responsibleUserId: null,
     }, 'first-key');
     expect(api.list).toHaveBeenCalledTimes(2);
     expect(fixture.nativeElement.textContent).toContain('Despesa cadastrada com sucesso.');
@@ -74,7 +75,7 @@ describe('ExpenseComponent', () => {
     })));
     fixture.componentInstance.form.setValue({
       description: 'Internet', amount: '99,90', status: 'PENDING',
-      dueDate: '2026-09-30', paymentDate: '', notes: 'tentar novamente', categoryId: '',
+      dueDate: '2026-09-30', paymentDate: '', notes: 'tentar novamente', categoryId: '', responsibleUserId: '',
     });
 
     fixture.componentInstance.submit();
@@ -146,7 +147,7 @@ describe('ExpenseComponent', () => {
     component.confirmCorrection();
     expect(api.correct).toHaveBeenCalledWith('pending', {
       version: 4, status: 'PENDING', description: 'Energia corrigida', amount: '151.25',
-      dueDate: '2026-10-01', notes: null, categoryId: null,
+      dueDate: '2026-10-01', notes: null, categoryId: null, responsibleUserId: null,
     }, 'next-key');
 
     component.openCorrection({ id: 'paid', status: 'PAID', version: 2, description: 'Mercado', amount: '25.50',
@@ -157,6 +158,7 @@ describe('ExpenseComponent', () => {
     expect(api.correct).toHaveBeenLastCalledWith('paid', {
       version: 2, status: 'PAID', description: 'Mercado', amount: '25.50', dueDate: null, notes: 'compra',
       paidAmount: '27.00', paymentDate: '2026-09-26', paidByUserId: 'payer', paymentNotes: 'ajuste', categoryId: null,
+      responsibleUserId: null,
     }, 'next-key');
   });
 
@@ -196,10 +198,13 @@ describe('ExpenseComponent', () => {
     api.reversePayment.mockReturnValue(of({}));
     api.get.mockReturnValue(of({ ...paid, status: 'PENDING', version: 3,
       history: [{ type: 'PAYMENT_REVERSED', version: 3, actorDisplayName: 'Autor', occurredAt: '2026-09-25T13:00:00Z', reason: 'Pagamento incorreto' }] }));
+    api.history.mockReturnValue(of({ content: [{ type: 'PAYMENT_REVERSED', version: 3, actorDisplayName: 'Autor',
+      occurredAt: '2026-09-25T13:00:00Z', reason: 'Pagamento incorreto', changes: [] }],
+      page: 0, size: 10, totalElements: 1, totalPages: 1 }));
     component.confirmLifecycleAction();
     expect(api.reversePayment).toHaveBeenCalledWith('paid', 2, 'Pagamento incorreto', 'next-key');
     expect(component.message()).toContain('voltou a ficar pendente');
-    expect(component.detail()?.history[0].type).toBe('PAYMENT_REVERSED');
+    expect(component.history()[0].type).toBe('PAYMENT_REVERSED');
   });
 
   it('preserves cancellation reason after conflict and never retries automatically', () => {
@@ -268,5 +273,29 @@ describe('ExpenseComponent', () => {
     expect(component.selectedForBatch().has('one')).toBe(true);
     expect(component.batchForm.controls.paymentDate.value).toBe('2026-10-01');
     expect(component.errorMessage()).toContain('lote inteiro foi rejeitado');
+  });
+
+  it('assigns an active responsible and loads paginated history in the space timezone', () => {
+    const component = fixture.componentInstance;
+    component.openCorrection({ id: 'expense', status: 'PENDING', version: 2, description: 'Energia', amount: '150.00',
+      dueDate: '2026-09-30', notes: null, responsibleUserId: null } as any);
+    component.editForm.controls.responsibleUserId.setValue('payer');
+    api.correct.mockReturnValue(of({}));
+
+    component.confirmCorrection();
+
+    expect(api.correct).toHaveBeenCalledWith('expense', expect.objectContaining({ responsibleUserId: 'payer', version: 2 }), 'next-key');
+
+    api.get.mockReturnValue(of({ id: 'expense', status: 'PENDING', version: 3 }));
+    api.history.mockReturnValue(of({ content: [{ type: 'EXPENSE_CORRECTED', version: 3,
+      actorDisplayName: 'Autor', occurredAt: '2026-09-25T13:00:00Z', reason: null,
+      changes: [{ field: 'responsibleUserId', previousValue: null, currentValue: 'Outro' }] }],
+      page: 1, size: 10, totalElements: 11, totalPages: 2 }));
+    component.loadDetail('expense');
+    component.loadHistory('expense', 1);
+
+    expect(api.history).toHaveBeenLastCalledWith('expense', 1, 10);
+    expect(component.history()[0].changes[0].currentValue).toBe('Outro');
+    expect(component.formatInstant('2026-09-25T13:00:00Z')).toContain('10:00:00');
   });
 });

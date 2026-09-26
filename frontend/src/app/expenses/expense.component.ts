@@ -35,6 +35,11 @@ export class ExpenseComponent implements OnInit {
   readonly conflictCurrent = signal<Expense | null>(null);
   readonly lifecycleAction = signal<{ expense: Expense; type: 'REVERSE' | 'CANCEL' } | null>(null);
   readonly detail = signal<Expense | null>(null);
+  readonly history = signal<import('./expense.service').ExpenseHistoryEvent[]>([]);
+  readonly historyPage = signal(0);
+  readonly historyTotalPages = signal(0);
+  readonly historyLoading = signal(false);
+  readonly historyError = signal<string | null>(null);
   readonly selectedForBatch = signal(new Map<string, Expense>());
   readonly batchOpen = signal(false);
   private paymentKey = '';
@@ -42,6 +47,7 @@ export class ExpenseComponent implements OnInit {
   private actionKey = '';
   private batchKey = '';
   private today = '';
+  private spaceTimeZone = 'America/Sao_Paulo';
   readonly paymentForm = this.formBuilder.nonNullable.group({
     paidAmount: ['', [Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]],
     paymentDate: ['', Validators.required],
@@ -54,6 +60,7 @@ export class ExpenseComponent implements OnInit {
     dueDate: [''],
     notes: ['', Validators.maxLength(2000)],
     categoryId: [''],
+    responsibleUserId: [''],
     paidAmount: ['', Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)],
     paymentDate: [''],
     paidByUserId: [''],
@@ -88,10 +95,12 @@ export class ExpenseComponent implements OnInit {
     paymentDate: [''],
     notes: ['', Validators.maxLength(2000)],
     categoryId: [''],
+    responsibleUserId: [''],
   });
 
   ngOnInit(): void {
     this.identity.context().subscribe({ next: context => {
+      this.spaceTimeZone = context.timeZone;
       const parts = new Intl.DateTimeFormat('en-CA', { timeZone: context.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
       const part = (type: string) => parts.find(value => value.type === type)!.value;
       this.today = `${part('year')}-${part('month')}-${part('day')}`;
@@ -126,6 +135,7 @@ export class ExpenseComponent implements OnInit {
       paymentDate: value.paymentDate || null,
       notes: value.notes.trim() || null,
       categoryId: value.categoryId || null,
+      responsibleUserId: value.responsibleUserId || null,
       ...(value.status === 'PAID' ? {
         paidAmount: this.paymentForm.controls.paidAmount.value.replace(',', '.'),
         paidByUserId: this.paymentForm.controls.paidByUserId.value,
@@ -137,6 +147,7 @@ export class ExpenseComponent implements OnInit {
         this.idempotencyKey = this.expensesApi.newIdempotencyKey();
         this.form.reset({
           description: '', amount: '', status: 'PENDING', dueDate: '', paymentDate: '', notes: '', categoryId: '',
+          responsibleUserId: '',
         });
         this.page.set(0);
         this.load();
@@ -248,6 +259,7 @@ export class ExpenseComponent implements OnInit {
       notes: expense.notes ?? '', paidAmount: expense.paidAmount ?? '', paymentDate: expense.paymentDate ?? '',
       paidByUserId: expense.paidByUserId ?? '', paymentNotes: expense.paymentAudit?.notes ?? '',
       categoryId: expense.categoryId ?? '',
+      responsibleUserId: expense.responsibleUserId ?? '',
     });
     if (expense.status === 'PAID') {
       this.editForm.controls.paidAmount.setValidators([Validators.required, Validators.pattern(/^\d{1,8}([.,]\d{1,2})?$/)]);
@@ -277,6 +289,7 @@ export class ExpenseComponent implements OnInit {
       version: expense.version, status: expense.status, description: value.description,
       amount: value.amount.replace(',', '.'), dueDate: value.dueDate || null, notes: value.notes.trim() || null,
       categoryId: value.categoryId || null,
+      responsibleUserId: value.responsibleUserId || null,
       ...(expense.status === 'PAID' ? {
         paidAmount: value.paidAmount.replace(',', '.'), paymentDate: value.paymentDate,
         paidByUserId: value.paidByUserId, paymentNotes: value.paymentNotes.trim() || null,
@@ -346,15 +359,45 @@ export class ExpenseComponent implements OnInit {
   }
 
   loadDetail(id: string): void {
+    this.historyPage.set(0);
     this.expensesApi.get(id).subscribe({
-      next: expense => this.detail.set(expense),
+      next: expense => { this.detail.set(expense); this.loadHistory(id, 0); },
       error: error => this.handleError(error, 'Não foi possível consultar o histórico da despesa.'),
     });
   }
 
+  loadHistory(id: string, page: number): void {
+    this.historyLoading.set(true);
+    this.historyError.set(null);
+    this.expensesApi.history(id, page, 10).pipe(finalize(() => this.historyLoading.set(false))).subscribe({
+      next: result => {
+        this.history.set(result.content);
+        this.historyPage.set(result.page);
+        this.historyTotalPages.set(result.totalPages);
+      },
+      error: () => this.historyError.set('Não foi possível carregar esta página do histórico.'),
+    });
+  }
+
   historyLabel(type: string): string {
-    return ({ EXPENSE_PAID: 'Quitação registrada', PAYMENT_REVERSED: 'Quitação desfeita',
+    return ({ EXPENSE_CREATED: 'Despesa cadastrada', EXPENSE_PAID: 'Quitação registrada', PAYMENT_REVERSED: 'Quitação desfeita',
       EXPENSE_CORRECTED: 'Despesa corrigida', EXPENSE_CANCELLED: 'Despesa cancelada' } as Record<string, string>)[type] ?? type;
+  }
+
+  historyField(field: string): string {
+    return ({ description: 'Descrição', amount: 'Valor', dueDate: 'Vencimento', notes: 'Observação',
+      paidAmount: 'Valor pago', paymentDate: 'Data do pagamento', paidByUserId: 'Pagador',
+      categoryId: 'Categoria', responsibleUserId: 'Responsável' } as Record<string, string>)[field] ?? field;
+  }
+
+  historyValue(value: string | null): string {
+    return value === null || value === '' ? 'Não definido' : value;
+  }
+
+  formatInstant(value: string): string {
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: this.spaceTimeZone, dateStyle: 'short', timeStyle: 'medium',
+    }).format(new Date(value));
   }
 
   toggleDirection(): void {

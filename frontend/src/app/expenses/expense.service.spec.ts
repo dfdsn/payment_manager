@@ -91,6 +91,15 @@ describe('ExpenseService', () => {
     put.flush({});
   });
 
+  it('loads a deterministic page of expense history', () => {
+    service.history('expense-id', 2, 10).subscribe();
+    const request = http.expectOne(candidate => candidate.url === '/api/v1/expenses/expense-id/history');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.params.get('page')).toBe('2');
+    expect(request.request.params.get('size')).toBe('10');
+    request.flush({ content: [], page: 2, size: 10, totalElements: 0, totalPages: 0 });
+  });
+
   it('reverses and cancels through protected versioned idempotent actions', () => {
     for (const action of [
       { invoke: () => service.reversePayment('expense-id', 4, 'Pagamento incorreto', 'reverse-key'), path: 'payment-reversal', key: 'reverse-key', reason: 'Pagamento incorreto' },

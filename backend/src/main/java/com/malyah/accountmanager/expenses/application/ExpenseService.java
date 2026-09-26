@@ -62,15 +62,19 @@ public final class ExpenseService {
         if (payment == null && (command.paidAmount() != null || command.paidByUserId() != null || command.paymentNotes() != null))
             throw new com.malyah.accountmanager.expenses.domain.ExpenseValidationException("payment", "Despesa pendente não possui pagamento.");
         memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment == null ? null : payment.payerId());
+        if (command.responsibleUserId() != null)
+            memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), command.responsibleUserId());
         if (categories != null) categories.requireSelectable(actor.spaceId(), command.categoryId());
         var expense = new OneOffExpense(
                 identifiers.next(), actor.spaceId(), command.description(), ExpenseAmount.parse(command.amount()),
                 command.status(), command.dueDate(), command.paymentDate(), null, command.notes(), actor.userId(),
                 clock.instant(), payment);
-        var stored = categories == null
-                ? repository.createIdempotently(expense, actor.userId(), command.idempotencyKey(), fingerprint(expense, null), clock.instant())
+        var stored = command.categoryId() == null && command.responsibleUserId() == null
+                ? repository.createIdempotently(expense, actor.userId(), command.idempotencyKey(),
+                        fingerprint(expense, null), clock.instant())
                 : repository.createIdempotently(expense, actor.userId(), command.idempotencyKey(),
-                        fingerprint(expense, command.categoryId()), command.categoryId(), clock.instant());
+                        fingerprint(expense, command.categoryId(), command.responsibleUserId()), command.categoryId(),
+                        command.responsibleUserId(), clock.instant());
         return new ExpenseCreationResult(view(stored.expense(), actor.timeZone()), stored.replayed());
     }
 
@@ -133,15 +137,32 @@ public final class ExpenseService {
                     "payment", "Despesa pendente não possui pagamento.");
         }
         memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment == null ? null : payment.payerId());
+        if (command.responsibleUserId() != null)
+            memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), command.responsibleUserId());
         if (categories != null && !Objects.equals(current.categoryId(), command.categoryId()))
             categories.requireSelectable(actor.spaceId(), command.categoryId());
         var corrected = new OneOffExpense(current.id(), current.spaceId(), command.description(),
                 ExpenseAmount.parse(command.amount()), command.status(), command.dueDate(), paymentDate, null,
                 command.notes(), current.createdByUserId(), current.createdAt(), payment);
-        var result = categories == null
+        var result = command.categoryId() == null && command.responsibleUserId() == null
                 ? repository.correct(actor.spaceId(), actor.userId(), command, corrected, clock.instant())
-                : repository.correct(actor.spaceId(), actor.userId(), command, corrected, command.categoryId(), clock.instant());
+                : repository.correct(actor.spaceId(), actor.userId(), command, corrected, command.categoryId(),
+                        command.responsibleUserId(), clock.instant());
         return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
+    }
+
+    public ExpenseHistoryPage history(String email, UUID expenseId, int page, int size) {
+        if (expenseId == null) throw new ExpenseQueryValidationException("expenseId", "Informe a despesa.");
+        if (page < 0) throw new ExpenseQueryValidationException("page", "A página não pode ser negativa.");
+        if (size < 1 || size > MAXIMUM_PAGE_SIZE)
+            throw new ExpenseQueryValidationException("size", "O tamanho da página deve estar entre 1 e 100.");
+        var actor = contextQuery.findByEmail(email);
+        repository.findById(actor.spaceId(), expenseId);
+        var all = repository.history(actor.spaceId(), expenseId);
+        var from = Math.min(all.size(), Math.multiplyExact(page, size));
+        var to = Math.min(all.size(), from + size);
+        var pages = all.isEmpty() ? 0 : (all.size() + size - 1) / size;
+        return new ExpenseHistoryPage(all.subList(from, to), page, size, all.size(), pages);
     }
 
     public ExpenseCreationResult reversePayment(String email, ReversePaymentCommand command) {
@@ -201,7 +222,8 @@ public final class ExpenseService {
                 expense.id(), "ONE_OFF", expense.description(), expense.amount().toPlainString(), "BRL",
                 expense.status(), expense.dueDate(), expense.paymentDate(),
                 expense.paidAmount() == null ? null : expense.paidAmount().toPlainString(),
-                referenceDate, overdue, expense.categoryName(), expense.categoryId(), null, expense.notes(), expense.createdByUserId(),
+                referenceDate, overdue, expense.categoryName(), expense.categoryId(), expense.responsibleUserId(),
+                expense.responsibleDisplayName(), expense.notes(), expense.createdByUserId(),
                 expense.createdByDisplayName(), expense.paidByUserId(), expense.paidByDisplayName(),
                 expense.createdAt(), expense.version(), expense.paymentAudit(), history);
     }
@@ -213,9 +235,14 @@ public final class ExpenseService {
     }
 
     private String fingerprint(OneOffExpense expense, UUID categoryId) {
+        return fingerprint(expense, categoryId, null);
+    }
+
+    private String fingerprint(OneOffExpense expense, UUID categoryId, UUID responsibleUserId) {
         var canonical = String.join("\u001f",
                 expense.description(), expense.amount().canonical(), expense.status().name(),
-                value(expense.dueDate()), value(expense.paymentDate()), value(expense.notes()), value(categoryId));
+                value(expense.dueDate()), value(expense.paymentDate()), value(expense.notes()), value(categoryId),
+                value(responsibleUserId));
         var payment = expense.payment();
         // Keep the H02.1 fingerprint for unchanged/default creation requests, including retries after upgrade.
         if (payment != null && (!payment.amount().equals(expense.amount())

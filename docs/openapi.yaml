@@ -676,6 +676,34 @@ paths:
           description: Despesa não encontrada no espaço ativo.
         "409":
           description: Despesa já paga, versão desatualizada ou chave reutilizada com outro payload.
+  /expenses/{id}/history:
+    get:
+      operationId: listExpenseHistory
+      summary: Consulta o histórico paginado de uma despesa do espaço ativo
+      description: Eventos persistidos são ordenados de forma determinística por instante, versão e tipo. Horários são instantes UTC; a interface os apresenta no fuso do espaço.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+      responses:
+        "200":
+          description: Página de criação, correções, quitações, reversões e cancelamento.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseHistoryPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Despesa não encontrada no espaço ativo. }
   /expenses/batch-payment:
     post:
       operationId: settleExpensesBatch
@@ -904,6 +932,10 @@ components:
           type: [string, "null"]
           format: uuid
           description: Categoria ativa do espaço; ausência representa Sem categoria.
+        responsibleUserId:
+          type: [string, "null"]
+          format: uuid
+          description: Membro ativo do espaço responsável; ausência deixa a responsabilidade não definida.
     PaymentRequest:
       type: object
       additionalProperties: false
@@ -916,10 +948,6 @@ components:
         paymentDate: { type: string, format: date }
         paidByUserId: { type: string, format: uuid }
         paymentNotes: { type: [string, "null"], maxLength: 2000 }
-        categoryId:
-          type: [string, "null"]
-          format: uuid
-          description: Categoria ativa do espaço, ou a categoria arquivada já vinculada quando não houver troca.
     BatchPaymentRequest:
       type: object
       additionalProperties: false
@@ -993,6 +1021,14 @@ components:
           format: uuid
           description: Membro ativo pagador; obrigatório somente para PAID.
         paymentNotes: { type: [string, "null"], maxLength: 2000 }
+        categoryId:
+          type: [string, "null"]
+          format: uuid
+          description: Categoria ativa do espaço, ou a categoria arquivada já vinculada quando não houver troca.
+        responsibleUserId:
+          type: [string, "null"]
+          format: uuid
+          description: Membro ativo do espaço, ou nulo para remover a atribuição.
     ExpenseActionRequest:
       type: object
       additionalProperties: false
@@ -1027,6 +1063,9 @@ components:
           type: [string, "null"]
           description: Nome atual preservado para leitura; nulo é apresentado como Sem categoria.
         responsibleUserId: { type: [string, "null"], format: uuid }
+        responsibleDisplayName:
+          type: [string, "null"]
+          description: Nome atual do responsável; nulo representa responsabilidade não definida.
         notes: { type: [string, "null"] }
         createdByUserId: { type: string, format: uuid }
         createdByDisplayName: { type: string }
@@ -1056,7 +1095,7 @@ components:
       properties:
         type:
           type: string
-          enum: [EXPENSE_PAID, PAYMENT_REVERSED, EXPENSE_CORRECTED, EXPENSE_CANCELLED]
+          enum: [EXPENSE_CREATED, EXPENSE_PAID, PAYMENT_REVERSED, EXPENSE_CORRECTED, EXPENSE_CANCELLED]
         actorUserId: { type: string, format: uuid }
         actorDisplayName: { type: string }
         occurredAt: { type: string, format: date-time }
@@ -1072,6 +1111,29 @@ components:
           type: [string, "null"]
           format: uuid
           description: Correlação comum às auditorias individuais produzidas por uma quitação em lote.
+        changes:
+          type: array
+          description: Valores anterior e posterior disponíveis para cada campo alterado; vazio quando o evento não é uma correção.
+          items:
+            $ref: "#/components/schemas/ExpenseFieldChange"
+    ExpenseFieldChange:
+      type: object
+      required: [field]
+      properties:
+        field: { type: string }
+        previousValue: { type: [string, "null"] }
+        currentValue: { type: [string, "null"] }
+    ExpenseHistoryPage:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items: { $ref: "#/components/schemas/ExpenseHistoryEvent" }
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1, maximum: 100 }
+        totalElements: { type: integer, format: int64, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
     ExpensePage:
       type: object
       required: [content, page, size, totalElements, totalPages, sort, direction]

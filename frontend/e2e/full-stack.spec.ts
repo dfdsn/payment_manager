@@ -93,6 +93,16 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await guestPage.goto('/despesas');
   await expect(guestPage.locator('.expense-row').filter({ hasText: 'Energia' }).getByText(/Categoria: Casa/)).toBeVisible();
   await expect(guestPage.getByLabel('Categoria (opcional)').getByRole('option', { name: 'Casa' })).toHaveCount(0);
+  const assignedEnergy = guestPage.locator('.expense-row').filter({ hasText: 'Energia' });
+  await assignedEnergy.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await guestPage.getByLabel('Responsável corrigido (opcional)').selectOption({ label: 'Pessoa Convidada' });
+  await guestPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(guestPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+  await expect(assignedEnergy.getByText(/Responsável: Pessoa Convidada/)).toBeVisible();
+  await assignedEnergy.getByRole('button', { name: 'Ver histórico' }).click();
+  await expect(guestPage.getByText('Despesa cadastrada', { exact: true })).toBeVisible();
+  await expect(guestPage.getByText(/Responsável: Não definido → Pessoa Convidada/)).toBeVisible();
+  await guestPage.getByRole('button', { name: 'Fechar histórico' }).click();
   await guestPage.getByRole('button', { name: 'Quitar despesa' }).click();
   await guestPage.getByRole('textbox', { name: 'Valor efetivamente pago' }).fill('155,00');
   await guestPage.getByLabel('Data da quitação').fill('2026-09-25');

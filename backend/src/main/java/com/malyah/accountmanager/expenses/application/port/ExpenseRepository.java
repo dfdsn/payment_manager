@@ -15,7 +15,14 @@ public interface ExpenseRepository {
         return createIdempotently(expense, actorUserId, idempotencyKey, requestHash, null, requestedAt);
     }
     StoredExpenseCreation createIdempotently(
-            OneOffExpense expense, UUID actorUserId, UUID idempotencyKey, String requestHash, UUID categoryId, Instant requestedAt);
+            OneOffExpense expense, UUID actorUserId, UUID idempotencyKey, String requestHash,
+            UUID categoryId, UUID responsibleUserId, Instant requestedAt);
+
+    default StoredExpenseCreation createIdempotently(
+            OneOffExpense expense, UUID actorUserId, UUID idempotencyKey, String requestHash,
+            UUID categoryId, Instant requestedAt) {
+        return createIdempotently(expense, actorUserId, idempotencyKey, requestHash, categoryId, null, requestedAt);
+    }
 
     StoredExpensePage findBySpace(UUID spaceId, ExpenseListQuery query);
 
@@ -26,7 +33,13 @@ public interface ExpenseRepository {
 
     StoredExpenseCreation correct(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command,
-            OneOffExpense corrected, UUID categoryId, Instant at);
+            OneOffExpense corrected, UUID categoryId, UUID responsibleUserId, Instant at);
+
+    default StoredExpenseCreation correct(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command,
+            OneOffExpense corrected, UUID categoryId, Instant at) {
+        return correct(spaceId, actorId, command, corrected, categoryId, null, at);
+    }
 
     default StoredExpenseCreation correct(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command,

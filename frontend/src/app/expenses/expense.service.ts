@@ -17,6 +17,7 @@ export interface CreateExpenseData {
   paidByUserId?: string;
   paymentNotes?: string | null;
   categoryId?: string | null;
+  responsibleUserId?: string | null;
 }
 
 export interface CorrectExpenseData {
@@ -31,6 +32,7 @@ export interface CorrectExpenseData {
   paidByUserId?: string;
   paymentNotes?: string | null;
   categoryId?: string | null;
+  responsibleUserId?: string | null;
 }
 
 export interface Expense {
@@ -49,6 +51,7 @@ export interface Expense {
   categoryName: string | null;
   categoryId: string | null;
   responsibleUserId: string | null;
+  responsibleDisplayName: string | null;
   notes: string | null;
   createdByDisplayName: string;
   paidByDisplayName: string | null;
@@ -59,7 +62,7 @@ export interface Expense {
 }
 
 export interface ExpenseHistoryEvent {
-  type: 'EXPENSE_PAID' | 'PAYMENT_REVERSED' | 'EXPENSE_CORRECTED' | 'EXPENSE_CANCELLED';
+  type: 'EXPENSE_CREATED' | 'EXPENSE_PAID' | 'PAYMENT_REVERSED' | 'EXPENSE_CORRECTED' | 'EXPENSE_CANCELLED';
   actorUserId: string;
   actorDisplayName: string;
   occurredAt: string;
@@ -72,6 +75,15 @@ export interface ExpenseHistoryEvent {
   payerDisplayName: string | null;
   changedFields: string | null;
   batchOperationId: string | null;
+  changes: { field: string; previousValue: string | null; currentValue: string | null }[];
+}
+
+export interface ExpenseHistoryPage {
+  content: ExpenseHistoryEvent[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
 }
 
 export interface BatchSettlementResult {
@@ -118,6 +130,12 @@ export class ExpenseService {
 
   get(id: string) {
     return this.http.get<Expense>(`${this.endpoint}/${id}`);
+  }
+
+  history(id: string, page = 0, size = 10) {
+    return this.http.get<ExpenseHistoryPage>(`${this.endpoint}/${id}/history`, {
+      params: new HttpParams().set('page', page).set('size', size),
+    });
   }
 
   correct(id: string, data: CorrectExpenseData, idempotencyKey: string) {

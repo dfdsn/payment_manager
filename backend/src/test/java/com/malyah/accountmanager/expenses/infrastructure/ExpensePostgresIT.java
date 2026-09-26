@@ -54,16 +54,17 @@ class ExpensePostgresIT {
             .withPassword("test-only-password");
 
     private JdbcTemplate jdbc;
+    private DriverManagerDataSource dataSource;
     private ExpenseUseCase useCase;
     private com.malyah.accountmanager.expenses.application.CategoryService categoryService;
 
     @BeforeEach
     void reset() {
-        var dataSource = new DriverManagerDataSource(
+        dataSource = new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(11);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(12);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var context = new AuthenticatedUserContextService(contextRepository());
@@ -113,6 +114,93 @@ class ExpensePostgresIT {
             assertThat(executor.invokeAll(List.of(create, create)).stream().map(f -> { try{return f.get();}catch(Exception e){throw new AssertionError(e);} }).toList())
                     .containsExactlyInAnyOrder("CREATED", "CONFLICT");
         }
+    }
+
+    @Test void assignsChangesAndRemovesResponsibleWhileHistoryKeepsDistinctPeopleAndPagination() {
+        var created = useCase.create("admin@example.com", new CreateOneOffExpenseCommand(
+                "Internet", "120", ExpenseStatus.PENDING, LocalDate.of(2026, 10, 5), null, null,
+                UUID.randomUUID(), null, null, null, null, GUEST)).expense();
+        assertThat(created.responsibleUserId()).isEqualTo(GUEST);
+        assertThat(created.responsibleDisplayName()).isEqualTo("Convidado");
+
+        var reassigned = useCase.correct("guest@example.com", new CorrectExpenseCommand(
+                created.id(), created.version(), created.status(), created.description(), created.amount(),
+                created.dueDate(), created.notes(), null, null, null, null, UUID.randomUUID(), null, ADMIN)).expense();
+        assertThat(reassigned.responsibleDisplayName()).isEqualTo("Administrador");
+
+        var paid = useCase.settle("guest@example.com", new com.malyah.accountmanager.expenses.application.SettleExpenseCommand(
+                created.id(), reassigned.version(), "120", LocalDate.of(2026, 10, 4), GUEST,
+                "Pago pelo convidado", UUID.randomUUID())).expense();
+        var unassigned = useCase.correct("admin@example.com", new CorrectExpenseCommand(
+                paid.id(), paid.version(), paid.status(), paid.description(), paid.amount(), paid.dueDate(), paid.notes(),
+                paid.paidAmount(), paid.paymentDate(), paid.paidByUserId(), paid.paymentAudit().notes(),
+                UUID.randomUUID(), null, null)).expense();
+        assertThat(unassigned.responsibleUserId()).isNull();
+        assertThat(unassigned.paidByDisplayName()).isEqualTo("Convidado");
+        assertThat(unassigned.paymentAudit().recordedByDisplayName()).isEqualTo("Convidado");
+
+        var firstPage = useCase.history("admin@example.com", created.id(), 0, 2);
+        var secondPage = useCase.history("guest@example.com", created.id(), 1, 2);
+        assertThat(firstPage.totalElements()).isEqualTo(4);
+        assertThat(firstPage.totalPages()).isEqualTo(2);
+        assertThat(firstPage.content()).extracting(event -> event.type())
+                .containsExactly("EXPENSE_CREATED", "EXPENSE_CORRECTED");
+        assertThat(secondPage.content()).extracting(event -> event.type())
+                .containsExactly("EXPENSE_PAID", "EXPENSE_CORRECTED");
+        assertThat(secondPage.content().getLast().changes()).singleElement().satisfies(change -> {
+            assertThat(change.field()).isEqualTo("responsibleUserId");
+            assertThat(change.previousValue()).isEqualTo("Administrador");
+            assertThat(change.currentValue()).isNull();
+        });
+
+        var foreign = UUID.fromString("00000000-0000-0000-0000-000000000201");
+        assertThatThrownBy(() -> useCase.create("admin@example.com", new CreateOneOffExpenseCommand(
+                "Inválida", "10", ExpenseStatus.PENDING, LocalDate.of(2026, 10, 6), null, null,
+                UUID.randomUUID(), null, null, null, null, foreign)))
+                .isInstanceOf(com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException.class);
+        assertThatThrownBy(() -> useCase.history("other@example.com", created.id(), 0, 10))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.ExpenseNotFoundException.class);
+    }
+
+    @Test void concurrentAssignmentAndMembershipDepartureNeverLeavesAnInactiveResponsible() throws Exception {
+        var created = useCase.create("admin@example.com", new CreateOneOffExpenseCommand(
+                "Seguro", "75", ExpenseStatus.PENDING, LocalDate.of(2026, 10, 8), null, null,
+                UUID.randomUUID(), null, null, null, null, null)).expense();
+        Callable<String> assign = () -> {
+            try {
+                useCase.correct("admin@example.com", new CorrectExpenseCommand(
+                        created.id(), created.version(), created.status(), created.description(), created.amount(),
+                        created.dueDate(), created.notes(), null, null, null, null,
+                        UUID.randomUUID(), null, GUEST));
+                return "ASSIGNED";
+            } catch (com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException
+                    | com.malyah.accountmanager.expenses.application.ExpenseStateConflictException exception) {
+                return "REJECTED";
+            }
+        };
+        Callable<String> depart = () -> {
+            new TransactionTemplate(new DataSourceTransactionManager(dataSource)).executeWithoutResult(status -> {
+                jdbc.queryForObject("select id from family_spaces where id=? for update", UUID.class, SPACE);
+                new JdbcMembershipDepartureHandler(jdbc).beforeMembershipEnds(SPACE, GUEST, ADMIN, NOW);
+                jdbc.update("""
+                        update space_memberships
+                           set active=false, ended_at=?, ended_by_user_id=?, end_reason='ADMIN_REMOVAL'
+                         where space_id=? and user_id=? and active
+                        """, Timestamp.from(NOW), ADMIN, SPACE, GUEST);
+            });
+            return "DEPARTED";
+        };
+
+        List<String> outcomes;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            outcomes = executor.invokeAll(List.of(assign, depart)).stream().map(future -> {
+                try { return future.get(); } catch (Exception exception) { throw new AssertionError(exception); }
+            }).toList();
+        }
+
+        assertThat(outcomes).contains("DEPARTED").anyMatch(value -> value.equals("ASSIGNED") || value.equals("REJECTED"));
+        assertThat(jdbc.queryForObject("select active from space_memberships where user_id=?", Boolean.class, GUEST)).isFalse();
+        assertThat(jdbc.queryForObject("select responsible_user_id from expense_entries where id=?", UUID.class, created.id())).isNull();
     }
 
     @Test
@@ -447,10 +535,10 @@ class ExpensePostgresIT {
 
         var historyAfterReversal = useCase.get("admin@example.com", id).history();
         assertThat(historyAfterReversal).extracting(event -> event.type())
-                .containsExactly("EXPENSE_PAID", "PAYMENT_REVERSED");
-        assertThat(historyAfterReversal.get(1).reason()).isEqualTo("Cobrança paga pelo meio incorreto");
-        assertThat(historyAfterReversal.get(1).paidAmount()).isEqualTo("155.00");
-        assertThat(historyAfterReversal.get(1).payerUserId()).isEqualTo(GUEST);
+                .containsExactly("EXPENSE_CREATED", "EXPENSE_PAID", "PAYMENT_REVERSED");
+        assertThat(historyAfterReversal.get(2).reason()).isEqualTo("Cobrança paga pelo meio incorreto");
+        assertThat(historyAfterReversal.get(2).paidAmount()).isEqualTo("155.00");
+        assertThat(historyAfterReversal.get(2).payerUserId()).isEqualTo(GUEST);
 
         var repaid = useCase.settle("guest@example.com",
                 new com.malyah.accountmanager.expenses.application.SettleExpenseCommand(
@@ -458,7 +546,7 @@ class ExpensePostgresIT {
         assertThat(repaid.status()).isEqualTo(ExpenseStatus.PAID);
         assertThat(repaid.paidByUserId()).isEqualTo(ADMIN);
         assertThat(useCase.get("admin@example.com", id).history()).extracting(event -> event.type())
-                .containsExactly("EXPENSE_PAID", "PAYMENT_REVERSED", "EXPENSE_PAID");
+                .containsExactly("EXPENSE_CREATED", "EXPENSE_PAID", "PAYMENT_REVERSED", "EXPENSE_PAID");
     }
 
     @Test void cancellationIsHistoricalHiddenFromActiveListAndRejectsIncompatibleStates() {
@@ -477,7 +565,7 @@ class ExpensePostgresIT {
                 .isInstanceOf(ExpenseIdempotencyConflictException.class);
         assertThat(useCase.list("admin@example.com",
                 new ExpenseListQuery(0, 20, ExpenseSort.REFERENCE_DATE, SortDirection.ASC)).content()).isEmpty();
-        assertThat(useCase.get("admin@example.com", id).history()).singleElement().satisfies(event -> {
+        assertThat(useCase.get("admin@example.com", id).history()).filteredOn(event -> event.type().equals("EXPENSE_CANCELLED")).singleElement().satisfies(event -> {
             assertThat(event.type()).isEqualTo("EXPENSE_CANCELLED");
             assertThat(event.actorUserId()).isEqualTo(GUEST);
             assertThat(event.reason()).isEqualTo("Lançamento duplicado");
@@ -613,7 +701,7 @@ class ExpensePostgresIT {
         assertThat(reversed.dueDate()).isEqualTo(LocalDate.of(2026, 9, 24));
         assertThat(reversed.overdue()).isTrue();
         assertThat(useCase.get("admin@example.com", paid.id()).history()).extracting(event -> event.type())
-                .containsExactly("EXPENSE_PAID", "EXPENSE_CORRECTED", "PAYMENT_REVERSED");
+                .containsExactly("EXPENSE_CREATED", "EXPENSE_PAID", "EXPENSE_CORRECTED", "PAYMENT_REVERSED");
     }
 
     @Test void atomicBatchSettlesEveryItemWithChargeAmountPayerActorAndCorrelation() {
@@ -637,7 +725,8 @@ class ExpensePostgresIT {
         assertThat(useCase.get("guest@example.com", second).paymentAudit().recordedByUserId()).isEqualTo(ADMIN);
         assertThat(jdbc.queryForList("select distinct batch_operation_id from expense_payment_events where expense_id in (?, ?)",
                 UUID.class, first, second)).containsExactly(result.operationId());
-        assertThat(useCase.get("admin@example.com", first).history()).singleElement()
+        assertThat(useCase.get("admin@example.com", first).history())
+                .filteredOn(event -> event.type().equals("EXPENSE_PAID")).singleElement()
                 .satisfies(event -> assertThat(event.batchOperationId()).isEqualTo(result.operationId()));
 
         var replay = useCase.settleBatch("admin@example.com", command);

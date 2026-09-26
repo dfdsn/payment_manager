@@ -30,6 +30,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.malyah.accountmanager.expenses.application.CreateOneOffExpenseCommand;
 import com.malyah.accountmanager.expenses.application.ExpenseCreationResult;
 import com.malyah.accountmanager.expenses.application.ExpenseIdempotencyConflictException;
+import com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent;
+import com.malyah.accountmanager.expenses.application.ExpenseHistoryPage;
 import com.malyah.accountmanager.expenses.application.ExpensePage;
 import com.malyah.accountmanager.expenses.application.ExpenseSort;
 import com.malyah.accountmanager.expenses.application.ExpenseUseCase;
@@ -219,6 +221,22 @@ class ExpenseHttpTest {
         mvc.perform(put(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
                 .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(validCorrectionBody()))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPENSE_STATE_CONFLICT"));
+    }
+
+    @Test void protectsAndPaginatesHistoryWithStructuredChanges() throws Exception {
+        var path = "/expenses/" + EXPENSE + "/history?page=1&size=5";
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        given(useCase.history("guest@example.com", EXPENSE, 1, 5)).willReturn(new ExpenseHistoryPage(List.of(
+                new ExpenseHistoryEvent("EXPENSE_CREATED", KEY, "Pessoa", Instant.parse("2026-09-25T13:00:00Z"),
+                        null, null, 0, null, null, null, null, null, null, List.of())), 1, 5, 6, 2));
+
+        mvc.perform(get(path).with(user("guest@example.com")).session(activeSession()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.content[0].type").value("EXPENSE_CREATED"))
+                .andExpect(jsonPath("$.content[0].actorDisplayName").value("Pessoa"));
+        then(useCase).should().history("guest@example.com", EXPENSE, 1, 5);
     }
 
     @Test void reversalAndCancellationRequireSessionCsrfVersionReasonAndMapCommands() throws Exception {

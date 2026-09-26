@@ -20,6 +20,12 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQu
 @ConditionalOnProperty(name = "spring.datasource.url")
 class ExpensesConfiguration {
     @Bean
+    com.malyah.accountmanager.identity.application.MembershipDepartureHandler membershipDepartureHandler(
+            JdbcTemplate jdbcTemplate) {
+        return new JdbcMembershipDepartureHandler(jdbcTemplate);
+    }
+
+    @Bean
     com.malyah.accountmanager.expenses.application.port.CategoryRepository categoryRepository(JdbcTemplate jdbcTemplate) {
         return new JdbcCategoryRepository(jdbcTemplate);
     }
