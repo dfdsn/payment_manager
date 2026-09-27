@@ -54,7 +54,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H03.1 | Gerenciar categorias | Concluído | 100 Java, 36 ITs PostgreSQL (26 de despesas), JaCoCo 95,55%/85,86%, PIT 81%, 42 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H03.1.md`. |
 | H03.2 | Atribuir responsável e consultar histórico | Concluído | 101 Java, 32 ITs PostgreSQL, JaCoCo 95,38%/85,02%, PIT 75%, 44 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H03.2.md`. |
 | H03.3 | Anexar e acessar documentos | Em validação | Fluxo implementado; 101 Java, 31 ITs selecionados PostgreSQL e 44 frontend aprovados. Faltam gates finais/E2E específico. Evidência: `docs/evidencias/H03.3.md`. |
-| H03.4 | Buscar e filtrar lançamentos | Não iniciado | — |
+| H03.4 | Buscar e filtrar lançamentos | Concluído | Busca/filtros/paginação autorizados e V14 aprovados em PostgreSQL, gates e E2E. Evidência: `docs/evidencias/H03.4.md`. |
 | H04.1 | Cadastrar recorrência e calcular calendário | Não iniciado | — |
 | H04.2 | Gerar ocorrências sem duplicação | Não iniciado | — |
 | H04.3 | Visualizar e antecipar previsões | Não iniciado | — |
@@ -340,6 +340,16 @@ Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes
 ## H03.3 — Anexar e acessar documentos (em validação)
 
 Implementação iniciada em 26/09/2026: migração V13, volume privado, staging/promoção/compensação, validação efetiva de PDF/JPG/PNG, limite de cinco/10 MB, idempotência, autorização por espaço, download seguro, remoção lógica auditada e interface integrada ao detalhe. A primeira regressão revelou dependência ausente apenas nos slices HTTP e mocks antigos do frontend; os ajustes foram aplicados e a repetição dos testes permanece obrigatória antes de concluir a história.
+
+## H03.4 — Buscar e filtrar lançamentos (concluída)
+
+Implementação iniciada em 27/09/2026: busca na descrição; período inclusivo por vencimento/referência ou pagamento; filtros de categoria, responsável, pagador e situação; mês atual e cancelados ocultos por padrão; atraso no fuso do espaço; paginação/contagem autorizadas no PostgreSQL; ordenação permitida e determinística; índices V14; interface com limpeza, estado vazio contextual, proteção contra respostas fora de ordem e seleção de lote preservada. Categorias arquivadas e pessoas históricas permanecem filtráveis sem restaurar associação.
+
+Validações finais: 102 testes Java/HTTP/ArchUnit, 46 testes frontend, build Angular e 32 ITs selecionados (31 despesas e 1 Flyway) em PostgreSQL 17.6 com V1–V14, todos sem ignorados, falhas ou erros. JaCoCo domínio/aplicação: 771/810 linhas (95,19%) e 373/442 branches (84,39%). PIT: 270/365 mutações eliminadas (74%), força 85%. O E2E full-stack em Chrome passou 1/1 desde banco vazio, incluindo pesquisa sem resultado e limpeza. A stack descartável foi removida depois do teste.
+
+Falhas encontradas e corrigidas, sem contabilizá-las como aprovação: escape SQL inválido; fixture de saída sem o motivo persistido `ADMIN_REMOVAL`; seletores E2E ambíguos após a inclusão dos filtros; lançamentos de regressão fora do mês padrão; e volume privado sem propriedade para o UID não-root no Compose. O Dockerfile prepara o mountpoint e o passo de migração recebe o mesmo volume privado.
+
+Próximo passo: concluir a validação específica de H03.3. H03.4 está concluída, mas E03 ainda não, pois upload/download/remoção de anexo não foi exercitado no E2E próprio e a evidência H03.3 permanece em validação.
 Condição de conclusão ou desbloqueio: critérios executáveis da H03.2 satisfeitos em 25/09/2026; integrações futuras explicitamente diferidas conforme backlog.
 Próximo passo: H03.3 — anexar e acessar documentos.
 ```
@@ -397,3 +407,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 25/09/2026 | H02.3 implementou correções pendentes/pagas nas quatro camadas e UI, V8, histórico antes/depois, versão, idempotência, concorrência/rollback e revisão manual do conflito. Regressão final: 85 Java, 23 ITs PostgreSQL, JaCoCo 95,77%/84,87%, PIT 81%, 33 frontend, build e E2E aprovados. H02.3 concluída; próximo passo H02.4. |
 | 25/09/2026 | H02.4 implementou reversão e cancelamento lógico com motivo, versão, idempotência, histórico imutável, concorrência e rollback. P10 foi encerrada exigindo correção prévia do vencimento para paga sem data. Regressão final: 91 Java, 28 ITs PostgreSQL, JaCoCo 95,57%/85,55%, PIT 82%, 37 frontend, build e E2E aprovados. H02.4 concluída; próximo passo H02.5. |
 | 25/09/2026 | H03.1 implementou categorias iniciais/opcionais, criação, renomeação e arquivamento pelos dois papéis, integração com despesas, isolamento, versão, concorrência e auditoria. Regressão final: 100 Java, 36 ITs PostgreSQL, JaCoCo 95,55%/85,86%, PIT 81%, 42 frontend, build e E2E aprovados. H03.1 concluída; próximo passo H03.2. |
+| 27/09/2026 | H03.4 implementou busca por descrição, período/base de data, categoria, responsável, pagador e situação, com mês atual, atraso no fuso, cancelados ocultos, paginação/contagem autorizadas, ordenação determinística, opções históricas, V14 e proteção de respostas concorrentes. Regressão final: 102 Java, 32 ITs PostgreSQL selecionados, JaCoCo 95,19%/84,39%, PIT 74%/força 85%, 46 frontend, build e 1 E2E full-stack aprovados. H03.4 concluída; E03 aguarda a validação específica de H03.3. |

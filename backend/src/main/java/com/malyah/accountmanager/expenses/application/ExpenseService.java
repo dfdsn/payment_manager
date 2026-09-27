@@ -78,6 +78,11 @@ public final class ExpenseService {
         return new ExpenseCreationResult(view(stored.expense(), actor.timeZone()), stored.replayed());
     }
 
+    public ExpenseFilterOptions filterOptions(String actorEmail) {
+        var actor = contextQuery.findByEmail(actorEmail);
+        return repository.filterOptions(actor.spaceId());
+    }
+
     public ExpenseCreationResult settle(String email, SettleExpenseCommand command) {
         if (command.idempotencyKey() == null || command.expenseId() == null || command.version() < 0)
             throw new ExpenseQueryValidationException("payment", "Informe a despesa, versão e chave de repetição válidas.");
@@ -191,12 +196,24 @@ public final class ExpenseService {
     public ExpensePage list(String actorEmail, ExpenseListQuery query) {
         validate(query);
         var actor = contextQuery.findByEmail(actorEmail);
-        var stored = repository.findBySpace(actor.spaceId(), query);
+        var today = LocalDate.now(clock.withZone(ZoneId.of(actor.timeZone())));
+        var from = query.dateFrom();
+        var to = query.dateTo();
+        if (from == null && to == null) {
+            from = today.withDayOfMonth(1);
+            to = today.withDayOfMonth(today.lengthOfMonth());
+        }
+        var effective = new ExpenseListQuery(query.page(), query.size(), query.sort(), query.direction(),
+                query.search() == null ? null : query.search().trim(), from, to,
+                query.dateBasis() == null ? ExpenseDateBasis.DUE_DATE : query.dateBasis(),
+                query.categoryId(), query.withoutCategory(), query.responsibleUserId(), query.withoutResponsible(),
+                query.payerUserId(), query.status() == null ? ExpenseStatusFilter.ACTIVE : query.status(), today);
+        var stored = repository.findBySpace(actor.spaceId(), effective);
         var totalPages = stored.totalElements() == 0 ? 0
-                : Math.toIntExact((stored.totalElements() + query.size() - 1) / query.size());
+                : Math.toIntExact((stored.totalElements() + effective.size() - 1) / effective.size());
         return new ExpensePage(
                 stored.content().stream().map(expense -> view(expense, actor.timeZone())).toList(),
-                query.page(), query.size(), stored.totalElements(), totalPages, query.sort(), query.direction());
+                effective.page(), effective.size(), stored.totalElements(), totalPages, effective.sort(), effective.direction());
     }
 
     private void validate(ExpenseListQuery query) {
@@ -207,6 +224,14 @@ public final class ExpenseService {
         }
         if (query.sort() == null) throw new ExpenseQueryValidationException("sort", "Informe a ordenação.");
         if (query.direction() == null) throw new ExpenseQueryValidationException("direction", "Informe a direção.");
+        if (query.search() != null && query.search().trim().length() > 200)
+            throw new ExpenseQueryValidationException("search", "A busca deve ter até 200 caracteres.");
+        if (query.dateFrom() != null && query.dateTo() != null && query.dateFrom().isAfter(query.dateTo()))
+            throw new ExpenseQueryValidationException("dateFrom", "A data inicial não pode ser posterior à final.");
+        if (query.categoryId() != null && query.withoutCategory())
+            throw new ExpenseQueryValidationException("category", "Escolha uma categoria ou Sem categoria.");
+        if (query.responsibleUserId() != null && query.withoutResponsible())
+            throw new ExpenseQueryValidationException("responsible", "Escolha um responsável ou Sem responsável.");
     }
 
     private ExpenseView view(StoredExpense expense, String timeZone) {

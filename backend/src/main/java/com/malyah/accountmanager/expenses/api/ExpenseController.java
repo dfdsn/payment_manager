@@ -52,8 +52,25 @@ class ExpenseController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "REFERENCE_DATE") ExpenseSort sort,
-            @RequestParam(defaultValue = "ASC") SortDirection direction) {
-        return useCase.list(principal.getName(), new ExpenseListQuery(page, size, sort, direction));
+            @RequestParam(defaultValue = "ASC") SortDirection direction,
+            @RequestParam(required=false) String search,
+            @RequestParam(required=false) java.time.LocalDate dateFrom,
+            @RequestParam(required=false) java.time.LocalDate dateTo,
+            @RequestParam(defaultValue="DUE_DATE") com.malyah.accountmanager.expenses.application.ExpenseDateBasis dateBasis,
+            @RequestParam(required=false) UUID categoryId,
+            @RequestParam(defaultValue="false") boolean withoutCategory,
+            @RequestParam(required=false) UUID responsibleUserId,
+            @RequestParam(defaultValue="false") boolean withoutResponsible,
+            @RequestParam(required=false) UUID payerUserId,
+            @RequestParam(defaultValue="ACTIVE") com.malyah.accountmanager.expenses.application.ExpenseStatusFilter status) {
+        return useCase.list(principal.getName(), new ExpenseListQuery(page, size, sort, direction,
+                search,dateFrom,dateTo,dateBasis,categoryId,withoutCategory,responsibleUserId,withoutResponsible,
+                payerUserId,status,null));
+    }
+
+    @GetMapping("/filter-options")
+    com.malyah.accountmanager.expenses.application.ExpenseFilterOptions filterOptions(Principal principal) {
+        return useCase.filterOptions(principal.getName());
     }
 
     @GetMapping("/{id}")

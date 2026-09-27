@@ -26,6 +26,8 @@ public interface ExpenseRepository {
 
     StoredExpensePage findBySpace(UUID spaceId, ExpenseListQuery query);
 
+    com.malyah.accountmanager.expenses.application.ExpenseFilterOptions filterOptions(UUID spaceId);
+
     StoredExpense findById(UUID spaceId, UUID expenseId);
 
     java.util.List<com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent> history(

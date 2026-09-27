@@ -64,18 +64,57 @@ final class JdbcExpenseRepository implements ExpenseRepository {
 
     @Override
     public StoredExpensePage findBySpace(UUID spaceId, ExpenseListQuery query) {
-        var total = jdbc.queryForObject(
-                "select count(*) from expense_entries where space_id = ? and status <> 'CANCELLED'", Long.class, spaceId);
+        var where = new StringBuilder(" where e.space_id = ?");
+        var parameters = new java.util.ArrayList<Object>(); parameters.add(spaceId);
+        if (query.search()!=null && !query.search().isBlank()) { where.append(" and lower(e.description) like lower(?) escape '!'"); parameters.add("%"+query.search().replace("!","!!").replace("%","!%").replace("_","!_")+"%"); }
+        var dateColumn = query.dateBasis()==com.malyah.accountmanager.expenses.application.ExpenseDateBasis.PAYMENT_DATE ? "e.payment_date" : "e.reference_date";
+        if(query.dateFrom()!=null){where.append(" and ").append(dateColumn).append(" >= ?");parameters.add(query.dateFrom());}
+        if(query.dateTo()!=null){where.append(" and ").append(dateColumn).append(" <= ?");parameters.add(query.dateTo());}
+        if(query.withoutCategory())where.append(" and e.category_id is null"); else if(query.categoryId()!=null){where.append(" and e.category_id=?");parameters.add(query.categoryId());}
+        if(query.withoutResponsible())where.append(" and e.responsible_user_id is null"); else if(query.responsibleUserId()!=null){where.append(" and e.responsible_user_id=?");parameters.add(query.responsibleUserId());}
+        if(query.payerUserId()!=null){where.append(" and e.paid_by_user_id=?");parameters.add(query.payerUserId());}
+        switch(query.status()) {
+            case ACTIVE -> where.append(" and e.status <> 'CANCELLED'");
+            case PENDING -> where.append(" and e.status='PENDING'");
+            case OVERDUE -> {where.append(" and e.status='PENDING' and e.due_date < ?");parameters.add(query.today());}
+            case PAID -> where.append(" and e.status='PAID'");
+            case CANCELLED -> where.append(" and e.status='CANCELLED'");
+            case ALL -> { }
+        }
+        var total = jdbc.queryForObject("select count(*) from expense_entries e"+where, Long.class, parameters.toArray());
         var order = switch (query.sort()) {
             case REFERENCE_DATE -> "e.reference_date";
             case AMOUNT -> "e.charge_amount";
             case DESCRIPTION -> "lower(e.description)";
         };
         var direction = query.direction().name();
-        var items = jdbc.query(selectBase() + " where e.space_id = ? and e.status <> 'CANCELLED' order by " + order + " " + direction
+        var itemParameters=new java.util.ArrayList<>(parameters);itemParameters.add(query.size());itemParameters.add((long)query.page()*query.size());
+        var items = jdbc.query(selectBase() + where + " order by " + order + " " + direction
                         + ", e.created_at " + direction + ", e.id " + direction + " limit ? offset ?",
-                this::map, spaceId, query.size(), (long) query.page() * query.size());
+                this::map, itemParameters.toArray());
         return new StoredExpensePage(items, total == null ? 0 : total);
+    }
+
+    @Override
+    public com.malyah.accountmanager.expenses.application.ExpenseFilterOptions filterOptions(UUID spaceId) {
+        var responsible = filterPeople(spaceId, "e.responsible_user_id");
+        var payers = filterPeople(spaceId, "e.paid_by_user_id");
+        return new com.malyah.accountmanager.expenses.application.ExpenseFilterOptions(responsible, payers);
+    }
+
+    private java.util.List<com.malyah.accountmanager.expenses.application.ExpenseFilterPerson> filterPeople(
+            UUID spaceId, String column) {
+        return jdbc.query("""
+                select distinct u.id, u.display_name,
+                       exists(select 1 from space_memberships m
+                               where m.space_id=e.space_id and m.user_id=u.id and m.active=true) active_member
+                  from expense_entries e
+                  join identity_users u on u.id = %s
+                 where e.space_id=? and %s is not null
+                 order by u.display_name, u.id
+                """.formatted(column, column), (rs, row) ->
+                new com.malyah.accountmanager.expenses.application.ExpenseFilterPerson(
+                        rs.getObject(1, UUID.class), rs.getString(2), rs.getBoolean(3)), spaceId);
     }
 
     @Override

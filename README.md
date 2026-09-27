@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01, E02, H03.1 e H03.2 estão concluídos pelas evidências atuais. A próxima história recomendada é **H03.3 — Anexar e acessar documentos**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01, E02, H03.1, H03.2 e H03.4 estão concluídos pelas evidências atuais. H03.3 permanece em validação; por isso o próximo passo recomendado é fechar seus gates/E2E específico antes de iniciar E04.
 
 ## Anexos privados (H03.3)
 
@@ -426,3 +426,19 @@ Na visualização de uma despesa, ambos os membros ativos podem anexar, listar, 
 O backend usa `APP_FILES_ROOT` (padrão `/var/lib/account-manager/files`) e separa `staging/` de `permanent/`. Em Docker, o volume privado `files-full-local`/`private-files` é montado somente no backend e não no Nginx. Para comprovar persistência local, envie um arquivo, recrie somente o container backend sem remover volumes e baixe-o novamente. `docker compose down -v` apaga deliberadamente o ambiente local e não deve ser usado numa atualização.
 
 Backup operacional deve capturar PostgreSQL e a área `permanent/` na mesma janela de manutenção. `staging/` não é backup permanente. A restauração completa continua pendente de P06/H11.2–H11.3 e não foi declarada validada nesta história.
+
+## Busca e filtros de despesas (H03.4)
+
+A tela de despesas abre no mês atual do fuso do espaço, pela data de vencimento/referência, e oculta canceladas. A busca textual consulta somente a descrição. É possível combinar período inclusivo, base de data (vencimento ou pagamento), categoria, responsável, pagador e situação (`ACTIVE`, `PENDING`, `OVERDUE`, `PAID`, `CANCELLED` ou `ALL`). Atrasadas continuam sendo pendentes e não formam uma segunda contagem.
+
+As opções incluem categorias arquivadas e pessoas ainda referenciadas em despesas; quem já saiu aparece como “membro anterior”. “Sem categoria” e “Sem responsável” são filtros explícitos. As ordenações aceitas são `REFERENCE_DATE`, `AMOUNT` e `DESCRIPTION`, com `ASC`/`DESC` e desempate estável. Ao trocar um filtro, a interface volta à primeira página, cancela respostas antigas e preserva explicitamente a seleção do lote entre páginas/filtros.
+
+Exemplos autenticados:
+
+```text
+GET /api/v1/expenses?search=energia&dateFrom=2026-09-01&dateTo=2026-09-30&status=OVERDUE&sort=AMOUNT&direction=DESC
+GET /api/v1/expenses?dateBasis=PAYMENT_DATE&status=PAID&payerUserId=<UUID>&page=0&size=20
+GET /api/v1/expenses/filter-options
+```
+
+Parâmetros inválidos, página negativa, tamanho fora de 1–100, período invertido, enum ou campo de ordenação desconhecido retornam `400`; a API não aceita SQL ou nome livre como ordenação.

@@ -47,12 +47,17 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.goto('/despesas');
   await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Energia');
   await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('150,25');
-  await page.getByLabel('Vencimento').fill('2026-09-24');
+  await page.getByLabel('Vencimento', { exact: true }).fill('2026-09-24');
   await page.getByLabel('Categoria (opcional)').selectOption({ label: 'Pets' });
   await page.getByRole('button', { name: 'Salvar despesa' }).click();
   await expect(page.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
   await expect(page.getByText('Energia')).toBeVisible();
-  await expect(page.getByText('Atrasada')).toBeVisible();
+  await expect(page.getByText('Atrasada', { exact: true })).toBeVisible();
+  await page.getByLabel('Buscar na descrição').fill('inexistente');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByText('Nenhum lançamento corresponde aos filtros.')).toBeVisible();
+  await page.getByRole('button', { name: 'Limpar' }).click();
+  await expect(page.getByText('Energia')).toBeVisible();
 
   await page.goto('/membros');
   await page.getByLabel('Email do convidado').fill(guestEmail);
@@ -115,7 +120,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(guestPage.getByText('Registrado por Pessoa Convidada.')).toBeVisible();
   await guestPage.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Mercado');
   await guestPage.getByRole('textbox', { name: 'Valor', exact: true }).fill('25,50');
-  await guestPage.getByLabel('Situação').selectOption('PAID');
+  await guestPage.locator('form').first().getByLabel('Situação').selectOption('PAID');
   await guestPage.getByLabel('Data do pagamento').fill('2026-09-25');
   await guestPage.getByRole('button', { name: 'Salvar despesa' }).click();
   await expect(guestPage.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
@@ -179,7 +184,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   for (const [description, amount] of [['Água', '80,00'], ['Internet', '99,90']] as const) {
     await guestPage.getByRole('textbox', { name: 'Descrição', exact: true }).fill(description);
     await guestPage.getByRole('textbox', { name: 'Valor', exact: true }).fill(amount);
-    await guestPage.getByLabel('Vencimento').fill('2026-10-10');
+    await guestPage.getByLabel('Vencimento', { exact: true }).fill('2026-09-28');
     await guestPage.getByRole('button', { name: 'Salvar despesa' }).click();
     await expect(guestPage.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
   }

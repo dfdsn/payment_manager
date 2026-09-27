@@ -5,6 +5,12 @@ import { switchMap } from 'rxjs';
 export type ExpenseStatus = 'PENDING' | 'PAID' | 'CANCELLED';
 export type ExpenseSort = 'REFERENCE_DATE' | 'AMOUNT' | 'DESCRIPTION';
 export type SortDirection = 'ASC' | 'DESC';
+export type ExpenseStatusFilter = 'ACTIVE' | 'PENDING' | 'OVERDUE' | 'PAID' | 'CANCELLED' | 'ALL';
+export interface ExpenseFilters { search?: string; dateFrom?: string; dateTo?: string; dateBasis?: 'DUE_DATE'|'PAYMENT_DATE';
+  categoryId?: string; withoutCategory?: boolean; responsibleUserId?: string; withoutResponsible?: boolean;
+  payerUserId?: string; status?: ExpenseStatusFilter; }
+export interface ExpenseFilterPerson { userId: string; displayName: string; activeMember: boolean; }
+export interface ExpenseFilterOptions { responsiblePeople: ExpenseFilterPerson[]; payerPeople: ExpenseFilterPerson[]; }
 
 export interface CreateExpenseData {
   description: string;
@@ -128,13 +134,18 @@ export class ExpenseService {
     );
   }
 
-  list(page = 0, size = 20, sort: ExpenseSort = 'REFERENCE_DATE', direction: SortDirection = 'ASC') {
-    const params = new HttpParams()
+  list(page = 0, size = 20, sort: ExpenseSort = 'REFERENCE_DATE', direction: SortDirection = 'ASC', filters: ExpenseFilters = {}) {
+    let params = new HttpParams()
       .set('page', page)
       .set('size', size)
       .set('sort', sort)
       .set('direction', direction);
+    for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== '' && value !== false) params = params.set(key, String(value));
     return this.http.get<ExpensePage>(this.endpoint, { params });
+  }
+
+  filterOptions() {
+    return this.http.get<ExpenseFilterOptions>(`${this.endpoint}/filter-options`);
   }
 
   get(id: string) {

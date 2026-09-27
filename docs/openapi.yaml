@@ -598,6 +598,22 @@ paths:
             type: string
             enum: [ASC, DESC]
             default: ASC
+        - { name: search, in: query, description: Busca case-insensitive somente na descrição., schema: { type: string, maxLength: 200 } }
+        - { name: dateFrom, in: query, description: Limite inicial inclusivo; sem período informado usa o primeiro dia do mês atual do espaço., schema: { type: string, format: date } }
+        - { name: dateTo, in: query, description: Limite final inclusivo; sem período informado usa o último dia do mês atual do espaço., schema: { type: string, format: date } }
+        - name: dateBasis
+          in: query
+          description: DUE_DATE usa a data de referência/vencimento; PAYMENT_DATE usa a data efetiva do pagamento.
+          schema: { type: string, enum: [DUE_DATE, PAYMENT_DATE], default: DUE_DATE }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutCategory, in: query, schema: { type: boolean, default: false } }
+        - { name: responsibleUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutResponsible, in: query, schema: { type: boolean, default: false } }
+        - { name: payerUserId, in: query, schema: { type: string, format: uuid } }
+        - name: status
+          in: query
+          description: ACTIVE oculta canceladas; OVERDUE é subconjunto de PENDING e considera o dia atual no fuso do espaço.
+          schema: { type: string, enum: [ACTIVE, PENDING, OVERDUE, PAID, CANCELLED, ALL], default: ACTIVE }
       responses:
         "200":
           description: Página com ordenação estável e atraso calculado no fuso do espaço.
@@ -611,6 +627,25 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /expenses/filter-options:
+    get:
+      operationId: getExpenseFilterOptions
+      summary: Lista responsáveis e pagadores presentes nas despesas do espaço ativo
+      description: Inclui membros anteriores ainda referenciados, identificados por activeMember=false.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Opções autorizadas, sem dados de outros espaços.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [responsiblePeople, payerPeople]
+                properties:
+                  responsiblePeople: { type: array, items: { $ref: "#/components/schemas/ExpenseFilterPerson" } }
+                  payerPeople: { type: array, items: { $ref: "#/components/schemas/ExpenseFilterPerson" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /expenses/{id}:
     get:
       operationId: getExpense
@@ -889,6 +924,13 @@ components:
         type: string
         format: uuid
   schemas:
+    ExpenseFilterPerson:
+      type: object
+      required: [userId, displayName, activeMember]
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string }
+        activeMember: { type: boolean }
     Category:
       type: object
       required: [id, name, archived, version, updatedAt]

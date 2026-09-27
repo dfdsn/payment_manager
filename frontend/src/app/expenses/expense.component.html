@@ -337,6 +337,23 @@
   }
 
   <section aria-labelledby="expense-list-title" class="expense-list-section">
+    <mat-card appearance="outlined" class="filter-card">
+      <mat-card-header><mat-card-title>Buscar e filtrar</mat-card-title><mat-card-subtitle>Sem período informado, mostra o mês atual pela data de referência de vencimento.</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        <form [formGroup]="filterForm" (ngSubmit)="applyFilters()">
+          <mat-form-field appearance="outline" class="wide-field"><mat-label>Buscar na descrição</mat-label><input matInput formControlName="search" maxlength="200"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Data inicial</mat-label><input matInput type="date" formControlName="dateFrom"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Data final</mat-label><input matInput type="date" formControlName="dateTo"></mat-form-field>
+          <label class="select-field">Base do período<select formControlName="dateBasis"><option value="DUE_DATE">Vencimento/referência</option><option value="PAYMENT_DATE">Data de pagamento</option></select></label>
+          <label class="select-field">Situação<select formControlName="status"><option value="ACTIVE">Ativas</option><option value="PENDING">Pendentes (inclui atrasadas)</option><option value="OVERDUE">Somente atrasadas</option><option value="PAID">Pagas</option><option value="CANCELLED">Canceladas</option><option value="ALL">Todas</option></select></label>
+          <label class="select-field">Categoria<select formControlName="category"><option value="">Todas</option><option value="NONE">Sem categoria</option>@for(category of categories();track category.id){<option [value]="category.id">{{category.name}}{{category.archived?' (arquivada)':''}}</option>}</select></label>
+          <label class="select-field">Responsável<select formControlName="responsible"><option value="">Todos</option><option value="NONE">Sem responsável</option>@for(person of responsibleFilterPeople();track person.userId){<option [value]="person.userId">{{person.displayName}}{{person.activeMember?'':' (membro anterior)'}}</option>}</select></label>
+          <label class="select-field">Pagador<select formControlName="payerUserId"><option value="">Todos</option>@for(person of payerFilterPeople();track person.userId){<option [value]="person.userId">{{person.displayName}}{{person.activeMember?'':' (membro anterior)'}}</option>}</select></label>
+          <div class="form-actions wide-field"><button matButton="filled" type="submit">Aplicar filtros</button><button matButton="outlined" type="button" (click)="clearFilters()">Limpar</button></div>
+        </form>
+        @if(filtersActive()){<p role="status">Há filtros ativos. A seleção do lote é preservada entre páginas e filtros até ser quitada ou desmarcada.</p>}
+      </mat-card-content>
+    </mat-card>
     <div class="list-header">
       <div>
         <h2 id="expense-list-title">Lançamentos</h2>
@@ -363,7 +380,7 @@
     @if (loading()) {
       <p role="status">Carregando despesas…</p>
     } @else if (expenses().length === 0) {
-      <div class="empty-state" role="status">Nenhuma despesa cadastrada neste espaço.</div>
+      <div class="empty-state" role="status">{{ filtersActive() ? 'Nenhum lançamento corresponde aos filtros.' : 'Nenhuma despesa cadastrada neste espaço.' }}</div>
     } @else {
       <div class="expense-grid">
         @for (expense of expenses(); track expense.id) {
@@ -383,7 +400,7 @@
                 <strong>{{ formatCurrency(expense.amount) }}</strong>
               </div>
               <p>
-                <span class="status-label">{{ expense.status === 'PAID' ? 'Paga' : (expense.overdue ? 'Atrasada' : 'Pendente') }}</span>
+                <span class="status-label">{{ expense.status === 'CANCELLED' ? 'Cancelada' : (expense.status === 'PAID' ? 'Paga' : (expense.overdue ? 'Atrasada' : 'Pendente')) }}</span>
                 — referência {{ formatDate(expense.referenceDate) }}
               </p>
               <p>Categoria: {{ expense.categoryName ?? 'Sem categoria' }} · Responsável: {{ expense.responsibleDisplayName ?? 'Não definido' }}</p>
@@ -395,11 +412,11 @@
                   @if (audit.notes) { <p>{{ audit.notes }}</p> }
                 }
                 <button matButton="outlined" type="button" (click)="openLifecycleAction(expense, 'REVERSE')" [disabled]="submitting()">Desfazer quitação</button>
-              } @else {
+              } @else if (expense.status === 'PENDING') {
                 <button matButton="outlined" type="button" (click)="openPayment(expense)" [disabled]="submitting()">Quitar despesa</button>
                 <button matButton="outlined" type="button" (click)="openLifecycleAction(expense, 'CANCEL')" [disabled]="submitting()">Cancelar despesa</button>
               }
-              <button matButton="outlined" type="button" (click)="openCorrection(expense)" [disabled]="submitting()">Corrigir despesa</button>
+              @if (expense.status !== 'CANCELLED') { <button matButton="outlined" type="button" (click)="openCorrection(expense)" [disabled]="submitting()">Corrigir despesa</button> }
               <button matButton="outlined" type="button" (click)="loadDetail(expense.id)" [disabled]="submitting()">Ver histórico</button>
             </mat-card-content>
           </mat-card>

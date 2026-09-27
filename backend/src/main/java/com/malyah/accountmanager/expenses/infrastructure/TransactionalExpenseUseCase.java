@@ -31,6 +31,11 @@ final class TransactionalExpenseUseCase implements ExpenseUseCase {
     }
 
     @Override
+    public com.malyah.accountmanager.expenses.application.ExpenseFilterOptions filterOptions(String actorEmail) {
+        return delegate.filterOptions(actorEmail);
+    }
+
+    @Override
     public com.malyah.accountmanager.expenses.application.ExpenseView get(
             String actorEmail, java.util.UUID expenseId) {
         return delegate.get(actorEmail, expenseId);

@@ -1,6 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { of, Subject, throwError } from 'rxjs';
 import { ExpenseComponent } from './expense.component';
 import { ExpenseService } from './expense.service';
 import { provideRouter } from '@angular/router';
@@ -11,7 +11,7 @@ describe('ExpenseComponent', () => {
   let fixture: ComponentFixture<ExpenseComponent>;
   const api = {
     newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(), settle: vi.fn(), get: vi.fn(), correct: vi.fn(),
-    reversePayment: vi.fn(), cancel: vi.fn(), settleBatch: vi.fn(), history: vi.fn(),
+    reversePayment: vi.fn(), cancel: vi.fn(), settleBatch: vi.fn(), history: vi.fn(), filterOptions: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -22,6 +22,7 @@ describe('ExpenseComponent', () => {
       sort: 'REFERENCE_DATE', direction: 'ASC',
     }));
     api.history.mockReturnValue(of({ content: [], page: 0, size: 10, totalElements: 0, totalPages: 0 }));
+    api.filterOptions.mockReturnValue(of({ responsiblePeople: [], payerPeople: [] }));
     await TestBed.configureTestingModule({
       imports: [ExpenseComponent],
       providers: [{ provide: ExpenseService, useValue: api }, provideRouter([]),
@@ -38,6 +39,30 @@ describe('ExpenseComponent', () => {
   it('shows loading completion and a clear empty state', () => {
     expect(fixture.nativeElement.textContent).toContain('Nenhuma despesa cadastrada neste espaço.');
     expect(fixture.nativeElement.textContent).toContain('0 despesas');
+  });
+
+  it('applies combined filters from page zero and keeps the batch selection explicit', () => {
+    const component=fixture.componentInstance;
+    component.page.set(3);
+    component.selectedForBatch.set(new Map([['selected',{id:'selected'} as any]]));
+    component.filterForm.patchValue({search:' energia ',dateFrom:'2026-09-01',dateTo:'2026-09-30',status:'OVERDUE',category:'NONE'});
+    component.applyFilters();
+    expect(component.page()).toBe(0);
+    expect(component.selectedForBatch().has('selected')).toBe(true);
+    expect(api.list).toHaveBeenLastCalledWith(0,20,'REFERENCE_DATE','ASC',expect.objectContaining({
+      search:'energia',dateFrom:'2026-09-01',dateTo:'2026-09-30',status:'OVERDUE',withoutCategory:true,
+    }));
+  });
+
+  it('does not allow an older search response to replace the latest result', () => {
+    const oldResult=new Subject<any>(); const latestResult=new Subject<any>();
+    api.list.mockReturnValueOnce(oldResult).mockReturnValueOnce(latestResult);
+    const component=fixture.componentInstance;
+    component.filterForm.controls.search.setValue('antiga'); component.applyFilters();
+    component.filterForm.controls.search.setValue('nova'); component.applyFilters();
+    latestResult.next({content:[{id:'new',description:'Nova'}],page:0,size:20,totalElements:1,totalPages:1});
+    oldResult.next({content:[{id:'old',description:'Antiga'}],page:0,size:20,totalElements:1,totalPages:1});
+    expect(component.expenses().map(item=>item.id)).toEqual(['new']);
   });
 
   it('creates a pending expense converting decimal comma and refreshes the list', () => {

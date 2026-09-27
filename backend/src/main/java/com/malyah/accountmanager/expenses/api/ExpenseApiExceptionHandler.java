@@ -74,7 +74,8 @@ class ExpenseApiExceptionHandler {
         return response(HttpStatus.BAD_REQUEST, "REQUEST_VALIDATION_FAILED", "Revise os campos informados.", fields);
     }
 
-    @ExceptionHandler({ HttpMessageNotReadableException.class, MissingRequestHeaderException.class })
+    @ExceptionHandler({ HttpMessageNotReadableException.class, MissingRequestHeaderException.class,
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class })
     ResponseEntity<ApiError> malformedRequest(Exception exception) {
         return response(HttpStatus.BAD_REQUEST, "REQUEST_VALIDATION_FAILED",
                 "Revise o formato dos dados e informe a chave de repetição.", List.of());

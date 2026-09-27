@@ -38,6 +38,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - files-full-local:/var/lib/account-manager/files
     restart: "no"
 
   backend:

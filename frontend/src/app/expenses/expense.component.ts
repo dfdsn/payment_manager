@@ -30,6 +30,8 @@ export class ExpenseComponent implements OnInit {
   private readonly categoryApi = inject(CategoryService);
   readonly categories = signal<Category[]>([]);
   readonly members = signal<SpaceMember[]>([]);
+  readonly responsibleFilterPeople = signal<import('./expense.service').ExpenseFilterPerson[]>([]);
+  readonly payerFilterPeople = signal<import('./expense.service').ExpenseFilterPerson[]>([]);
   readonly settling = signal<Expense | null>(null);
   readonly editing = signal<Expense | null>(null);
   readonly conflictCurrent = signal<Expense | null>(null);
@@ -88,6 +90,12 @@ export class ExpenseComponent implements OnInit {
   readonly totalElements = signal(0);
   readonly sort = signal<ExpenseSort>('REFERENCE_DATE');
   readonly direction = signal<SortDirection>('ASC');
+  readonly filtersActive = signal(false);
+  private loadSequence = 0;
+  readonly filterForm = this.formBuilder.nonNullable.group({
+    search: ['', Validators.maxLength(200)], dateFrom: [''], dateTo: [''], dateBasis: ['DUE_DATE' as 'DUE_DATE'|'PAYMENT_DATE'],
+    category: [''], responsible: [''], payerUserId: [''], status: ['ACTIVE' as import('./expense.service').ExpenseStatusFilter],
+  });
   private idempotencyKey = this.expensesApi.newIdempotencyKey();
 
   readonly form = this.formBuilder.nonNullable.group({
@@ -114,6 +122,7 @@ export class ExpenseComponent implements OnInit {
       error: error => this.handleError(error, 'Não foi possível carregar os pagadores.') });
     this.form.controls.status.valueChanges.subscribe(status => this.updateDateRules(status));
     this.loadCategories();
+    this.loadFilterOptions();
     this.load();
   }
 
@@ -441,6 +450,19 @@ export class ExpenseComponent implements OnInit {
     this.load();
   }
 
+  applyFilters(): void {
+    if (this.filterForm.invalid) { this.filterForm.markAllAsTouched(); return; }
+    const value=this.filterForm.getRawValue();
+    if(value.dateFrom && value.dateTo && value.dateFrom>value.dateTo){this.errorMessage.set('A data inicial não pode ser posterior à final.');return;}
+    this.page.set(0); this.filtersActive.set(Object.values(value).some(v=>v!==''&&v!=='DUE_DATE'&&v!=='ACTIVE'));
+    this.load();
+  }
+
+  clearFilters(): void {
+    this.filterForm.reset({search:'',dateFrom:'',dateTo:'',dateBasis:'DUE_DATE',category:'',responsible:'',payerUserId:'',status:'ACTIVE'});
+    this.page.set(0); this.filtersActive.set(false); this.load();
+  }
+
   previous(): void {
     if (this.page() === 0) return;
     this.page.update(value => value - 1);
@@ -482,24 +504,41 @@ export class ExpenseComponent implements OnInit {
   }
 
   private load(clearError = true): void {
+    const sequence=++this.loadSequence;
     this.loading.set(true);
     if (clearError) this.errorMessage.set(null);
-    this.expensesApi.list(this.page(), 20, this.sort(), this.direction())
-      .pipe(finalize(() => this.loading.set(false)))
+    const f=this.filterForm.getRawValue();
+    this.expensesApi.list(this.page(), 20, this.sort(), this.direction(), {
+      search:f.search.trim()||undefined,dateFrom:f.dateFrom||undefined,dateTo:f.dateTo||undefined,dateBasis:f.dateBasis,
+      categoryId:f.category && f.category!=='NONE'?f.category:undefined,withoutCategory:f.category==='NONE',
+      responsibleUserId:f.responsible&&f.responsible!=='NONE'?f.responsible:undefined,withoutResponsible:f.responsible==='NONE',
+      payerUserId:f.payerUserId||undefined,status:f.status,
+    }).pipe(finalize(() => { if(sequence===this.loadSequence)this.loading.set(false); }))
       .subscribe({
         next: result => {
+          if(sequence!==this.loadSequence)return;
           this.expenses.set(result.content);
           this.page.set(result.page);
           this.totalPages.set(result.totalPages);
           this.totalElements.set(result.totalElements);
         },
-        error: error => this.handleError(error, 'Não foi possível carregar as despesas.'),
+        error: error => { if(sequence===this.loadSequence)this.handleError(error, 'Não foi possível carregar as despesas.'); },
       });
   }
 
   private loadCategories(): void {
     this.categoryApi.list(true).subscribe({next: values => this.categories.set(values),
       error: error => this.handleError(error, 'Não foi possível carregar as categorias.')});
+  }
+
+  private loadFilterOptions(): void {
+    this.expensesApi.filterOptions().subscribe({
+      next: options => {
+        this.responsibleFilterPeople.set(options.responsiblePeople);
+        this.payerFilterPeople.set(options.payerPeople);
+      },
+      error: error => this.handleError(error, 'Não foi possível carregar as opções dos filtros.'),
+    });
   }
 
   private handleError(error: HttpErrorResponse, fallback: string): void {

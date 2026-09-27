@@ -68,7 +68,7 @@ class ExpensePostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(13);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(14);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var context = new AuthenticatedUserContextService(contextRepository());
@@ -270,6 +270,47 @@ class ExpensePostgresIT {
         });
     }
 
+    @Test void searchesFiltersDatesStatusesAndKeepsCountsInsideTheAuthorizedSpace() {
+        var category=categoryService.create("admin@example.com","Serviços");
+        var overdue=useCase.create("admin@example.com",new CreateOneOffExpenseCommand("Energia elétrica","100",ExpenseStatus.PENDING,
+                LocalDate.of(2026,9,24),null,null,UUID.randomUUID(),null,null,null,category.id(),GUEST)).expense();
+        var paid=useCase.create("guest@example.com",new CreateOneOffExpenseCommand("Energia solar","200",ExpenseStatus.PAID,
+                LocalDate.of(2026,9,30),LocalDate.of(2026,10,2),null,UUID.randomUUID(),"205",GUEST,null,null,null)).expense();
+        var cancelled=useCase.create("admin@example.com",command("Energia cancelada","10",ExpenseStatus.PENDING,
+                LocalDate.of(2026,9,25),null,UUID.randomUUID())).expense();
+        useCase.cancel("admin@example.com",new com.malyah.accountmanager.expenses.application.CancelExpenseCommand(
+                cancelled.id(),cancelled.version(),"Duplicada",UUID.randomUUID()));
+        insertOtherSpaceExpense();
+        var overdueQuery=new ExpenseListQuery(0,20,ExpenseSort.DESCRIPTION,SortDirection.ASC," energia ",
+                LocalDate.of(2026,9,1),LocalDate.of(2026,9,30),com.malyah.accountmanager.expenses.application.ExpenseDateBasis.DUE_DATE,
+                category.id(),false,GUEST,false,null,com.malyah.accountmanager.expenses.application.ExpenseStatusFilter.OVERDUE,null);
+        assertThat(useCase.list("guest@example.com",overdueQuery).content()).extracting(e->e.id()).containsExactly(overdue.id());
+        var paymentQuery=new ExpenseListQuery(0,20,ExpenseSort.REFERENCE_DATE,SortDirection.ASC,"energia",
+                LocalDate.of(2026,10,2),LocalDate.of(2026,10,2),com.malyah.accountmanager.expenses.application.ExpenseDateBasis.PAYMENT_DATE,
+                null,true,null,true,GUEST,com.malyah.accountmanager.expenses.application.ExpenseStatusFilter.PAID,null);
+        var paymentPage=useCase.list("admin@example.com",paymentQuery);
+        assertThat(paymentPage.totalElements()).isEqualTo(1);
+        assertThat(paymentPage.content()).extracting(e->e.id()).containsExactly(paid.id());
+        jdbc.update("""
+                update space_memberships
+                   set active=false, ended_at=?, ended_by_user_id=?, end_reason='ADMIN_REMOVAL'
+                 where user_id=?
+                """, Timestamp.from(NOW), ADMIN, GUEST);
+        var options=useCase.filterOptions("admin@example.com");
+        assertThat(options.responsiblePeople()).anySatisfy(person -> {
+            assertThat(person.userId()).isEqualTo(GUEST);
+            assertThat(person.activeMember()).isFalse();
+        });
+        assertThat(options.payerPeople()).anySatisfy(person -> {
+            assertThat(person.userId()).isEqualTo(GUEST);
+            assertThat(person.activeMember()).isFalse();
+        });
+        var cancelledQuery=new ExpenseListQuery(0,20,ExpenseSort.DESCRIPTION,SortDirection.ASC,null,
+                LocalDate.of(2026,9,25),LocalDate.of(2026,9,25),com.malyah.accountmanager.expenses.application.ExpenseDateBasis.DUE_DATE,
+                null,false,null,false,null,com.malyah.accountmanager.expenses.application.ExpenseStatusFilter.CANCELLED,null);
+        assertThat(useCase.list("admin@example.com",cancelledQuery).content()).extracting(e->e.id()).containsExactly(cancelled.id());
+    }
+
     @Test
     void sameRequestIsIdempotentConcurrentAndNewKeyAllowsLegitimateDuplicate() throws Exception {
         var key = UUID.randomUUID();
@@ -300,14 +341,14 @@ class ExpensePostgresIT {
     void reusedKeyWithDifferentPayloadConflictsAndPaginationOrderingIsStable() {
         var key = UUID.randomUUID();
         useCase.create("admin@example.com", command(
-                "B", "20.00", ExpenseStatus.PENDING, LocalDate.of(2026, 10, 2), null, key));
+                "B", "20.00", ExpenseStatus.PENDING, LocalDate.of(2026, 9, 27), null, key));
         assertThatThrownBy(() -> useCase.create("admin@example.com", command(
-                "Alterada", "20.00", ExpenseStatus.PENDING, LocalDate.of(2026, 10, 2), null, key)))
+                "Alterada", "20.00", ExpenseStatus.PENDING, LocalDate.of(2026, 9, 27), null, key)))
                 .isInstanceOf(ExpenseIdempotencyConflictException.class);
         useCase.create("admin@example.com", command(
-                "A", "10.00", ExpenseStatus.PENDING, LocalDate.of(2026, 10, 1), null, UUID.randomUUID()));
+                "A", "10.00", ExpenseStatus.PENDING, LocalDate.of(2026, 9, 26), null, UUID.randomUUID()));
         useCase.create("admin@example.com", command(
-                "C", "30.00", ExpenseStatus.PENDING, LocalDate.of(2026, 10, 3), null, UUID.randomUUID()));
+                "C", "30.00", ExpenseStatus.PENDING, LocalDate.of(2026, 9, 28), null, UUID.randomUUID()));
 
         var first = useCase.list("admin@example.com",
                 new ExpenseListQuery(0, 2, ExpenseSort.DESCRIPTION, SortDirection.ASC));

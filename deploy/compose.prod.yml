@@ -45,6 +45,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - private-files:/var/lib/account-manager/files
     restart: "no"
     profiles: ["migration"]
 

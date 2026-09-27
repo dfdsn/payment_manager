@@ -35,12 +35,15 @@ describe('ExpenseService', () => {
   });
 
   it('requests server pagination and stable ordering', () => {
-    service.list(2, 20, 'DESCRIPTION', 'DESC').subscribe();
+    service.list(2, 20, 'DESCRIPTION', 'DESC', { search: 'energia', status: 'OVERDUE', withoutCategory: true }).subscribe();
     const request = http.expectOne(candidate => candidate.url === '/api/v1/expenses');
     expect(request.request.params.get('page')).toBe('2');
     expect(request.request.params.get('size')).toBe('20');
     expect(request.request.params.get('sort')).toBe('DESCRIPTION');
     expect(request.request.params.get('direction')).toBe('DESC');
+    expect(request.request.params.get('search')).toBe('energia');
+    expect(request.request.params.get('status')).toBe('OVERDUE');
+    expect(request.request.params.get('withoutCategory')).toBe('true');
     request.flush({ content: [], page: 2, size: 20, totalElements: 0, totalPages: 0 });
   });
 

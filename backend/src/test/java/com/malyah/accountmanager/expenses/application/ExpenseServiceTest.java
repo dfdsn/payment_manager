@@ -76,7 +76,7 @@ class ExpenseServiceTest {
 
     @Test
     void listsStablePageAndCalculatesTotalPages() {
-        given(repository.findBySpace(SPACE, new ExpenseListQuery(1, 2, ExpenseSort.AMOUNT, SortDirection.DESC)))
+        given(repository.findBySpace(org.mockito.ArgumentMatchers.eq(SPACE), any()))
                 .willReturn(new StoredExpensePage(List.of(
                         stored(ExpenseStatus.PENDING, LocalDate.of(2026, 9, 25), null)), 5));
 
@@ -100,6 +100,17 @@ class ExpenseServiceTest {
         assertInvalidQuery(new ExpenseListQuery(0, 20, ExpenseSort.REFERENCE_DATE, null));
         assertThatThrownBy(() -> service.list("guest@example.com", null))
                 .isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
+    @Test void defaultsToCurrentMonthAndRejectsContradictoryFilters() {
+        given(repository.findBySpace(org.mockito.ArgumentMatchers.eq(SPACE), any())).willReturn(new StoredExpensePage(List.of(),0));
+        service.list("guest@example.com", new ExpenseListQuery(0,20,ExpenseSort.REFERENCE_DATE,SortDirection.ASC));
+        org.mockito.Mockito.verify(repository).findBySpace(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.argThat(query -> query.dateFrom().equals(LocalDate.of(2026,9,1))
+                        && query.dateTo().equals(LocalDate.of(2026,9,30)) && query.today().equals(LocalDate.of(2026,9,25))));
+        assertThatThrownBy(() -> service.list("guest@example.com", new ExpenseListQuery(0,20,ExpenseSort.REFERENCE_DATE,
+                SortDirection.ASC,null,LocalDate.of(2026,10,2),LocalDate.of(2026,10,1),ExpenseDateBasis.DUE_DATE,
+                null,false,null,false,null,ExpenseStatusFilter.ACTIVE,null))).isInstanceOf(ExpenseQueryValidationException.class);
     }
 
     private void assertInvalidQuery(ExpenseListQuery query) {
