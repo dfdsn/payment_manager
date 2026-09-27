@@ -418,3 +418,11 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 ## Estado e próximo passo
 
 Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01, E02, H03.1 e H03.2 estão concluídos pelas evidências atuais. A próxima história recomendada é **H03.3 — Anexar e acessar documentos**.
+
+## Anexos privados (H03.3)
+
+Na visualização de uma despesa, ambos os membros ativos podem anexar, listar, baixar e remover até cinco arquivos PDF, JPG ou PNG de no máximo 10 MB cada. O backend valida a assinatura real do conteúdo; o nome original é apenas metadado e nunca compõe o caminho físico. Downloads autenticados usam `Content-Disposition: attachment`, `nosniff` e `no-store`.
+
+O backend usa `APP_FILES_ROOT` (padrão `/var/lib/account-manager/files`) e separa `staging/` de `permanent/`. Em Docker, o volume privado `files-full-local`/`private-files` é montado somente no backend e não no Nginx. Para comprovar persistência local, envie um arquivo, recrie somente o container backend sem remover volumes e baixe-o novamente. `docker compose down -v` apaga deliberadamente o ambiente local e não deve ser usado numa atualização.
+
+Backup operacional deve capturar PostgreSQL e a área `permanent/` na mesma janela de manutenção. `staging/` não é backup permanente. A restauração completa continua pendente de P06/H11.2–H11.3 e não foi declarada validada nesta história.

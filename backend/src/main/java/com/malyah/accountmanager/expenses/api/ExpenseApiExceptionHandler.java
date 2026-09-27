@@ -16,8 +16,18 @@ import com.malyah.accountmanager.expenses.application.ExpenseQueryValidationExce
 import com.malyah.accountmanager.expenses.domain.ExpenseValidationException;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException;
 
-@RestControllerAdvice(assignableTypes = {ExpenseController.class, CategoryController.class})
+@RestControllerAdvice(assignableTypes = {ExpenseController.class, CategoryController.class, AttachmentController.class})
 class ExpenseApiExceptionHandler {
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.AttachmentException.class)
+    ResponseEntity<ApiError> attachment(com.malyah.accountmanager.expenses.application.AttachmentException exception) {
+        var status = switch (exception.code()) {
+            case "ATTACHMENT_NOT_FOUND", "EXPENSE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "ATTACHMENT_LIMIT", "ATTACHMENT_IDEMPOTENCY_CONFLICT" -> HttpStatus.CONFLICT;
+            case "ATTACHMENT_STORAGE_FAILED", "ATTACHMENT_CONTENT_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
+            default -> HttpStatus.BAD_REQUEST;
+        };
+        return response(status, exception.code(), exception.getMessage(), List.of());
+    }
     @ExceptionHandler(com.malyah.accountmanager.expenses.application.CategoryConflictException.class)
     ResponseEntity<ApiError> categoryConflict(com.malyah.accountmanager.expenses.application.CategoryConflictException exception) {
         return response(HttpStatus.CONFLICT, "CATEGORY_CONFLICT", exception.getMessage(), List.of());

@@ -13,10 +13,12 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
+import java.nio.file.Path;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -57,6 +59,8 @@ class ExpensePostgresIT {
     private DriverManagerDataSource dataSource;
     private ExpenseUseCase useCase;
     private com.malyah.accountmanager.expenses.application.CategoryService categoryService;
+    private com.malyah.accountmanager.expenses.application.AttachmentUseCase attachments;
+    @TempDir Path attachmentRoot;
 
     @BeforeEach
     void reset() {
@@ -64,7 +68,7 @@ class ExpensePostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(12);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(13);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var context = new AuthenticatedUserContextService(contextRepository());
@@ -75,6 +79,44 @@ class ExpensePostgresIT {
                 Clock.fixed(NOW, ZoneOffset.UTC), new com.malyah.accountmanager.identity.infrastructure.JdbcFinancialMemberAccess(jdbc), categories);
         useCase = new TransactionalExpenseUseCase(
                 service, new TransactionTemplate(new DataSourceTransactionManager(dataSource)));
+        attachments = new FileSystemAttachmentUseCase(jdbc, context,
+                new TransactionTemplate(new DataSourceTransactionManager(dataSource)), attachmentRoot,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test void storesAuthorizesReplaysAndRemovesPrivateAttachments() {
+        var expense = useCase.create("admin@example.com", command("Comprovante", "10.00",
+                ExpenseStatus.PENDING, LocalDate.of(2026, 9, 30), null, UUID.randomUUID())).expense();
+        var key = UUID.randomUUID();
+        var pdf = "%PDF-1.7\nsynthetic-test-only".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        var uploaded = attachments.upload("guest@example.com", expense.id(), key, "comprovante.pdf", pdf);
+        assertThat(attachments.upload("guest@example.com", expense.id(), key, "comprovante.pdf", pdf).id())
+                .isEqualTo(uploaded.id());
+        assertThat(attachments.download("admin@example.com", expense.id(), uploaded.id()).bytes()).isEqualTo(pdf);
+        assertThat(attachments.list("admin@example.com", expense.id())).singleElement()
+                .satisfies(item -> assertThat(item.uploadedByDisplayName()).isEqualTo("Convidado"));
+        assertThatThrownBy(() -> attachments.download("other@example.com", expense.id(), uploaded.id()))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.AttachmentException.class);
+        attachments.remove("admin@example.com", expense.id(), uploaded.id());
+        assertThat(attachments.list("guest@example.com", expense.id())).isEmpty();
+        assertThat(jdbc.queryForObject("select count(*) from expense_attachment_audit where attachment_id=?", Integer.class, uploaded.id())).isEqualTo(2);
+    }
+
+    @Test void rejectsInvalidAttachmentContentAndEnforcesConcurrentLimit() throws Exception {
+        var expense = useCase.create("admin@example.com", command("Arquivos", "20.00",
+                ExpenseStatus.PENDING, LocalDate.of(2026, 9, 30), null, UUID.randomUUID())).expense();
+        assertThatThrownBy(() -> attachments.upload("admin@example.com", expense.id(), UUID.randomUUID(),
+                "fake.pdf", "not-a-pdf".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .isInstanceOf(com.malyah.accountmanager.expenses.application.AttachmentException.class);
+        var png = new byte[]{(byte)137,80,78,71,13,10,26,10,1};
+        for (int index=0; index<4; index++) attachments.upload("admin@example.com", expense.id(), UUID.randomUUID(), "a"+index+".png", png);
+        Callable<String> upload = () -> { try { attachments.upload("guest@example.com", expense.id(), UUID.randomUUID(), UUID.randomUUID()+".png", png); return "OK"; }
+            catch (com.malyah.accountmanager.expenses.application.AttachmentException e) { return e.code(); } };
+        try (var executor=Executors.newFixedThreadPool(2)) {
+            assertThat(executor.invokeAll(List.of(upload, upload)).stream().map(f->{try{return f.get();}catch(Exception e){throw new AssertionError(e);}}).toList())
+                    .containsExactlyInAnyOrder("OK", "ATTACHMENT_LIMIT");
+        }
+        assertThat(attachments.list("admin@example.com", expense.id())).hasSize(5);
     }
 
     @Test void managesInitialCategoriesAndPreservesReferencedExpensesAfterRenameAndArchive() {

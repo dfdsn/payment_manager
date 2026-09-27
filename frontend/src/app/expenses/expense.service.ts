@@ -86,6 +86,15 @@ export interface ExpenseHistoryPage {
   totalPages: number;
 }
 
+export interface ExpenseAttachment {
+  id: string;
+  name: string;
+  mediaType: 'application/pdf' | 'image/jpeg' | 'image/png';
+  size: number;
+  uploadedByDisplayName: string;
+  uploadedAt: string;
+}
+
 export interface BatchSettlementResult {
   operationId: string;
   replayed: boolean;
@@ -136,6 +145,26 @@ export class ExpenseService {
     return this.http.get<ExpenseHistoryPage>(`${this.endpoint}/${id}/history`, {
       params: new HttpParams().set('page', page).set('size', size),
     });
+  }
+
+  attachments(id: string) {
+    return this.http.get<ExpenseAttachment[]>(`${this.endpoint}/${id}/attachments`);
+  }
+
+  uploadAttachment(id: string, file: File, key: string) {
+    const body = new FormData(); body.append('file', file, file.name);
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
+      this.http.post<ExpenseAttachment>(`${this.endpoint}/${id}/attachments`, body,
+        { headers: { 'Idempotency-Key': key } })));
+  }
+
+  downloadAttachment(expenseId: string, attachmentId: string) {
+    return this.http.get(`${this.endpoint}/${expenseId}/attachments/${attachmentId}`, { responseType: 'blob' });
+  }
+
+  removeAttachment(expenseId: string, attachmentId: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
+      this.http.delete<void>(`${this.endpoint}/${expenseId}/attachments/${attachmentId}`)));
   }
 
   correct(id: string, data: CorrectExpenseData, idempotencyKey: string) {

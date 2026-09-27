@@ -282,6 +282,23 @@
 
   @if (detail(); as selected) {
     <mat-card appearance="outlined" class="expense-form-card history-card">
+      <mat-card-header><mat-card-title>Anexos de {{ selected.description }}</mat-card-title><mat-card-subtitle>PDF, JPG ou PNG · até 10 MB · máximo de 5</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        <label>Selecionar documento <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" (change)="uploadAttachment($event, selected.id)" [disabled]="attachmentLoading() || attachments().length >= 5"></label>
+        @if (attachmentLoading()) { <p aria-live="polite">Enviando ou atualizando anexos…</p> }
+        @if (attachmentError()) { <div class="error-summary" role="alert">{{ attachmentError() }}</div> }
+        @if (!attachmentLoading() && attachments().length === 0) { <p>Nenhum anexo nesta despesa.</p> }
+        <ul>
+          @for (item of attachments(); track item.id) {
+            <li><strong>{{ item.name }}</strong> · {{ item.size }} bytes · enviado por {{ item.uploadedByDisplayName }}
+              <button matButton type="button" (click)="downloadAttachment(selected.id,item)">Baixar</button>
+              <button matButton type="button" (click)="removeAttachment(selected.id,item.id)">Remover</button>
+            </li>
+          }
+        </ul>
+      </mat-card-content>
+    </mat-card>
+    <mat-card appearance="outlined" class="expense-form-card history-card">
       <mat-card-header>
         <mat-card-title>Histórico de {{ selected.description }}</mat-card-title>
         <mat-card-subtitle>Situação atual: {{ selected.status === 'CANCELLED' ? 'Cancelada' : (selected.status === 'PAID' ? 'Paga' : 'Pendente') }} · versão {{ selected.version }}</mat-card-subtitle>

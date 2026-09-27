@@ -2,6 +2,7 @@ package com.malyah.accountmanager.expenses.infrastructure;
 
 import java.time.Clock;
 import java.util.UUID;
+import java.nio.file.Path;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -19,6 +20,14 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQu
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "spring.datasource.url")
 class ExpensesConfiguration {
+    @Bean
+    com.malyah.accountmanager.expenses.application.AttachmentUseCase attachmentUseCase(
+            JdbcTemplate jdbcTemplate, AuthenticatedUserContextQuery contextQuery,
+            PlatformTransactionManager transactionManager, Clock applicationClock,
+            @org.springframework.beans.factory.annotation.Value("${app.files.root:/var/lib/account-manager/files}") String root) {
+        return new FileSystemAttachmentUseCase(jdbcTemplate, contextQuery,
+                new TransactionTemplate(transactionManager), Path.of(root), applicationClock);
+    }
     @Bean
     com.malyah.accountmanager.identity.application.MembershipDepartureHandler membershipDepartureHandler(
             JdbcTemplate jdbcTemplate) {

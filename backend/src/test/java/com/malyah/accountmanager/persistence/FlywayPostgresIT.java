@@ -25,7 +25,7 @@ class FlywayPostgresIT {
                 .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .load();
 
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(12);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(13);
 
         try (var connection = DriverManager.getConnection(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());

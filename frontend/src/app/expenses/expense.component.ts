@@ -40,6 +40,9 @@ export class ExpenseComponent implements OnInit {
   readonly historyTotalPages = signal(0);
   readonly historyLoading = signal(false);
   readonly historyError = signal<string | null>(null);
+  readonly attachments = signal<import('./expense.service').ExpenseAttachment[]>([]);
+  readonly attachmentLoading = signal(false);
+  readonly attachmentError = signal<string | null>(null);
   readonly selectedForBatch = signal(new Map<string, Expense>());
   readonly batchOpen = signal(false);
   private paymentKey = '';
@@ -361,8 +364,40 @@ export class ExpenseComponent implements OnInit {
   loadDetail(id: string): void {
     this.historyPage.set(0);
     this.expensesApi.get(id).subscribe({
-      next: expense => { this.detail.set(expense); this.loadHistory(id, 0); },
+      next: expense => { this.detail.set(expense); this.loadHistory(id, 0); this.loadAttachments(id); },
       error: error => this.handleError(error, 'Não foi possível consultar o histórico da despesa.'),
+    });
+  }
+
+  loadAttachments(id: string) {
+    if (typeof this.expensesApi.attachments !== 'function') return;
+    this.attachmentLoading.set(true); this.attachmentError.set(null);
+    this.expensesApi.attachments(id).pipe(finalize(() => this.attachmentLoading.set(false))).subscribe({
+      next: items => this.attachments.set(items),
+      error: () => this.attachmentError.set('Não foi possível carregar os anexos.'),
+    });
+  }
+
+  uploadAttachment(event: Event, expenseId: string) {
+    const input = event.target as HTMLInputElement; const file = input.files?.[0];
+    if (!file) return;
+    this.attachmentLoading.set(true); this.attachmentError.set(null);
+    this.expensesApi.uploadAttachment(expenseId, file, this.expensesApi.newIdempotencyKey())
+      .pipe(finalize(() => { this.attachmentLoading.set(false); input.value = ''; }))
+      .subscribe({ next: () => this.loadAttachments(expenseId), error: e => this.attachmentError.set(e.error?.message ?? 'O anexo não foi enviado.') });
+  }
+
+  downloadAttachment(expenseId: string, item: import('./expense.service').ExpenseAttachment) {
+    this.expensesApi.downloadAttachment(expenseId, item.id).subscribe({ next: blob => {
+      const url=URL.createObjectURL(blob); const link=document.createElement('a'); link.href=url; link.download=item.name; link.click(); URL.revokeObjectURL(url);
+    }, error: () => this.attachmentError.set('Não foi possível baixar o anexo.') });
+  }
+
+  removeAttachment(expenseId: string, id: string) {
+    if (!confirm('Remover este anexo? O histórico da remoção será preservado.')) return;
+    this.attachmentLoading.set(true);
+    this.expensesApi.removeAttachment(expenseId,id).pipe(finalize(()=>this.attachmentLoading.set(false))).subscribe({
+      next:()=>this.loadAttachments(expenseId), error:()=>this.attachmentError.set('Não foi possível remover o anexo.'),
     });
   }
 

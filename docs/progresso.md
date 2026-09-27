@@ -52,8 +52,8 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H02.4 | Desfazer quitação e cancelar | Concluído | 91 Java, 28 ITs PostgreSQL (18 de despesas), JaCoCo 95,57%/85,55%, PIT 82%, 37 frontend, build e E2E aprovados. P10 encerrada com correção prévia do vencimento. Evidência: `docs/evidencias/H02.4.md`. |
 | H02.5 | Quitar vários lançamentos | Concluído | 97 Java, 34 ITs PostgreSQL (24 de despesas), JaCoCo 95,73%/85,64%, PIT 83%, 40 frontend, build e E2E atômico aprovados. Evidência: `docs/evidencias/H02.5.md`. |
 | H03.1 | Gerenciar categorias | Concluído | 100 Java, 36 ITs PostgreSQL (26 de despesas), JaCoCo 95,55%/85,86%, PIT 81%, 42 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H03.1.md`. |
-| H03.2 | Atribuir responsável e consultar histórico | Não iniciado | — |
-| H03.3 | Anexar e acessar documentos | Não iniciado | — |
+| H03.2 | Atribuir responsável e consultar histórico | Concluído | 101 Java, 32 ITs PostgreSQL, JaCoCo 95,38%/85,02%, PIT 75%, 44 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H03.2.md`. |
+| H03.3 | Anexar e acessar documentos | Em validação | Fluxo implementado; 101 Java, 31 ITs selecionados PostgreSQL e 44 frontend aprovados. Faltam gates finais/E2E específico. Evidência: `docs/evidencias/H03.3.md`. |
 | H03.4 | Buscar e filtrar lançamentos | Não iniciado | — |
 | H04.1 | Cadastrar recorrência e calcular calendário | Não iniciado | — |
 | H04.2 | Gerar ocorrências sem duplicação | Não iniciado | — |
@@ -336,6 +336,10 @@ Validação manual / integração real: Testcontainers comprovou atribuição/tr
 Falhas de validação encontradas e corrigidas: a primeira execução PostgreSQL tentou bloquear o lado anulável de um LEFT JOIN e terminou com 27 testes de despesas e Flyway aprovados, porém 1 falha e 2 erros de associação. O lock passou a `FOR UPDATE OF e`. O novo teste concorrente também revelou que sua simulação direta de saída omitia os campos obrigatórios do contrato H01.4; o arranjo foi corrigido. A execução final gerou relatórios novos e aprovou 32/32. Execuções falhas não foram tratadas como aprovação.
 Limitações e cenários futuros: o aviso interno/WhatsApp ao administrador ainda não existe e será validado em E08; associação em recorrências/parcelas, filtros/CSV e alertas pertencem a E04–E06/E08. Mailpit foi apenas infraestrutura local; H03.2 não envia email. Android/Edge reais continuam no aceite transversal.
 Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H03.2.md e este arquivo.
+
+## H03.3 — Anexar e acessar documentos (em validação)
+
+Implementação iniciada em 26/09/2026: migração V13, volume privado, staging/promoção/compensação, validação efetiva de PDF/JPG/PNG, limite de cinco/10 MB, idempotência, autorização por espaço, download seguro, remoção lógica auditada e interface integrada ao detalhe. A primeira regressão revelou dependência ausente apenas nos slices HTTP e mocks antigos do frontend; os ajustes foram aplicados e a repetição dos testes permanece obrigatória antes de concluir a história.
 Condição de conclusão ou desbloqueio: critérios executáveis da H03.2 satisfeitos em 25/09/2026; integrações futuras explicitamente diferidas conforme backlog.
 Próximo passo: H03.3 — anexar e acessar documentos.
 ```

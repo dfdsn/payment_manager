@@ -6,6 +6,33 @@ info:
 servers:
   - url: /api/v1
 paths:
+  /expenses/{expenseId}/attachments:
+    get:
+      summary: Lista anexos disponíveis da despesa
+      responses: { '200': { description: Lista autorizada } }
+    post:
+      summary: Anexa PDF, JPG ou PNG (máximo 10 MB e cinco por despesa)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties: { file: { type: string, format: binary } }
+      responses: { '201': { description: Anexo promovido e disponível }, '409': { description: Limite ou chave conflitante } }
+  /expenses/{expenseId}/attachments/{attachmentId}:
+    get:
+      summary: Baixa conteúdo privado após autorização
+      responses: { '200': { description: Conteúdo }, '404': { description: Ausente ou inacessível } }
+    delete:
+      summary: Remove conteúdo preservando metadado e auditoria
+      responses: { '204': { description: Removido } }
   /auth/csrf:
     get:
       operationId: issueCsrfToken
