@@ -286,6 +286,22 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByLabel('Senha').fill(newPassword);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
+
+  await page.goto('/recorrencias');
+  await page.getByLabel('Descrição').fill('Condomínio recorrente');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('500,00');
+  await page.getByLabel('Primeiro vencimento').fill('2027-01-31');
+  await page.getByRole('button', { name: 'Calcular próximas datas' }).click();
+  await expect(page.getByText('2027-02-28')).toBeVisible();
+  await expect(page.getByText('2027-03-31')).toBeVisible();
+  await page.getByRole('button', { name: 'Cadastrar recorrência' }).click();
+  await expect(page.getByText(/Nenhum lançamento foi gerado nesta etapa/)).toBeVisible();
+  await expect(page.getByText('Condomínio recorrente', { exact: true })).toBeVisible();
+
+  await page.goto('/entrar');
+  await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
+  await page.getByLabel('Senha').fill(newPassword);
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await page.getByRole('button', { name: 'Encerrar todas as sessões' }).click();
   await expect(page.getByRole('region', { name: 'Entrar' })).toBeVisible();
 });

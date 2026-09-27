@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Ambos os papéis podem cadastrar, listar, quitar individualmente ou em lote, corrigir, reverter quitação e cancelar despesas avulsas, com auditoria e proteção contra conflito.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1 permite cadastrar definições de recorrência e calcular seu calendário sem gerar despesas antecipadamente.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites, V5 registra o ciclo da associação, V6 adiciona despesas avulsas/idempotência, V7 registra pagamentos, V8 registra correções auditáveis, V9 reversões/cancelamentos e V10 operações de quitação em lote com correlação individual.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V14 cobrem identidade, despesas e organização; V15 adiciona definições de recorrência, idempotência e auditoria, sem materializar lançamentos.
 
 ## Pré-requisitos
 
@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01, E02, H03.1, H03.2 e H03.4 estão concluídos pelas evidências atuais. H03.3 permanece em validação; por isso o próximo passo recomendado é fechar seus gates/E2E específico antes de iniciar E04.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1 está concluída; H03.3 permanece em validação independente. A próxima história funcional é H04.2.
 
 ## Anexos privados (H03.3)
 
@@ -442,3 +442,25 @@ GET /api/v1/expenses/filter-options
 ```
 
 Parâmetros inválidos, página negativa, tamanho fora de 1–100, período invertido, enum ou campo de ordenação desconhecido retornam `400`; a API não aceita SQL ou nome livre como ordenação.
+
+## Recorrências e calendário (H04.1)
+
+Após entrar, abra `/recorrencias` (também há um link na tela de despesas). Administrador e convidado ativos podem cadastrar descrição, valor, modalidade fixa ou estimativa variável, frequência, primeiro vencimento e, opcionalmente, término, categoria e responsável. Categoria e responsável precisam estar ativos e pertencer ao mesmo espaço.
+
+As frequências são mensal, bimestral, trimestral, semestral e anual. O primeiro vencimento fixa o dia-base: `31/01/2027` produz `28/02/2027` e depois `31/03/2027`, sem deslocamento acumulado. Em ano bissexto, fevereiro usa dia 29. Não há ajuste de fim de semana/feriado. O término é inclusivo e datas passadas são aceitas como referência, mas não geram ocorrências retroativas.
+
+“Calcular próximas datas” chama o backend e mostra até 12 datas; o frontend não replica o algoritmo. “Cadastrar recorrência” persiste somente a definição. H04.1 não cria despesas, jobs ou previsões materializadas — isso começa em H04.2.
+
+Exemplos autenticados (operações `POST` também exigem CSRF):
+
+```text
+POST /api/v1/recurrences/calendar-preview
+POST /api/v1/recurrences  Idempotency-Key: <UUID>
+GET  /api/v1/recurrences
+```
+
+Teste de persistência e migração V15:
+
+```powershell
+backend\scripts\run-integration-tests.ps1 -Tests RecurrencePostgresIT,FlywayPostgresIT
+```

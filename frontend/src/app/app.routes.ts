@@ -12,6 +12,7 @@ export const routes: Routes = [
   { path: 'membros', component: InvitationComponent, data: { mode: 'manage' } },
   { path: 'despesas', loadComponent: () => import('./expenses/expense.component').then(module => module.ExpenseComponent) },
   { path: 'categorias', loadComponent: () => import('./expenses/category.component').then(module => module.CategoryComponent) },
+  { path: 'recorrencias', loadComponent: () => import('./recurrences/recurrence.component').then(module => module.RecurrenceComponent) },
   { path: 'aceitar-convite', component: InvitationComponent, data: { mode: 'accept' } },
   { path: 'configuracao-inicial', component: InitialSetupComponent },
   { path: '**', redirectTo: 'entrar' },

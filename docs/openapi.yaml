@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H02.3.
+  description: Contrato versionado dos endpoints implementados até H04.1.
 servers:
   - url: /api/v1
 paths:
@@ -872,6 +872,47 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { description: Despesa não encontrada no espaço ativo. }
         "409": { description: Despesa paga/cancelada, versão desatualizada ou chave reutilizada com outro payload. }
+  /recurrences:
+    get:
+      summary: Lista as definições de recorrência do espaço autenticado
+      responses:
+        '200':
+          description: Definições autorizadas; não representa despesas materializadas
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Recurrence' } } } }
+    post:
+      summary: Cadastra uma definição de recorrência sem gerar lançamentos
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateRecurrence' } } }
+      responses:
+        '201': { description: Definição criada }
+        '200': { description: Repetição idempotente da definição criada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: Chave reutilizada com conteúdo diferente }
+  /recurrences/calendar-preview:
+    post:
+      summary: Calcula até 12 vencimentos sem persistir ou gerar despesas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstDueDate, frequency]
+              properties:
+                firstDueDate: { type: string, format: date }
+                lastDueDate: { type: [string, 'null'], format: date }
+                frequency: { $ref: '#/components/schemas/RecurrenceFrequency' }
+      responses:
+        '200':
+          description: Datas calculadas a partir do dia-base original
+          content: { application/json: { schema: { type: array, maxItems: 12, items: { type: string, format: date } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
 components:
   securitySchemes:
     sessionCookie:
@@ -924,6 +965,35 @@ components:
         type: string
         format: uuid
   schemas:
+    RecurrenceFrequency:
+      type: string
+      enum: [MONTHLY, BIMONTHLY, QUARTERLY, SEMIANNUAL, ANNUAL]
+    CreateRecurrence:
+      type: object
+      required: [description, amount, valueType, frequency, firstDueDate]
+      properties:
+        description: { type: string, maxLength: 200 }
+        amount: { type: string, pattern: '^\\d{1,8}(\\.\\d{1,2})?$' }
+        valueType: { type: string, enum: [FIXED, VARIABLE_ESTIMATE] }
+        frequency: { $ref: '#/components/schemas/RecurrenceFrequency' }
+        firstDueDate: { type: string, format: date }
+        lastDueDate: { type: [string, 'null'], format: date }
+        categoryId: { type: [string, 'null'], format: uuid }
+        responsibleUserId: { type: [string, 'null'], format: uuid }
+    Recurrence:
+      allOf:
+        - $ref: '#/components/schemas/CreateRecurrence'
+        - type: object
+          required: [id, baseDay, createdByDisplayName, createdAt, version, previewDates]
+          properties:
+            id: { type: string, format: uuid }
+            baseDay: { type: integer, minimum: 1, maximum: 31 }
+            categoryName: { type: [string, 'null'] }
+            responsibleDisplayName: { type: [string, 'null'] }
+            createdByDisplayName: { type: string }
+            createdAt: { type: string, format: date-time }
+            version: { type: integer, format: int64 }
+            previewDates: { type: array, maxItems: 12, items: { type: string, format: date } }
     ExpenseFilterPerson:
       type: object
       required: [userId, displayName, activeMember]

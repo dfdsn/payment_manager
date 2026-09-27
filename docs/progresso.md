@@ -1,8 +1,8 @@
 # Progresso de implementação — account_Manager
 
-Versão 1.0 • Atualizado em 25/09/2026.
+Versão 1.0 • Atualizado em 27/09/2026.
 
-**Estado atual: H03.1 concluída.** Categorias do espaço foram validadas com referências preservadas, concorrência, autorização e auditoria. E01 e E02 estão concluídos; E03 está em andamento e a próxima história é H03.2.
+**Estado atual: H04.1 concluída.** Definições de recorrência e cálculo de calendário foram validados sem gerar lançamentos. E01 e E02 estão concluídos; H03.3 mantém validação independente e a próxima história funcional é H04.2.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 25/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 10 de 46 concluídas; E01 e E02 concluídos, E03 em andamento. |
+| Histórias | 13 de 46 concluídas; E01 e E02 concluídos, E03 depende da validação final de H03.3 e E04 está em andamento. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | H03.2 — Atribuir responsável e consultar histórico; não iniciada nesta execução. |
+| Próxima ação | H04.2 — Gerar ocorrências sem duplicação; não iniciada nesta execução. |
 
 ## Estados permitidos
 
@@ -55,7 +55,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H03.2 | Atribuir responsável e consultar histórico | Concluído | 101 Java, 32 ITs PostgreSQL, JaCoCo 95,38%/85,02%, PIT 75%, 44 frontend, build e E2E aprovados. Evidência: `docs/evidencias/H03.2.md`. |
 | H03.3 | Anexar e acessar documentos | Em validação | Fluxo implementado; 101 Java, 31 ITs selecionados PostgreSQL e 44 frontend aprovados. Faltam gates finais/E2E específico. Evidência: `docs/evidencias/H03.3.md`. |
 | H03.4 | Buscar e filtrar lançamentos | Concluído | Busca/filtros/paginação autorizados e V14 aprovados em PostgreSQL, gates e E2E. Evidência: `docs/evidencias/H03.4.md`. |
-| H04.1 | Cadastrar recorrência e calcular calendário | Não iniciado | — |
+| H04.1 | Cadastrar recorrência e calcular calendário | Concluído | Cinco frequências, modalidade fixa/estimada, dia-base sem deslocamento, idempotência, autorização, V15, PostgreSQL e E2E aprovados. Evidência: `docs/evidencias/H04.1.md`. |
 | H04.2 | Gerar ocorrências sem duplicação | Não iniciado | — |
 | H04.3 | Visualizar e antecipar previsões | Não iniciado | — |
 | H04.4 | Confirmar valores variáveis | Não iniciado | — |
@@ -408,3 +408,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 25/09/2026 | H02.4 implementou reversão e cancelamento lógico com motivo, versão, idempotência, histórico imutável, concorrência e rollback. P10 foi encerrada exigindo correção prévia do vencimento para paga sem data. Regressão final: 91 Java, 28 ITs PostgreSQL, JaCoCo 95,57%/85,55%, PIT 82%, 37 frontend, build e E2E aprovados. H02.4 concluída; próximo passo H02.5. |
 | 25/09/2026 | H03.1 implementou categorias iniciais/opcionais, criação, renomeação e arquivamento pelos dois papéis, integração com despesas, isolamento, versão, concorrência e auditoria. Regressão final: 100 Java, 36 ITs PostgreSQL, JaCoCo 95,55%/85,86%, PIT 81%, 42 frontend, build e E2E aprovados. H03.1 concluída; próximo passo H03.2. |
 | 27/09/2026 | H03.4 implementou busca por descrição, período/base de data, categoria, responsável, pagador e situação, com mês atual, atraso no fuso, cancelados ocultos, paginação/contagem autorizadas, ordenação determinística, opções históricas, V14 e proteção de respostas concorrentes. Regressão final: 102 Java, 32 ITs PostgreSQL selecionados, JaCoCo 95,19%/84,39%, PIT 74%/força 85%, 46 frontend, build e 1 E2E full-stack aprovados. H03.4 concluída; E03 aguarda a validação específica de H03.3. |
+| 27/09/2026 | H04.1 implementou cadastro/listagem de definições fixa ou estimada, cinco frequências e prévia reutilizável por dia-base, com autorização, categoria/responsável elegíveis, idempotência, auditoria e V15, sem gerar despesas. Regressão final: 110 Java, 3 ITs PostgreSQL selecionados, JaCoCo 95,24%/83,67%, PIT 75%/força 85%, 49 frontend, build e 1 E2E full-stack aprovados. H04.1 concluída; próxima história H04.2. |
