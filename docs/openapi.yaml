@@ -1022,6 +1022,111 @@ paths:
           description: >-
             `CHARGE_ALREADY_CONFIRMED`, `EXPENSE_STATE_CONFLICT` (a ocorrência mudou), `IDEMPOTENCY_CONFLICT`
             ou ocorrência fora do calendário/horizonte.
+  /recurrences/{recurrenceId}/changes/preview:
+    post:
+      summary: Calcula o impacto de alterar a recorrência a partir de um período (H04.5)
+      description: >-
+        Somente leitura. O corpo traz a configuração completa desejada a partir do período de `effectiveDueDate`, que
+        precisa ser um vencimento da programação atual entre o mês atual e os 12 meses seguintes. Campos iguais à
+        configuração vigente naquele período não contam como alterados. `impactToken` identifica exatamente este impacto.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: recurrenceId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ChangeRecurrenceRequest' } } }
+      responses:
+        '200':
+          description: Impacto calculado; nada foi gravado
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecurrenceImpact' } } }
+        '400': { description: 'Campo inválido, nenhum campo alterado, período fora do horizonte ou `CATEGORY_NOT_SELECTABLE`.' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: '`RECURRENCE_NOT_FOUND`, inclusive para recorrência de outro espaço.' }
+        '409': { description: '`RECURRENCE_VERSION_CONFLICT`: a versão informada não é a atual.' }
+  /recurrences/{recurrenceId}/changes:
+    post:
+      summary: Aplica "este e os próximos" (H04.5)
+      description: >-
+        Recalcula o impacto no momento de salvar, sob lock da definição e dos lançamentos, e só aplica se o resultado
+        for idêntico ao revisado (`impactToken`). Atualiza a definição a partir do período, os lançamentos pendentes
+        afetados e registra auditoria, tudo numa transação. Pagos e cancelados nunca são reescritos; valores
+        confirmados e vencimentos corrigidos individualmente são preservados.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: recurrenceId, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ChangeRecurrenceRequest' } } }
+      responses:
+        '200':
+          description: Alteração aplicada ou repetição idempotente (`replayed=true`)
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecurrenceChangeResult' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: '`RECURRENCE_NOT_FOUND`.' }
+        '409':
+          description: >-
+            `RECURRENCE_VERSION_CONFLICT`, `RECURRENCE_IMPACT_CHANGED` (os dados mudaram desde a prévia; nada foi
+            aplicado) ou `IDEMPOTENCY_CONFLICT`.
+  /recurrences/{recurrenceId}/closure/preview:
+    post:
+      summary: Calcula o impacto de encerrar a recorrência (H04.5)
+      description: >-
+        Somente leitura. O último período é o último vencimento da programação em ou antes de `lastDueDate`
+        (inclusivo). O término só pode ser antecipado; reativar, pausar ou excluir não existem.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: recurrenceId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CloseRecurrenceRequest' } } }
+      responses:
+        '200':
+          description: Impacto calculado; nada foi gravado
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecurrenceImpact' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: '`RECURRENCE_NOT_FOUND`.' }
+        '409': { description: '`RECURRENCE_VERSION_CONFLICT`.' }
+  /recurrences/{recurrenceId}/closure:
+    post:
+      summary: Encerra a recorrência (H04.5)
+      description: >-
+        Interrompe novas ocorrências depois do último período. Não apaga histórico nem cancela todas as despesas:
+        somente lançamentos pendentes e ainda estimados depois do término são cancelados com o motivo informado;
+        pagos, confirmados ou com vencimento corrigido ficam marcados para revisão individual. `reason` é obrigatório.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: recurrenceId, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CloseRecurrenceRequest' } } }
+      responses:
+        '200':
+          description: Recorrência encerrada ou repetição idempotente
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecurrenceChangeResult' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: '`RECURRENCE_NOT_FOUND`.' }
+        '409': { description: '`RECURRENCE_VERSION_CONFLICT`, `RECURRENCE_IMPACT_CHANGED` ou `IDEMPOTENCY_CONFLICT`.' }
 components:
   securitySchemes:
     sessionCookie:
@@ -1103,6 +1208,132 @@ components:
             createdAt: { type: string, format: date-time }
             version: { type: integer, format: int64 }
             previewDates: { type: array, maxItems: 12, items: { type: string, format: date } }
+            upcomingDates:
+              type: array
+              maxItems: 13
+              description: Vencimentos da programação no mês atual e nos 12 seguintes (H04.5).
+              items: { type: string, format: date }
+            closedAt: { type: [string, 'null'], format: date-time }
+            closedByDisplayName: { type: [string, 'null'] }
+            closureReason: { type: [string, 'null'], maxLength: 2000 }
+            segments:
+              type: array
+              description: Configuração em vigor por período; a última aplicável ao mês atual preenche os campos de topo.
+              items: { $ref: '#/components/schemas/RecurrenceSegment' }
+            changes: { type: array, items: { $ref: '#/components/schemas/RecurrenceChange' } }
+    RecurrenceSegment:
+      type: object
+      required: [effectiveMonth, description, amount, frequency, dueDay]
+      properties:
+        effectiveMonth: { type: string, format: date, description: Primeiro dia do mês a partir do qual vale. }
+        description: { type: string }
+        amount: { type: string }
+        frequency: { $ref: '#/components/schemas/RecurrenceFrequency' }
+        dueDay: { type: integer, minimum: 1, maximum: 31 }
+        categoryId: { type: [string, 'null'], format: uuid }
+        categoryName: { type: [string, 'null'] }
+        responsibleUserId: { type: [string, 'null'], format: uuid }
+        responsibleDisplayName: { type: [string, 'null'] }
+    RecurrenceChange:
+      type: object
+      required: [id, type, actorUserId, actorDisplayName, occurredAt, version, effectiveDueDate, changedFields]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [CHANGE, CLOSURE] }
+        actorUserId: { type: string, format: uuid }
+        actorDisplayName: { type: string }
+        occurredAt: { type: string, format: date-time }
+        version: { type: integer, format: int64, description: Versão da definição antes da alteração. }
+        effectiveDueDate: { type: string, format: date }
+        changedFields: { type: array, items: { type: string } }
+        reason: { type: [string, 'null'], maxLength: 2000 }
+        updatedCount: { type: integer }
+        removedCount: { type: integer }
+        reviewCount: { type: integer }
+        preservedCount: { type: integer }
+    ChangeRecurrenceRequest:
+      type: object
+      required: [version, effectiveDueDate, description, amount, frequency, dueDay]
+      properties:
+        version: { type: integer, format: int64 }
+        effectiveDueDate: { type: string, format: date }
+        description: { type: string, minLength: 1, maxLength: 200 }
+        amount: { type: string, pattern: '^\d{1,8}(\.\d{1,2})?$', description: Valor fixo ou nova estimativa base. }
+        frequency: { $ref: '#/components/schemas/RecurrenceFrequency' }
+        dueDay: { type: integer, minimum: 1, maximum: 31 }
+        categoryId: { type: [string, 'null'], format: uuid }
+        responsibleUserId: { type: [string, 'null'], format: uuid }
+        impactToken: { type: string, description: Obrigatório para aplicar; ignorado na prévia. }
+    CloseRecurrenceRequest:
+      type: object
+      required: [version, lastDueDate]
+      properties:
+        version: { type: integer, format: int64 }
+        lastDueDate: { type: string, format: date, description: Data de corte inclusiva. }
+        reason: { type: string, minLength: 1, maxLength: 2000, description: Obrigatório para aplicar. }
+        impactToken: { type: string, description: Obrigatório para aplicar; ignorado na prévia. }
+    RecurrenceImpact:
+      type: object
+      required: [recurrenceId, operation, version, effectiveDueDate, changedFields, impactToken, occurrences, forecasts,
+        updatedCount, removedCount, reviewCount, preservedCount]
+      properties:
+        recurrenceId: { type: string, format: uuid }
+        operation: { type: string, enum: [CHANGE, CLOSURE] }
+        version: { type: integer, format: int64 }
+        effectiveDueDate: { type: string, format: date, description: Primeiro período alterado ou último período mantido. }
+        changedFields: { type: array, items: { type: string } }
+        impactToken: { type: string, description: SHA-256 do impacto exibido. }
+        occurrences:
+          type: array
+          items:
+            type: object
+            required: [expenseId, scheduledDueDate, dueDate, description, amount, status, chargeConfirmed, action, reason,
+              changes, preservedFields]
+            properties:
+              expenseId: { type: string, format: uuid }
+              scheduledDueDate: { type: string, format: date }
+              dueDate: { type: string, format: date }
+              description: { type: string }
+              amount: { type: string }
+              status: { type: string, enum: [PENDING, PAID, CANCELLED] }
+              chargeConfirmed: { type: boolean }
+              action: { type: string, enum: [UPDATE, REMOVE, REVIEW, PRESERVE] }
+              reason: { type: string, enum: [CHANGED, UNCHANGED, PAID, CANCELLED, AFTER_END, OUTSIDE_SCHEDULE] }
+              changes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    field: { type: string }
+                    previousValue: { type: [string, 'null'] }
+                    newValue: { type: [string, 'null'] }
+              preservedFields: { type: array, items: { type: string } }
+        forecasts:
+          type: array
+          description: Períodos ainda não materializados no horizonte (mês atual + 12).
+          items:
+            type: object
+            required: [month, action]
+            properties:
+              month: { type: string, format: date }
+              action: { type: string, enum: [CHANGED, ADDED, REMOVED] }
+              previousDueDate: { type: [string, 'null'], format: date }
+              newDueDate: { type: [string, 'null'], format: date }
+              previousAmount: { type: [string, 'null'] }
+              newAmount: { type: [string, 'null'] }
+              previousDescription: { type: [string, 'null'] }
+              newDescription: { type: [string, 'null'] }
+        updatedCount: { type: integer }
+        removedCount: { type: integer }
+        reviewCount: { type: integer }
+        preservedCount: { type: integer }
+    RecurrenceChangeResult:
+      type: object
+      required: [recurrence, change, replayed]
+      properties:
+        recurrence: { $ref: '#/components/schemas/Recurrence' }
+        change: { $ref: '#/components/schemas/RecurrenceChange' }
+        replayed: { type: boolean }
     RecurrenceForecast:
       type: object
       required: [recurrenceId, description, amount, estimated, scheduledDueDate, state, chargeConfirmed]
@@ -1117,6 +1348,10 @@ components:
         actualDueDate: { type: [string, 'null'], format: date }
         expenseStatus: { type: [string, 'null'], enum: [PENDING, PAID, CANCELLED, null] }
         chargeConfirmed: { type: boolean }
+        reviewReason:
+          type: [string, 'null']
+          enum: [AFTER_END, OUTSIDE_SCHEDULE, null]
+          description: Lançamento pago, confirmado ou com vencimento corrigido que saiu da programação e precisa de revisão individual (H04.5).
     ForecastPeriod:
       type: object
       required: [from, to, occurrences]
@@ -1411,10 +1646,12 @@ components:
         type:
           type: string
           enum: [EXPENSE_CREATED, EXPENSE_PAID, PAYMENT_REVERSED, EXPENSE_CORRECTED, EXPENSE_CANCELLED,
-            CHARGE_CONFIRMED, ESTIMATE_UPDATED]
+            CHARGE_CONFIRMED, ESTIMATE_UPDATED, RECURRENCE_CHANGE_APPLIED, RECURRENCE_OCCURRENCE_REMOVED]
           description: >-
             CHARGE_CONFIRMED registra estimativa anterior e valor confirmado; ESTIMATE_UPDATED registra a
-            atualização automática de uma estimativa posterior causada por uma confirmação.
+            atualização automática de uma estimativa posterior causada por uma confirmação. RECURRENCE_CHANGE_APPLIED
+            registra os campos alterados por "este e os próximos"; RECURRENCE_OCCURRENCE_REMOVED registra o
+            cancelamento de um lançamento estimado que saiu da programação por alteração ou encerramento (H04.5).
         actorUserId: { type: string, format: uuid }
         actorDisplayName: { type: string }
         occurredAt: { type: string, format: date-time }

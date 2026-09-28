@@ -25,6 +25,18 @@ class RecurrenceApiExceptionHandler {
     ResponseEntity<?> conflict(RecurrenceIdempotencyConflictException error) {
         return error(HttpStatus.CONFLICT,"IDEMPOTENCY_CONFLICT",error.getMessage(),"Idempotency-Key");
     }
+    @ExceptionHandler(com.malyah.accountmanager.recurrences.application.RecurrenceNotFoundException.class)
+    ResponseEntity<?> notFound(RuntimeException error) {
+        return error(HttpStatus.NOT_FOUND,"RECURRENCE_NOT_FOUND",error.getMessage(),"");
+    }
+    @ExceptionHandler(com.malyah.accountmanager.recurrences.application.RecurrenceVersionConflictException.class)
+    ResponseEntity<?> versionConflict(RuntimeException error) {
+        return error(HttpStatus.CONFLICT,"RECURRENCE_VERSION_CONFLICT",error.getMessage(),"version");
+    }
+    @ExceptionHandler(com.malyah.accountmanager.recurrences.application.RecurrenceImpactChangedException.class)
+    ResponseEntity<?> impactChanged(RuntimeException error) {
+        return error(HttpStatus.CONFLICT,"RECURRENCE_IMPACT_CHANGED",error.getMessage(),"impactToken");
+    }
     @ExceptionHandler(com.malyah.accountmanager.recurrences.application.RecurrenceOccurrenceException.class)
     ResponseEntity<?> occurrence(RuntimeException error) {
         return error(HttpStatus.CONFLICT,"RECURRENCE_OCCURRENCE_CONFLICT",error.getMessage(),"scheduledDueDate");
@@ -44,6 +56,10 @@ class RecurrenceApiExceptionHandler {
     @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseIdempotencyConflictException.class)
     ResponseEntity<?> expenseIdempotency(RuntimeException error) {
         return error(HttpStatus.CONFLICT,"IDEMPOTENCY_CONFLICT",error.getMessage(),"Idempotency-Key");
+    }
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.CategoryConflictException.class)
+    ResponseEntity<?> categoryConflict(RuntimeException error) {
+        return error(HttpStatus.BAD_REQUEST,"CATEGORY_NOT_SELECTABLE",error.getMessage(),"categoryId");
     }
     @ExceptionHandler(com.malyah.accountmanager.expenses.application.CategoryNotFoundException.class)
     ResponseEntity<?> category() { return error(HttpStatus.BAD_REQUEST,"CATEGORY_NOT_SELECTABLE","A categoria não está disponível no espaço.","categoryId"); }

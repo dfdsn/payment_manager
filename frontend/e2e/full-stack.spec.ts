@@ -346,6 +346,22 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.locator('form.forecast-confirm').getByRole('button', { name: 'Confirmar valor' }).click();
   await expect(page.getByText(/confirmado em R\$ 201\.00/)).toBeVisible();
 
+  // H04.5: change "este e os próximos" and closure, always after reviewing the impact.
+  const variableCard = page.locator('mat-card').filter({ hasText: 'Estimativa variável a confirmar' });
+  await variableCard.getByRole('button', { name: 'Alterar a partir de um vencimento' }).click();
+  await variableCard.getByLabel('Descrição').fill('Energia da casa');
+  await variableCard.getByRole('button', { name: 'Revisar impacto' }).click();
+  await expect(variableCard.getByText(/Vale a partir de/)).toBeVisible();
+  await variableCard.getByRole('button', { name: 'Confirmar alteração' }).click();
+  await expect(page.getByText(/alterada a partir de/)).toBeVisible();
+  await expect(variableCard.getByText('Histórico de alterações')).toBeVisible();
+  await variableCard.getByRole('button', { name: 'Encerrar recorrência' }).click();
+  await variableCard.getByLabel('Motivo do encerramento').fill('Troca de fornecedor');
+  await variableCard.getByRole('button', { name: 'Revisar impacto' }).click();
+  await variableCard.getByRole('button', { name: 'Confirmar encerramento' }).click();
+  await expect(variableCard.getByText(/Encerrada: último vencimento/)).toBeVisible();
+  await expect(variableCard.getByText(/Troca de fornecedor/)).toBeVisible();
+
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);

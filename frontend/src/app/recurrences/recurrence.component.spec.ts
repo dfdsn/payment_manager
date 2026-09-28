@@ -73,4 +73,36 @@ describe('RecurrenceComponent', () => {
     expect(component.anticipatedExpenseId()).toBe('expense-9');
     expect(component.message()).toContain('pendente de quitação');
   });
+
+  it('reloads after a change or conflict and describes history, closure and review flags', () => {
+    const component = fixture.componentInstance;
+    const recurrence = { id: 'rec-1', description: 'Gás', amount: '80.00', valueType: 'VARIABLE_ESTIMATE' as const,
+      frequency: 'MONTHLY' as const, firstDueDate: '2026-09-15', lastDueDate: '2026-10-15', categoryId: null, responsibleUserId: null,
+      baseDay: 15, categoryName: null, responsibleDisplayName: null, createdByDisplayName: 'Ana', createdAt: '2026-09-01T10:00:00Z',
+      version: 1, previewDates: [], upcomingDates: ['2026-09-15', '2026-10-15'], closedAt: '2026-09-27T12:00:00Z',
+      closedByDisplayName: 'Convidado', closureReason: 'Mudança', segments: [], changes: [] };
+    const closure = { id: 'c-1', type: 'CLOSURE' as const, actorUserId: 'u', actorDisplayName: 'Convidado', occurredAt: '2026-09-27T12:00:00Z',
+      version: 1, effectiveDueDate: '2026-10-15', changedFields: ['lastDueDate'], reason: 'Mudança', updatedCount: 0, removedCount: 1,
+      reviewCount: 2, preservedCount: 0 };
+    (api.list as ReturnType<typeof vi.fn>).mockReturnValue(of([{ ...recurrence, changes: [closure] }]) as never);
+    component.changed({ recurrence, change: closure, replayed: false });
+    expect(component.message()).toContain('encerrada');
+    expect(api.list).toHaveBeenCalledTimes(2);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Encerrada: último vencimento 2026-10-15');
+    expect(component.changeLabel(closure)).toContain('Motivo: Mudança');
+    const change = { ...closure, type: 'CHANGE' as const, changedFields: ['amount', 'dueDay'], reason: null, updatedCount: 3 };
+    expect(component.changeLabel(change)).toContain('valor, dia de vencimento');
+    expect(component.changeLabel(change)).toContain('3 atualizado(s)');
+    component.changed({ recurrence, change, replayed: false });
+    expect(component.message()).toContain('alterada a partir de 2026-10-15');
+    component.refresh();
+    expect(api.forecasts).toHaveBeenCalledTimes(4);
+    const item = { recurrenceId: 'rec-1', description: 'Gás', amount: '85.00', estimated: false, scheduledDueDate: '2026-11-15',
+      state: 'MATERIALIZED' as const, expenseId: 'e', actualDueDate: '2026-11-15', expenseStatus: 'PAID', chargeConfirmed: true,
+      reviewReason: 'AFTER_END' as const };
+    expect(component.reviewLabel(item)).toBe('Revisar: depois do término');
+    expect(component.reviewLabel({ ...item, reviewReason: 'OUTSIDE_SCHEDULE' })).toContain('fora da nova programação');
+    expect(component.reviewLabel({ ...item, reviewReason: null })).toBeNull();
+  });
 });

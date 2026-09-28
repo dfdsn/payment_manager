@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis (em validação; veja `docs/progresso.md`).
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (ambas em validação; veja `docs/progresso.md`).
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.3 está concluída e H04.4 está em validação (falta o E2E full-stack com Docker; a CI já aprovou os ITs em PostgreSQL 17.6). H03.3 permanece em validação independente. A próxima história funcional é H04.5, que não foi iniciada.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.3 está concluída e H04.4 está em validação (falta o E2E full-stack com Docker; a CI já aprovou os ITs em PostgreSQL 17.6). H03.3 permanece em validação independente. H04.5 está implementada e em validação pelo mesmo motivo (E2E full-stack não executado). E04 só termina quando H04.4 e H04.5 forem concluídas; o próximo épico não foi iniciado.
 
 ## Anexos privados (H03.3)
 
@@ -468,10 +468,10 @@ POST /api/v1/recurrences/<recurrenceId>/occurrences/<AAAA-MM-DD>/anticipation  I
 POST /api/v1/recurrences/<recurrenceId>/occurrences/<AAAA-MM-DD>/charge-confirmation  Idempotency-Key: <UUID>
 ```
 
-Teste de geração, previsão/antecipação, confirmação de valores variáveis, persistência e migrações V1–V18:
+Teste de geração, previsão/antecipação, confirmação de valores variáveis, alteração/encerramento, persistência e migrações V1–V19:
 
 ```powershell
-backend\scripts\run-integration-tests.ps1 -Tests RecurrenceGenerationPostgresIT,RecurrencePostgresIT,VariableChargeConfirmationPostgresIT,ExpensePostgresIT,FlywayPostgresIT
+backend\scripts\run-integration-tests.ps1 -Tests RecurrenceGenerationPostgresIT,RecurrencePostgresIT,VariableChargeConfirmationPostgresIT,RecurrenceChangePostgresIT,ExpensePostgresIT,FlywayPostgresIT
 ```
 
 Diagnóstico seguro: consulte contagens/estados em `recurrence_generation_jobs` e `recurrence_occurrences`; `FAILED` inclui somente `last_error_code`, nunca dados financeiros. Não altere manualmente jobs concluídos. Falhas transitórias ficam elegíveis após 30 segundos; `PROCESSING` com lease vencido é retomado por outro worker.
@@ -515,3 +515,61 @@ POST /api/v1/expenses/<id>/payment  Idempotency-Key: <UUID>
 
 Os reflexos em relatórios, fechamentos e notificações serão validados nos épicos E06–E08. O contrato preparado para eles é `chargeConfirmed` e `chargeConfirmation`.
 
+## Alterar e encerrar recorrência (H04.5)
+
+Em `/recorrencias`, cada recorrência ativa mostra **Alterar a partir de um vencimento** (“este e os próximos”) e **Encerrar recorrência**, além de **Programação por período** e **Histórico de alterações**. Administrador e convidado ativos podem usar as duas ações. Há três operações diferentes, e a interface explica qual está em uso:
+
+| Operação | O que muda | Onde |
+|---|---|---|
+| Correção individual (“somente este lançamento”) | Apenas o lançamento escolhido; a definição e os outros períodos não mudam. | **Corrigir** em `/despesas` (H02). |
+| Alteração da definição (“este e os próximos”) | A configuração a partir do período escolhido: descrição, valor/estimativa, frequência, dia de vencimento, categoria e responsável. Períodos anteriores ficam como estão. | `POST /recurrences/{id}/changes` |
+| Encerramento | Para de gerar ocorrências depois do último período. Não apaga histórico nem cancela todas as despesas. | `POST /recurrences/{id}/closure` |
+
+O fluxo é sempre **revisar impacto → confirmar**. A prévia não grava nada e mostra, por lançamento, se ele será atualizado, retirado da programação, marcado para revisão ou preservado, e o efeito nas previsões ainda não materializadas. Ao confirmar, o backend recalcula o impacto sob lock: se versão, lançamentos ou previsões mudaram, responde `409 RECURRENCE_IMPACT_CHANGED` sem aplicar nada, e a tela mantém os dados digitados e pede nova revisão.
+
+Efeito por situação do lançamento (a partir do período escolhido):
+
+| Situação | Descrição, categoria, responsável | Valor | Vencimento (dia/frequência) | Saiu da programação ou ficou após o término |
+|---|---|---|---|---|
+| Pendente, estimado ou fixo | Atualiza | Fixo: novo valor. Estimado: nova base de estimativa | Atualiza | Cancelado com motivo e auditoria |
+| Pendente com valor variável confirmado | Atualiza | Preservado | Preservado | Mantido e marcado para revisão |
+| Pendente com vencimento corrigido individualmente | Atualiza | Atualiza (se não confirmado) | Preservado | Mantido e marcado para revisão |
+| Pago | Nunca reescrito | Nunca reescrito | Nunca reescrito | Mantido e marcado para revisão |
+| Cancelado | Nunca reescrito | Nunca reescrito | Nunca reescrito | Nada muda |
+| Período anterior ao escolhido | Nada muda | Nada muda | Nada muda | — |
+
+Regras aplicadas:
+
+- O período inicial precisa ser um vencimento da programação atual, entre o mês atual e os 12 seguintes. O tipo de valor (fixo ou estimado) não é editável.
+- A identidade de cada ocorrência é o período (mês) da recorrência: mudar o dia ou a frequência move a data do lançamento pendente, sem duplicar. O job de geração lê a definição no momento de gerar; se o mês deixou de ter ocorrência, marca a tarefa como `SKIPPED`.
+- Ao mudar a estimativa de uma recorrência variável, ela passa a ser a referência a partir desse período; confirmações posteriores voltam a prevalecer (regra da H04.4).
+- O encerramento usa data de corte inclusiva: o último período é o último vencimento em ou antes da data informada. O motivo é obrigatório (até 2.000 caracteres). O término só pode ser antecipado; não há reativação, pausa ou exclusão física.
+- Toda alteração grava um evento em `recurrence_change_events` (autor, instante, versão, campos, contagens e motivo) e eventos por lançamento no histórico de despesas (`RECURRENCE_CHANGE_APPLIED` e `RECURRENCE_OCCURRENCE_REMOVED`). Definição, lançamentos e auditoria são gravados numa transação; qualquer falha desfaz tudo.
+- `Idempotency-Key` com o mesmo conteúdo reproduz o resultado; com outro conteúdo, `409 IDEMPOTENCY_CONFLICT`. Versão desatualizada retorna `409 RECURRENCE_VERSION_CONFLICT`; recorrência de outro espaço, `404 RECURRENCE_NOT_FOUND`; categoria arquivada, `400 CATEGORY_NOT_SELECTABLE`.
+
+Exemplos autenticados (operações `POST` também exigem CSRF):
+
+```text
+POST /api/v1/recurrences/<id>/changes/preview
+{"version": 3, "effectiveDueDate": "2026-11-05", "description": "Energia", "amount": "210.00",
+ "frequency": "MONTHLY", "dueDay": 20, "categoryId": null, "responsibleUserId": null}
+
+POST /api/v1/recurrences/<id>/changes  Idempotency-Key: <UUID>
+{ ...o mesmo corpo revisado..., "impactToken": "<impactToken da prévia>" }
+
+POST /api/v1/recurrences/<id>/closure/preview
+{"version": 4, "lastDueDate": "2026-12-31"}
+
+POST /api/v1/recurrences/<id>/closure  Idempotency-Key: <UUID>
+{"version": 4, "lastDueDate": "2026-12-31", "reason": "Mudança de endereço", "impactToken": "<impactToken>"}
+```
+
+Teste manual:
+
+1. Cadastre uma recorrência variável mensal de R$ 180,00 com primeiro vencimento no dia 5 do mês atual e antecipe os dois meses seguintes em **Previsões e lançamentos**.
+2. Confirme o valor do segundo mês (R$ 195,00) e quite o primeiro.
+3. Clique **Alterar a partir de um vencimento**, escolha o vencimento do mês seguinte, mude a estimativa para 210,00, o dia para 20 e a descrição, e clique **Revisar impacto**. O painel mostra o lançamento pago preservado, o confirmado com descrição atualizada e “Preservado: estimativa, vencimento”, e as previsões seguintes com 210,00 no dia 20.
+4. Abra a mesma recorrência em outra aba, altere e confirme lá; na primeira aba, **Confirmar alteração** mostra o conflito, mantém os dados digitados e pede nova revisão.
+5. Clique **Encerrar recorrência**, escolha um último vencimento, informe o motivo e revise. Os lançamentos estimados posteriores aparecem como “Sai da programação”, os pagos/confirmados como “Mantido para revisão”. Confirme: o cartão mostra o encerramento, as previsões param no último período e **Ver histórico** da despesa cancelada mostra o motivo.
+
+Os reflexos em relatórios, fechamentos e notificações serão implementados em E06–E08; o contrato preparado é o histórico `recurrence_change_events`, o `reviewReason` das previsões e os novos eventos de despesa.

@@ -78,7 +78,7 @@ export interface ChargeConfirmation {
 
 export interface ExpenseHistoryEvent {
   type: 'EXPENSE_CREATED' | 'EXPENSE_PAID' | 'PAYMENT_REVERSED' | 'EXPENSE_CORRECTED' | 'EXPENSE_CANCELLED'
-    | 'CHARGE_CONFIRMED' | 'ESTIMATE_UPDATED';
+    | 'CHARGE_CONFIRMED' | 'ESTIMATE_UPDATED' | 'RECURRENCE_CHANGE_APPLIED' | 'RECURRENCE_OCCURRENCE_REMOVED';
   actorUserId: string;
   actorDisplayName: string;
   occurredAt: string;

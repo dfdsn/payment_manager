@@ -28,15 +28,16 @@ class RecurrencesConfiguration {
             @org.springframework.beans.factory.annotation.Value("${app.jobs.recurrence.lease-seconds:120}") long leaseSeconds,
             @org.springframework.beans.factory.annotation.Value("${app.jobs.recurrence.batch-size:25}") int batchSize) {
         return new JdbcRecurrenceGenerationJob(jdbc,new TransactionTemplate(manager),materializer,applicationClock,
-                new RecurrenceCalendar(),java.time.Duration.ofSeconds(leaseSeconds),batchSize);
+                java.time.Duration.ofSeconds(leaseSeconds),batchSize);
     }
     @Bean RecurrenceUseCase recurrenceUseCase(JdbcTemplate jdbc, AuthenticatedUserContextQuery context,
             CategoryRepository categories, FinancialMemberAccess members, Clock applicationClock,
             PlatformTransactionManager manager,
             com.malyah.accountmanager.expenses.application.RecurringExpenseMaterializer materializer,
-            com.malyah.accountmanager.expenses.application.ChargeConfirmationUseCase chargeConfirmation) {
+            com.malyah.accountmanager.expenses.application.ChargeConfirmationUseCase chargeConfirmation,
+            com.malyah.accountmanager.expenses.application.RecurringOccurrenceAdjuster adjuster) {
         var service=new RecurrenceService(new JdbcRecurrenceRepository(jdbc),context,categories,members,
-                applicationClock,UUID::randomUUID,new RecurrenceCalendar(),materializer,chargeConfirmation);
+                applicationClock,UUID::randomUUID,new RecurrenceCalendar(),materializer,chargeConfirmation,adjuster);
         return new TransactionalRecurrenceUseCase(service,new TransactionTemplate(manager));
     }
 }

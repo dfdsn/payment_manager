@@ -427,5 +427,7 @@ describe('ExpenseComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('muda somente pela confirmação');
     expect(component.historyLabel('CHARGE_CONFIRMED')).toBe('Valor da cobrança confirmado');
     expect(component.historyLabel('ESTIMATE_UPDATED')).toContain('Estimativa atualizada');
+    expect(component.historyLabel('RECURRENCE_CHANGE_APPLIED')).toContain('Alterado pela recorrência');
+    expect(component.historyLabel('RECURRENCE_OCCURRENCE_REMOVED')).toContain('Retirado da programação');
   });
 });

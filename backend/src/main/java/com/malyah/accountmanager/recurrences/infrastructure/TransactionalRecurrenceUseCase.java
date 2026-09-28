@@ -26,4 +26,16 @@ final class TransactionalRecurrenceUseCase implements RecurrenceUseCase {
             String amount,java.util.UUID key) {
         return Objects.requireNonNull(transactions.execute(status->delegate.confirmForecastCharge(email,recurrenceId,due,amount,key)));
     }
+    @Override public RecurrenceImpactView previewChange(String email, ChangeRecurrenceCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.previewChange(email,command)));
+    }
+    @Override public RecurrenceChangeResult change(String email, ChangeRecurrenceCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.change(email,command)));
+    }
+    @Override public RecurrenceImpactView previewClosure(String email, CloseRecurrenceCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.previewClosure(email,command)));
+    }
+    @Override public RecurrenceChangeResult close(String email, CloseRecurrenceCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.close(email,command)));
+    }
 }

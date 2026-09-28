@@ -53,7 +53,7 @@ class VariableChargeConfirmationPostgresIT {
     @BeforeEach void reset() {
         var ds=new DriverManagerDataSource(POSTGRES.getJdbcUrl(),POSTGRES.getUsername(),POSTGRES.getPassword());
         var flyway=Flyway.configure().dataSource(ds).cleanDisabled(false).load(); flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(18);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(19);
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         insertSpace(SPACE,"Casa"); insertSpace(OTHER,"Outra");
         insertUser(ADMIN,"Admin","admin@example.com",SPACE,"ADMINISTRATOR");
@@ -350,8 +350,7 @@ class VariableChargeConfirmationPostgresIT {
     }
     private Object outcome(Callable<Object> action) { try { return action.call(); } catch(Exception error) { return error; } }
     private UUID generateCurrentMonth(Instant at) {
-        new JdbcRecurrenceGenerationJob(jdbc,tx,new JdbcRecurringExpenseMaterializer(jdbc,tx),Clock.fixed(at,ZoneOffset.UTC),
-                new RecurrenceCalendar(),Duration.ofMinutes(2),25).poll();
+        new JdbcRecurrenceGenerationJob(jdbc,tx,new JdbcRecurringExpenseMaterializer(jdbc,tx),Clock.fixed(at,ZoneOffset.UTC),Duration.ofMinutes(2),25).poll();
         var month=YearMonth.from(at.atZone(ZoneId.of("America/Sao_Paulo")));
         return jdbc.queryForObject("select expense_id from recurrence_occurrences where scheduled_due_date between ? and ?",
                 UUID.class,month.atDay(1),month.atEndOfMonth());

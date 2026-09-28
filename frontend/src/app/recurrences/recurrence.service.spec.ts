@@ -58,4 +58,30 @@ describe('RecurrenceService', () => {
     expect(request.request.body).toEqual({ confirmedAmount: '205.40' });
     request.flush({ occurrence: item, replayed: false });
   });
+
+  it('previews and applies changes and closures, sending the key only when applying', () => {
+    const change = { version: 2, effectiveDueDate: '2026-10-05', description: 'Luz', amount: '10.00', frequency: 'MONTHLY' as const,
+      dueDay: 5, categoryId: null, responsibleUserId: null };
+    service.previewChange('rec-1', change).subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({});
+    const preview = http.expectOne('/api/v1/recurrences/rec-1/changes/preview');
+    expect(preview.request.headers.has('Idempotency-Key')).toBe(false);
+    expect(preview.request.body).toEqual(change);
+    preview.flush({});
+    service.applyChange('rec-1', { ...change, impactToken: 't' }, 'change-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({});
+    const apply = http.expectOne('/api/v1/recurrences/rec-1/changes');
+    expect(apply.request.headers.get('Idempotency-Key')).toBe('change-key');
+    expect(apply.request.body.impactToken).toBe('t');
+    apply.flush({});
+    service.previewClosure('rec-1', { version: 2, lastDueDate: '2026-10-05' }).subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({});
+    http.expectOne('/api/v1/recurrences/rec-1/closure/preview').flush({});
+    service.applyClosure('rec-1', { version: 2, lastDueDate: '2026-10-05', reason: 'Fim', impactToken: 't' }, 'close-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({});
+    const close = http.expectOne('/api/v1/recurrences/rec-1/closure');
+    expect(close.request.headers.get('Idempotency-Key')).toBe('close-key');
+    expect(close.request.body.reason).toBe('Fim');
+    close.flush({});
+  });
 });
