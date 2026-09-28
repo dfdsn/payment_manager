@@ -30,7 +30,19 @@ public record ExpenseView(
         String paidByDisplayName,
         Instant createdAt,
         long version, PaymentAudit paymentAudit, List<ExpenseHistoryEvent> history,
-        boolean chargeConfirmed, ChargeConfirmationView chargeConfirmation) {
+        boolean chargeConfirmed, ChargeConfirmationView chargeConfirmation, InstallmentLink installment) {
+    public ExpenseView(UUID id, String origin, String description, String amount, String currency,
+            ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate, String paidAmount,
+            LocalDate referenceDate, boolean overdue, String categoryName, UUID categoryId,
+            UUID responsibleUserId, String responsibleDisplayName, String notes, UUID createdByUserId,
+            String createdByDisplayName, UUID paidByUserId, String paidByDisplayName, Instant createdAt,
+            long version, PaymentAudit paymentAudit, List<ExpenseHistoryEvent> history, boolean chargeConfirmed,
+            ChargeConfirmationView chargeConfirmation) {
+        this(id, origin, description, amount, currency, status, dueDate, paymentDate, paidAmount, referenceDate,
+                overdue, categoryName, categoryId, responsibleUserId, responsibleDisplayName, notes,
+                createdByUserId, createdByDisplayName, paidByUserId, paidByDisplayName, createdAt, version,
+                paymentAudit, history, chargeConfirmed, chargeConfirmation, null);
+    }
     public ExpenseView(UUID id, String origin, String description, String amount, String currency,
             ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate, String paidAmount,
             LocalDate referenceDate, boolean overdue, String categoryName, UUID categoryId,

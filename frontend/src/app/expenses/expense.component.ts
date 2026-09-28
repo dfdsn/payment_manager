@@ -214,6 +214,10 @@ export class ExpenseComponent implements OnInit {
     });
   }
 
+  isInstallment(expense: Expense): boolean {
+    return expense.origin === 'INSTALLMENT';
+  }
+
   isEstimated(expense: Expense): boolean {
     return expense.origin === 'RECURRENCE' && expense.status === 'PENDING' && !expense.chargeConfirmed;
   }

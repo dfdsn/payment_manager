@@ -43,7 +43,9 @@ export interface CorrectExpenseData {
 
 export interface Expense {
   id: string;
-  origin: 'ONE_OFF' | 'RECURRENCE';
+  origin: 'ONE_OFF' | 'RECURRENCE' | 'INSTALLMENT';
+  /** H05.1: installment origin (n of N) of a purchase; the purchase itself is never an expense. */
+  installment?: { purchaseId: string; number: number; count: number } | null;
   chargeConfirmed: boolean;
   description: string;
   amount: string;

@@ -362,6 +362,23 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(variableCard.getByText(/Encerrada: último vencimento/)).toBeVisible();
   await expect(variableCard.getByText(/Troca de fornecedor/)).toBeVisible();
 
+  // H05.1: installment purchase reviewed through the backend preview, then materialized as n/N entries.
+  await page.goto('/compras-parceladas');
+  await page.getByLabel('Descrição').fill('Sofá parcelado');
+  await page.getByLabel('Valor total').fill('100,00');
+  await page.getByLabel('Quantidade de parcelas').fill('3');
+  await page.getByLabel('Vencimento da primeira parcela').fill('2027-01-31');
+  await page.getByRole('button', { name: 'Revisar parcelas' }).click();
+  await expect(page.getByRole('row', { name: /2\/3 2027-02-28 R\$ 33\.33/ })).toBeVisible();
+  await expect(page.getByText(/A última parcela tem R\$ 0\.01 a mais/)).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar e criar 3 parcelas' }).click();
+  await expect(page.getByText(/criada com 3 parcelas pendentes, de 2027-01-31 a 2027-03-31, somando R\$ 100\.00/)).toBeVisible();
+  await page.getByRole('link', { name: 'Ver parcelas em Despesas' }).click();
+  await page.getByLabel('Buscar na descrição').fill('Sofá parcelado');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByText('Parcela 1/3 · compra parcelada')).toBeVisible();
+  await expect(page.getByText('Parcela 3/3 · compra parcelada')).toBeVisible();
+
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);

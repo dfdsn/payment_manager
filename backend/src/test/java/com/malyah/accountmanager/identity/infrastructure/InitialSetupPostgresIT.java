@@ -43,7 +43,7 @@ class InitialSetupPostgresIT {
     void persistsOnlyOneAdministratorAcrossConcurrencyAndRestart() throws Exception {
         var dataSource = new DriverManagerDataSource(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-        assertThat(Flyway.configure().dataSource(dataSource).load().migrate().migrationsExecuted).isEqualTo(19);
+        assertThat(Flyway.configure().dataSource(dataSource).load().migrate().migrationsExecuted).isEqualTo(20);
 
         var jdbc = new JdbcTemplate(dataSource);
         var ready = new CountDownLatch(2);

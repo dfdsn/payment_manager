@@ -4,7 +4,7 @@
       <h1 id="expenses-title">Despesas</h1>
       <p>Cadastre contas pendentes ou despesas que já foram pagas.</p>
     </div>
-    <div><a routerLink="/categorias">Gerenciar categorias</a> · <a routerLink="/recorrencias">Gerenciar recorrências</a> · <a routerLink="/entrar">Voltar ao início</a></div>
+    <div><a routerLink="/categorias">Gerenciar categorias</a> · <a routerLink="/recorrencias">Gerenciar recorrências</a> · <a routerLink="/compras-parceladas">Compras parceladas</a> · <a routerLink="/entrar">Voltar ao início</a></div>
   </header>
 
   <mat-card appearance="outlined" class="expense-form-card">
@@ -248,8 +248,9 @@
             <mat-error>Informe uma descrição com até 200 caracteres.</mat-error>
           </mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Valor da cobrança corrigido</mat-label>
-            <input matInput formControlName="amount" inputmode="decimal" [readonly]="isEstimated(expense)" />
+            <input matInput formControlName="amount" inputmode="decimal" [readonly]="isEstimated(expense) || isInstallment(expense)" />
             @if (isEstimated(expense)) { <mat-hint>Valor estimado: muda somente pela confirmação do valor da cobrança.</mat-hint> }
+            @if (isInstallment(expense)) { <mat-hint>Valor da parcela definido pela compra parcelada.</mat-hint> }
             <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error>
           </mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Vencimento corrigido{{ expense.status === 'PAID' ? ' (opcional)' : '' }}</mat-label>
@@ -457,6 +458,9 @@
                 <span class="status-label">{{ expense.status === 'CANCELLED' ? 'Cancelada' : (expense.status === 'PAID' ? 'Paga' : (expense.overdue ? 'Atrasada' : 'Pendente')) }}</span>
                 — referência {{ formatDate(expense.referenceDate) }}
               </p>
+              @if (expense.installment; as installment) {
+                <p class="installment-label">Parcela {{ installment.number }}/{{ installment.count }} · compra parcelada</p>
+              }
               @if (expense.origin === 'RECURRENCE') {
                 <p>Gerada por recorrência{{ expense.chargeConfirmed ? '' : ' · valor estimado a confirmar' }}.</p>
                 @if (isEstimated(expense)) {

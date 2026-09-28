@@ -146,3 +146,50 @@ test('changes a recurrence from a period after reviewing the impact and keeps th
   await expect(page.getByText(/Encerrada: último vencimento 2026-10-05/)).toBeVisible();
   expect(closures).toEqual([{ version: 1, lastDueDate: '2026-10-05', reason: 'Mudança', impactToken: 'closure-token' }]);
 });
+
+test('reviews an installment purchase with the cent remainder on the last installment before creating it', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const installments = [['33.33', '2027-01-31'], ['33.33', '2027-02-28'], ['33.34', '2027-03-31']]
+    .map(([amount, dueDate], index) => ({ number: index + 1, count: 3, amount, dueDate, expenseId: null, status: null }));
+  const preview = { description: 'Sofá', totalAmount: '100.00', installmentCount: 3, firstDueDate: '2027-01-31',
+    lastDueDate: '2027-03-31', regularAmount: '33.33', lastAmount: '33.34', lastInstallmentAdjustment: '0.01',
+    installmentsSum: '100.00', installments };
+  await page.route('**/api/v1/identity/members', route => route.fulfill(json([{ userId: 'actor', displayName: 'Diego', currentUser: true }])));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([{ id: 'cat-1', name: 'Casa', active: true }])));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ headerName: 'X-XSRF-TOKEN' })));
+  const previews: unknown[] = [];
+  await page.route('**/api/v1/installment-purchases/preview', async route => {
+    previews.push(route.request().postDataJSON());
+    await route.fulfill(json(preview));
+  });
+  const creations: { body: unknown; key: string | undefined }[] = [];
+  await page.route('**/api/v1/installment-purchases', async route => {
+    creations.push({ body: route.request().postDataJSON(), key: route.request().headers()['idempotency-key'] });
+    if (creations.length === 1) { await route.abort('failed'); return; }
+    await route.fulfill(json({ ...preview, id: 'purchase-1', categoryId: 'cat-1', categoryName: 'Casa',
+      responsibleUserId: null, responsibleDisplayName: null, createdByUserId: 'actor', createdByDisplayName: 'Diego',
+      createdAt: '2026-09-28T12:00:00Z', installments: installments.map(i => ({ ...i, expenseId: `e-${i.number}`, status: 'PENDING' })) }, 201));
+  });
+
+  await page.goto('/compras-parceladas');
+  await page.getByLabel('Descrição').fill('Sofá');
+  await page.getByLabel('Valor total').fill('100,00');
+  await page.getByLabel('Quantidade de parcelas').fill('3');
+  await page.getByLabel('Vencimento da primeira parcela').fill('2027-01-31');
+  await page.getByLabel('Categoria (opcional)').selectOption('cat-1');
+  await page.getByRole('button', { name: 'Revisar parcelas' }).click();
+  await expect(page.getByText('Revise antes de confirmar')).toBeVisible();
+  await expect(page.getByRole('row', { name: /3\/3 2027-03-31 R\$ 33\.34/ })).toBeVisible();
+  await expect(page.getByText(/A última parcela tem R\$ 0\.01 a mais/)).toBeVisible();
+  expect(previews).toEqual([{ description: 'Sofá', totalAmount: '100.00', installmentCount: 3, firstDueDate: '2027-01-31',
+    categoryId: 'cat-1', responsibleUserId: null }]);
+
+  const confirm = page.getByRole('button', { name: 'Confirmar e criar 3 parcelas' });
+  await confirm.click();
+  await expect(page.getByText(/a repetição não duplica parcelas/)).toBeVisible();
+  await confirm.click();
+  await expect(page.getByText(/criada com 3 parcelas pendentes, de 2027-01-31 a 2027-03-31/)).toBeVisible();
+  expect(creations).toHaveLength(2);
+  expect(creations[1].key).toBe(creations[0].key);
+  expect(creations[1].body).toEqual(previews[0]);
+});

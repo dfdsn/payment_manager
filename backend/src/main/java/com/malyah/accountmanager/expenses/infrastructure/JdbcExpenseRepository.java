@@ -252,6 +252,10 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
                 current.chargeConfirmed(), current.amount(), corrected.amount().value()))
             throw new com.malyah.accountmanager.expenses.domain.ExpenseValidationException("amount",
                     "O valor estimado só muda pela confirmação do valor da cobrança.");
+        // RF-PAR-03/07: installment amounts add up to the purchase total; an individual correction cannot change them.
+        if (current.installment() != null && current.amount().compareTo(corrected.amount().value()) != 0)
+            throw new com.malyah.accountmanager.expenses.domain.ExpenseValidationException("amount",
+                    "O valor da parcela é definido pela compra parcelada e não muda por correção individual.");
         var changedFields = changedFields(current, corrected);
         if (!Objects.equals(current.categoryId(), categoryId)) changedFields.add("categoryId");
         if (!Objects.equals(current.responsibleUserId(), responsibleUserId)) changedFields.add("responsibleUserId");
@@ -746,7 +750,7 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
                        e.category_id, category.name, e.responsible_user_id, responsible.display_name,
                        e.origin, e.charge_confirmed,
                        e.estimated_charge_amount, e.charge_confirmed_at, e.charge_confirmed_by_user_id,
-                       confirmer.display_name
+                       confirmer.display_name, e.installment_purchase_id, e.installment_number, e.installment_count
                   from expense_entries e
                   join identity_users creator on creator.id = e.created_by_user_id
                   left join identity_users payer on payer.id = e.paid_by_user_id
@@ -770,7 +774,9 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
                 rs.getString(24), rs.getBoolean(25), rs.getObject(26) == null ? null :
                         new com.malyah.accountmanager.expenses.application.ChargeConfirmationAudit(
                                 rs.getBigDecimal(26), rs.getTimestamp(27).toInstant(), rs.getObject(28, UUID.class),
-                                rs.getString(29)));
+                                rs.getString(29)),
+                rs.getObject(30) == null ? null : new com.malyah.accountmanager.expenses.application.InstallmentLink(
+                        rs.getObject(30, UUID.class), rs.getInt(31), rs.getInt(32)));
     }
 
     private record IdempotencyRecord(String requestHash, UUID expenseId) {

@@ -430,4 +430,22 @@ describe('ExpenseComponent', () => {
     expect(component.historyLabel('RECURRENCE_CHANGE_APPLIED')).toContain('Alterado pela recorrência');
     expect(component.historyLabel('RECURRENCE_OCCURRENCE_REMOVED')).toContain('Retirado da programação');
   });
+  it('identifies installment entries as n/N and keeps their amount read-only in correction', () => {
+    const installment = { ...estimated, id: 'inst-3', origin: 'INSTALLMENT', chargeConfirmed: true, description: 'Sofá',
+      amount: '33.34', installment: { purchaseId: 'purchase-1', number: 3, count: 3 } };
+    api.list.mockReturnValue(of({ content: [installment], page: 0, size: 20, totalElements: 1, totalPages: 1,
+      sort: 'REFERENCE_DATE', direction: 'ASC' }));
+    const component = fixture.componentInstance;
+    component.clearFilters();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Parcela 3/3 · compra parcelada');
+    expect(component.isInstallment(installment)).toBe(true);
+    expect(component.isEstimated(installment)).toBe(false);
+    expect(component.isInstallment(estimated)).toBe(false);
+    component.openCorrection(installment);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Valor da parcela definido pela compra parcelada');
+    const amount = fixture.nativeElement.querySelector('input[formcontrolname="amount"][readonly]');
+    expect(amount).not.toBeNull();
+  });
 });
