@@ -8,7 +8,9 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.malyah.accountmanager.installments.application.InstallmentIdempotencyConflictException;
+import com.malyah.accountmanager.installments.application.InstallmentImpactChangedException;
 import com.malyah.accountmanager.installments.application.InstallmentPurchaseNotFoundException;
+import com.malyah.accountmanager.installments.domain.InstallmentStateConflictException;
 import com.malyah.accountmanager.installments.domain.InstallmentValidationException;
 
 @RestControllerAdvice(basePackages = "com.malyah.accountmanager.installments.api")
@@ -33,6 +35,18 @@ class InstallmentApiExceptionHandler {
     @ExceptionHandler(InstallmentIdempotencyConflictException.class)
     ResponseEntity<?> idempotency(RuntimeException error) {
         return error(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", error.getMessage(), "Idempotency-Key");
+    }
+
+    @ExceptionHandler({InstallmentImpactChangedException.class,
+            com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class})
+    ResponseEntity<?> impactChanged() {
+        return error(HttpStatus.CONFLICT, "INSTALLMENT_IMPACT_CHANGED", new InstallmentImpactChangedException().getMessage(),
+                "impactToken");
+    }
+
+    @ExceptionHandler(InstallmentStateConflictException.class)
+    ResponseEntity<?> notPending(RuntimeException error) {
+        return error(HttpStatus.CONFLICT, "INSTALLMENT_NOT_PENDING", error.getMessage(), "");
     }
 
     @ExceptionHandler(InstallmentPurchaseNotFoundException.class)

@@ -157,25 +157,28 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
                        c.old_paid_amount, c.new_paid_amount, c.old_payment_date, c.new_payment_date,
                        old_payer.display_name, new_payer.display_name,
                        c.old_category_name, c.new_category_name,
-                       c.old_responsible_name, c.new_responsible_name, c.recurrence_change_id
+                       c.old_responsible_name, c.new_responsible_name, c.recurrence_change_id,
+                       c.installment_change_id
                   from expense_correction_events c
                   join identity_users actor on actor.id=c.actor_user_id
                   left join identity_users old_payer on old_payer.id=c.old_payer_user_id
                   left join identity_users new_payer on new_payer.id=c.new_payer_user_id
                  where c.space_id=? and c.expense_id=?
                 """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
-                    rs.getObject(24) == null ? "EXPENSE_CORRECTED" : "RECURRENCE_CHANGE_APPLIED",
+                    rs.getObject(24) != null ? "RECURRENCE_CHANGE_APPLIED"
+                            : rs.getObject(25) != null ? "INSTALLMENT_CHANGE_APPLIED" : "EXPENSE_CORRECTED",
                     rs.getObject(1, UUID.class), rs.getString(2),
                     rs.getTimestamp(3).toInstant(), null, null, rs.getLong(4), null, null, null, null,
                     rs.getString(5), null, correctionChanges(rs)), spaceId, expenseId));
         events.addAll(jdbc.query("""
                 select c.actor_user_id, actor.display_name, c.cancelled_at, c.reason, c.to_version,
-                       c.recurrence_change_id
+                       c.recurrence_change_id, c.installment_change_id
                   from expense_cancellation_events c
                   join identity_users actor on actor.id=c.actor_user_id
                  where c.space_id=? and c.expense_id=?
                 """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
-                    rs.getObject(6) == null ? "EXPENSE_CANCELLED" : "RECURRENCE_OCCURRENCE_REMOVED",
+                    rs.getObject(6) != null ? "RECURRENCE_OCCURRENCE_REMOVED"
+                            : rs.getObject(7) != null ? "INSTALLMENT_CANCELLED" : "EXPENSE_CANCELLED",
                     rs.getObject(1, UUID.class), rs.getString(2),
                     rs.getTimestamp(3).toInstant(), rs.getString(4), null, rs.getLong(5), null, null, null,
                     null, null), spaceId, expenseId));

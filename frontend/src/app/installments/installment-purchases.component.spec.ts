@@ -3,6 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 import { ExpenseService } from '../expenses/expense.service';
 import { AccountAccessService } from '../identity/account-access.service';
+import { CategoryService } from '../expenses/category.service';
 import { InstallmentPurchasesComponent } from './installment-purchases.component';
 import { InstallmentPurchaseService } from './installment-purchase.service';
 
@@ -32,6 +33,7 @@ describe('InstallmentPurchasesComponent', () => {
     expenses.settleBatch.mockReturnValue(of({ operationId: 'op', replayed: false, items: [{}, {}] }));
     await TestBed.configureTestingModule({ imports: [InstallmentPurchasesComponent], providers: [
       { provide: InstallmentPurchaseService, useValue: api }, { provide: ExpenseService, useValue: expenses },
+      { provide: CategoryService, useValue: { list: () => of([]) } },
       { provide: AccountAccessService, useValue: {
         context: () => of({ userId: 'u', timeZone: 'America/Sao_Paulo' }),
         members: () => of([{ userId: 'u', displayName: 'Ana', currentUser: true }]) } }] }).compileComponents();
@@ -112,6 +114,28 @@ describe('InstallmentPurchasesComponent', () => {
     expect(component.installmentsLabel(1)).toBe('da parcela selecionada');
     component.confirmPayment();
     expect(expenses.settleBatch).toHaveBeenLastCalledWith(expect.anything(), 'pay-1');
+  });
+
+  it('after a change or cancellation shows the result and reloads the purchase and the list', () => {
+    const component = fixture.componentInstance;
+    component.open(summary);
+    component.toggle(detail.installments[2] as never);
+    expect(component.selectedItems().map(i => i.number)).toEqual([3]);
+    component.afterAdjustment({ changeId: 'c', changeType: 'CANCELLATION', affectedCount: 1, preservedCount: 2,
+      purchase: detail as never, replacement: { ...detail, description: 'Sofá (restante)', installmentCount: 4 } as never,
+      replayed: false });
+    fixture.detectChanges();
+    expect(text()).toContain('1 parcela cancelada; 2 preservadas. Nova compra “Sofá (restante)” criada com 4 parcelas.');
+    expect(component.selection().size).toBe(0);
+    component.afterAdjustment({ changeId: 'c', changeType: 'CHANGE', affectedCount: 2, preservedCount: 1,
+      purchase: detail as never, replacement: null, replayed: false });
+    expect(component.message()).toBe('Alteração aplicada a 2 parcelas; 1 preservada.');
+    component.afterAdjustment({ changeId: 'c', changeType: 'CHANGE', affectedCount: 1, preservedCount: 1,
+      purchase: detail as never, replacement: null, replayed: false });
+    expect(component.message()).toBe('Alteração aplicada a 1 parcela; 1 preservada.');
+    component.afterAdjustment({ changeId: 'c', changeType: 'CANCELLATION', affectedCount: 2, preservedCount: 1,
+      purchase: detail as never, replacement: null, replayed: false });
+    expect(component.message()).toBe('2 parcelas canceladas; 1 preservada.');
   });
 
   it('pages through purchases and reports load failures', () => {

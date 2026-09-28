@@ -19,7 +19,7 @@
 </mat-card-content></mat-card>
 
 @if(selected(); as d){
-<mat-card appearance="outlined" aria-labelledby="detail-title"><mat-card-header><mat-card-title id="detail-title">Parcelas de {{d.description}}</mat-card-title><mat-card-subtitle>Total R$ {{d.totalAmount}} · soma das parcelas R$ {{d.installmentsSum}}</mat-card-subtitle></mat-card-header><mat-card-content>
+<mat-card appearance="outlined" aria-labelledby="detail-title"><mat-card-header><mat-card-title id="detail-title">Parcelas de {{d.description}}</mat-card-title><mat-card-subtitle>Total R$ {{d.totalAmount}} · soma das parcelas R$ {{d.installmentsSum}}@if(d.replacesPurchaseId){ · substitui o restante de uma compra anterior}</mat-card-subtitle></mat-card-header><mat-card-content>
   @if(d.progress; as pr){<dl class="summary">
     <div><dt>Pagas</dt><dd>{{pr.paidCount}} · R$ {{pr.paidAmount}}</dd></div>
     <div><dt>Pendentes</dt><dd>{{pr.pendingCount}} · R$ {{pr.pendingAmount}}</dd></div>
@@ -42,4 +42,5 @@
     @if(payForm.controls.confirmed.invalid&&payForm.controls.confirmed.touched){<p class="error wide" role="alert">Confirme a quitação para continuar.</p>}
     <div class="actions wide"><button matButton="filled" type="submit" [disabled]="submitting()">{{submitting()?'Quitando…':'Confirmar quitação'}}</button><button matButton="outlined" type="button" [disabled]="submitting()" (click)="paying.set(false)">Voltar e revisar seleção</button></div>
   </form>}
+  <app-installment-adjustments [purchase]="d" [selected]="selectedItems()" (changed)="afterAdjustment($event)" />
 </mat-card-content></mat-card>}

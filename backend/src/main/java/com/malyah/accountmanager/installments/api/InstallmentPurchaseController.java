@@ -13,6 +13,11 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import com.malyah.accountmanager.installments.application.InstallmentAdjustmentUseCase;
+import com.malyah.accountmanager.installments.application.InstallmentCancellationCommand;
+import com.malyah.accountmanager.installments.application.InstallmentChangeCommand;
+import com.malyah.accountmanager.installments.application.InstallmentChangeResult;
+import com.malyah.accountmanager.installments.application.InstallmentImpactView;
 import com.malyah.accountmanager.installments.application.InstallmentPreviewView;
 import com.malyah.accountmanager.installments.application.InstallmentPurchaseCommand;
 import com.malyah.accountmanager.installments.application.InstallmentPurchasePage;
@@ -25,8 +30,12 @@ import jakarta.validation.Valid;
 @ConditionalOnProperty(name = "spring.datasource.url")
 class InstallmentPurchaseController {
     private final InstallmentPurchaseUseCase useCase;
+    private final InstallmentAdjustmentUseCase adjustments;
 
-    InstallmentPurchaseController(InstallmentPurchaseUseCase useCase) { this.useCase = useCase; }
+    InstallmentPurchaseController(InstallmentPurchaseUseCase useCase, InstallmentAdjustmentUseCase adjustments) {
+        this.useCase = useCase;
+        this.adjustments = adjustments;
+    }
 
     @PostMapping("/preview")
     InstallmentPreviewView preview(Principal principal, @Valid @RequestBody InstallmentPurchaseRequest request) {
@@ -51,6 +60,42 @@ class InstallmentPurchaseController {
     @GetMapping("/{id}")
     InstallmentPurchaseView get(Principal principal, @PathVariable UUID id) {
         return useCase.get(principal.getName(), id);
+    }
+
+    @PostMapping("/{id}/changes/preview")
+    InstallmentImpactView previewChange(Principal principal, @PathVariable UUID id,
+            @Valid @RequestBody InstallmentChangeRequest request) {
+        return adjustments.previewChange(principal.getName(), change(id, request, null));
+    }
+
+    @PostMapping("/{id}/changes")
+    ResponseEntity<InstallmentChangeResult> applyChange(Principal principal, @PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") UUID key, @Valid @RequestBody InstallmentChangeRequest request) {
+        return ResponseEntity.ok(adjustments.applyChange(principal.getName(), change(id, request, key)));
+    }
+
+    @PostMapping("/{id}/cancellation/preview")
+    InstallmentImpactView previewCancellation(Principal principal, @PathVariable UUID id,
+            @Valid @RequestBody InstallmentCancellationRequest request) {
+        return adjustments.previewCancellation(principal.getName(), cancellation(id, request, null));
+    }
+
+    @PostMapping("/{id}/cancellation")
+    ResponseEntity<InstallmentChangeResult> applyCancellation(Principal principal, @PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") UUID key, @Valid @RequestBody InstallmentCancellationRequest request) {
+        return ResponseEntity.ok(adjustments.applyCancellation(principal.getName(), cancellation(id, request, key)));
+    }
+
+    private static InstallmentChangeCommand change(UUID id, InstallmentChangeRequest request, UUID key) {
+        return new InstallmentChangeCommand(id, request.fromNumber(), request.scope(), request.changedFields(),
+                request.description(), request.categoryId(), request.responsibleUserId(), request.dueDate(),
+                request.impactToken(), key);
+    }
+
+    private static InstallmentCancellationCommand cancellation(UUID id, InstallmentCancellationRequest request,
+            UUID key) {
+        return new InstallmentCancellationCommand(id, request.installmentNumbers(), request.reason(),
+                request.replacement() == null ? null : command(request.replacement(), null), request.impactToken(), key);
     }
 
     private static InstallmentPurchaseCommand command(InstallmentPurchaseRequest request, UUID key) {

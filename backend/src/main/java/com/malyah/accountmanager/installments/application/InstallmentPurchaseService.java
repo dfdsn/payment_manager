@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.HexFormat;
@@ -52,13 +53,8 @@ public final class InstallmentPurchaseService implements InstallmentPurchaseUseC
         Objects.requireNonNull(command);
         var actor = context.findByEmail(actorEmail);
         var plan = plan(command);
-        requireReferences(actor, command);
-        var views = plan.installments().stream().map(i -> new InstallmentView(i.number(), plan.count(),
-                i.amount().toPlainString(), i.dueDate(), null, null)).toList();
-        return new InstallmentPreviewView(plan.description(), plan.total().toPlainString(), plan.count(),
-                plan.firstDueDate(), plan.lastDueDate(), plan.installments().getFirst().amount().toPlainString(),
-                plan.installments().getLast().amount().toPlainString(), plan.lastInstallmentAdjustment().toPlainString(),
-                sum(plan.installments().stream().map(Installment::amount).toList()), views);
+        requireReferences(actor, command.categoryId(), command.responsibleUserId());
+        return previewOf(plan);
     }
 
     @Override
@@ -74,34 +70,49 @@ public final class InstallmentPurchaseService implements InstallmentPurchaseUseC
         var claim = repository.claim(actor.spaceId(), actor.userId(), command.idempotencyKey(),
                 fingerprint(plan, command), now);
         if (claim.replayed()) return new InstallmentPurchaseCreationResult(view(actor, claim.purchaseId()), true);
-        requireReferences(actor, command);
-        var purchaseId = identifiers.get();
-        repository.insert(purchaseId, actor.spaceId(), plan, command.categoryId(), command.responsibleUserId(),
-                actor.userId(), now);
-        var entries = plan.installments().stream()
-                .map(i -> new InstallmentExpensesCommand.Entry(i.number(), i.amount(), i.dueDate())).toList();
-        var created = expenses.create(new InstallmentExpensesCommand(actor.spaceId(), purchaseId, actor.userId(), now,
-                plan.description(), command.categoryId(), command.responsibleUserId(), entries));
-        if (created.size() != plan.count()) throw new IllegalStateException("Installments were not created.");
+        requireReferences(actor, command.categoryId(), command.responsibleUserId());
+        var purchaseId = insert(actor, plan, command.categoryId(), command.responsibleUserId(), now);
         repository.complete(actor.spaceId(), actor.userId(), command.idempotencyKey(), purchaseId, now);
         return new InstallmentPurchaseCreationResult(view(actor, purchaseId), false);
     }
 
-    private static InstallmentPlan plan(InstallmentPurchaseCommand command) {
+    /** Writes the purchase and all installments; shared by creation and by the replacement of cancelled ones. */
+    UUID insert(AuthenticatedUserContext actor, InstallmentPlan plan, UUID categoryId, UUID responsibleUserId,
+            Instant now) {
+        var purchaseId = identifiers.get();
+        repository.insert(purchaseId, actor.spaceId(), plan, categoryId, responsibleUserId, actor.userId(), now);
+        var entries = plan.installments().stream()
+                .map(i -> new InstallmentExpensesCommand.Entry(i.number(), i.amount(), i.dueDate())).toList();
+        var created = expenses.create(new InstallmentExpensesCommand(actor.spaceId(), purchaseId, actor.userId(), now,
+                plan.description(), categoryId, responsibleUserId, entries));
+        if (created.size() != plan.count()) throw new IllegalStateException("Installments were not created.");
+        return purchaseId;
+    }
+
+    InstallmentPreviewView previewOf(InstallmentPlan plan) {
+        var views = plan.installments().stream().map(i -> new InstallmentView(i.number(), plan.count(),
+                i.amount().toPlainString(), i.dueDate(), null, null)).toList();
+        return new InstallmentPreviewView(plan.description(), plan.total().toPlainString(), plan.count(),
+                plan.firstDueDate(), plan.lastDueDate(), plan.installments().getFirst().amount().toPlainString(),
+                plan.installments().getLast().amount().toPlainString(), plan.lastInstallmentAdjustment().toPlainString(),
+                sum(plan.installments().stream().map(Installment::amount).toList()), views);
+    }
+
+    static InstallmentPlan plan(InstallmentPurchaseCommand command) {
         return InstallmentPlan.calculate(command.description(), parse(command.totalAmount()),
                 command.installmentCount(), command.firstDueDate());
     }
 
-    private void requireReferences(AuthenticatedUserContext actor, InstallmentPurchaseCommand command) {
-        if (command.responsibleUserId() != null) {
+    void requireReferences(AuthenticatedUserContext actor, UUID categoryId, UUID responsibleUserId) {
+        if (responsibleUserId != null) {
             try {
-                members.requireActiveParticipants(actor.spaceId(), actor.userId(), command.responsibleUserId());
+                members.requireActiveParticipants(actor.spaceId(), actor.userId(), responsibleUserId);
             } catch (AuthenticatedUserContextNotFoundException exception) {
                 throw new InstallmentValidationException("responsibleUserId",
                         "O responsável precisa ser membro ativo deste espaço.");
             }
         }
-        categories.requireSelectable(actor.spaceId(), command.categoryId());
+        categories.requireSelectable(actor.spaceId(), categoryId);
     }
 
     @Override
@@ -130,7 +141,7 @@ public final class InstallmentPurchaseService implements InstallmentPurchaseUseC
         return view(context.findByEmail(actorEmail), purchaseId);
     }
 
-    private InstallmentPurchaseView view(AuthenticatedUserContext actor, UUID purchaseId) {
+    InstallmentPurchaseView view(AuthenticatedUserContext actor, UUID purchaseId) {
         var purchase = repository.find(actor.spaceId(), purchaseId)
                 .orElseThrow(InstallmentPurchaseNotFoundException::new);
         var entries = expenses.find(actor.spaceId(), purchaseId);
@@ -144,10 +155,10 @@ public final class InstallmentPurchaseService implements InstallmentPurchaseUseC
                 purchase.categoryName(), purchase.responsibleUserId(), purchase.responsibleDisplayName(),
                 purchase.createdByUserId(), purchase.createdByDisplayName(), purchase.createdAt(),
                 sum(entries.stream().map(InstallmentExpenseSnapshot::amount).toList()),
-                InstallmentProgress.of(entries, today), views);
+                InstallmentProgress.of(entries, today), purchase.replacesPurchaseId(), views);
     }
 
-    private LocalDate today(AuthenticatedUserContext actor) {
+    LocalDate today(AuthenticatedUserContext actor) {
         return LocalDate.now(clock.withZone(ZoneId.of(actor.timeZone())));
     }
 
@@ -155,7 +166,7 @@ public final class InstallmentPurchaseService implements InstallmentPurchaseUseC
         return entries.isEmpty() ? null : entries.getLast().dueDate();
     }
 
-    private static String sum(List<BigDecimal> amounts) {
+    static String sum(List<BigDecimal> amounts) {
         return amounts.stream().reduce(BigDecimal.ZERO.setScale(2), BigDecimal::add).toPlainString();
     }
 

@@ -83,13 +83,14 @@ final class JdbcInstallmentPurchaseRepository implements InstallmentPurchaseRepo
         return new StoredInstallmentPurchase(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
                 rs.getString(3), rs.getBigDecimal(4), rs.getInt(5), rs.getObject(6, LocalDate.class),
                 rs.getObject(7, UUID.class), rs.getString(8), rs.getObject(9, UUID.class), rs.getString(10),
-                rs.getObject(11, UUID.class), rs.getString(12), rs.getTimestamp(13).toInstant());
+                rs.getObject(11, UUID.class), rs.getString(12), rs.getTimestamp(13).toInstant(),
+                rs.getObject(14, UUID.class));
     }
 
     private static final String SELECT = """
             select p.id, p.space_id, p.description, p.total_amount, p.installment_count, p.first_due_date,
                    p.category_id, category.name, p.responsible_user_id, responsible.display_name,
-                   p.created_by_user_id, creator.display_name, p.created_at
+                   p.created_by_user_id, creator.display_name, p.created_at, p.replaces_purchase_id
               from installment_purchases p
               join identity_users creator on creator.id = p.created_by_user_id
               left join expense_categories category on category.id = p.category_id and category.space_id = p.space_id

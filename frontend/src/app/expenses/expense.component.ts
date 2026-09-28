@@ -504,7 +504,9 @@ export class ExpenseComponent implements OnInit {
       EXPENSE_CORRECTED: 'Despesa corrigida', EXPENSE_CANCELLED: 'Despesa cancelada',
       CHARGE_CONFIRMED: 'Valor da cobrança confirmado', ESTIMATE_UPDATED: 'Estimativa atualizada por confirmação anterior',
       RECURRENCE_CHANGE_APPLIED: 'Alterado pela recorrência (este e os próximos)',
-      RECURRENCE_OCCURRENCE_REMOVED: 'Retirado da programação da recorrência' } as Record<string, string>)[type] ?? type;
+      RECURRENCE_OCCURRENCE_REMOVED: 'Retirado da programação da recorrência',
+      INSTALLMENT_CHANGE_APPLIED: 'Alterado pela compra parcelada',
+      INSTALLMENT_CANCELLED: 'Cancelado pela compra parcelada' } as Record<string, string>)[type] ?? type;
   }
 
   historyField(field: string): string {

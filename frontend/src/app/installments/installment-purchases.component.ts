@@ -8,7 +8,8 @@ import { MatInputModule } from '@angular/material/input';
 import { finalize } from 'rxjs';
 import { ExpenseService } from '../expenses/expense.service';
 import { AccountAccessService, SpaceMember } from '../identity/account-access.service';
-import { InstallmentItem, InstallmentPurchase, InstallmentPurchasePage, InstallmentPurchaseService,
+import { InstallmentAdjustmentsComponent } from './installment-adjustments.component';
+import { InstallmentChangeResult, InstallmentItem, InstallmentPurchase, InstallmentPurchasePage, InstallmentPurchaseService,
   InstallmentPurchaseSummary } from './installment-purchase.service';
 
 /**
@@ -16,7 +17,7 @@ import { InstallmentItem, InstallmentPurchase, InstallmentPurchasePage, Installm
  * expenses, so payment goes through the same atomic batch settlement of Despesas (T12/D19).
  */
 @Component({ selector: 'app-installment-purchases',
-  imports: [ReactiveFormsModule, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule],
+  imports: [ReactiveFormsModule, InstallmentAdjustmentsComponent, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule],
   templateUrl: './installment-purchases.component.html', styleUrl: './installment-purchases.component.scss' })
 export class InstallmentPurchasesComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
@@ -116,6 +117,22 @@ export class InstallmentPurchasesComponent implements OnInit {
         } else this.handle(e, 'Não foi possível quitar as parcelas. Nada foi alterado; tente novamente.');
       },
     });
+  }
+
+  selectedItems() { return [...this.selection().values()]; }
+
+  /** H05.3: after a change or cancellation, show the result and reload the purchase and the list. */
+  afterAdjustment(result: InstallmentChangeResult) {
+    this.error.set(null);
+    const kept = result.preservedCount === 1 ? '1 preservada' : `${result.preservedCount} preservadas`;
+    const text = result.changeType === 'CHANGE'
+      ? `Alteração aplicada a ${result.affectedCount} ${result.affectedCount === 1 ? 'parcela' : 'parcelas'}; ${kept}.`
+      : `${result.affectedCount} ${result.affectedCount === 1 ? 'parcela cancelada' : 'parcelas canceladas'}; ${kept}.`;
+    this.message.set(result.replacement
+      ? `${text} Nova compra “${result.replacement.description}” criada com ${result.replacement.installmentCount} parcelas.`
+      : text);
+    this.selected.set(result.purchase); this.selection.set(new Map()); this.paying.set(false);
+    this.load(this.page()?.page ?? 0);
   }
 
   selectedTotal() {

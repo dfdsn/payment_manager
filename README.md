@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, e H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1–H04.5 e H05.1 estão concluídas, com E2E full-stack aprovado em 28/09/2026; E04 está concluído. H03.3 permanece em validação independente. H05.2 (consultar e quitar parcelas) está implementada e em validação até a CI do PR.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1–H04.5 e H05.1 estão concluídas, com E2E full-stack aprovado em 28/09/2026; E04 está concluído. H03.3 permanece em validação independente. H05.2 (consultar e quitar parcelas) está concluída; H05.3 (ajustar e cancelar parcelas pendentes) está implementada e em validação até a CI do PR.
 
 ## Anexos privados (H03.3)
 
@@ -679,4 +679,50 @@ Testes (Windows; em Linux, `./mvnw verify -Dit.test=InstallmentProgressPostgresI
 backend\scripts\run-integration-tests.ps1 -Tests InstallmentProgressPostgresIT,InstallmentPurchasePostgresIT,ExpensePostgresIT
 ```
 
-Ajustes em grupo e cancelamento de parcelas pendentes (H05.3) ainda não foram implementados.
+## Ajustar e cancelar parcelas pendentes (H05.3)
+
+No detalhe de uma compra em **Compras cadastradas** ficam **Alterar parcelas pendentes** e **Cancelar selecionadas (k)**. As duas ações sempre mostram primeiro o impacto calculado pelo servidor (parcelas afetadas com “de → para” e parcelas preservadas com o motivo) e só gravam em **Confirmar alteração** / **Confirmar cancelamento**.
+
+- **Alterar (RF-PAR-05/06):** a partir de uma parcela pendente, com alcance **Somente esta parcela** ou **Esta e as próximas pendentes**, muda descrição, categoria, responsável e/ou vencimento. Com “esta e as próximas”, o novo vencimento vale para a parcela escolhida e as pendentes seguintes são recalculadas mês a mês pela diferença de número (regra de calendário da H05.1: meses curtos usam o último dia). Parcelas pagas e canceladas nunca mudam; parcelas que já têm os valores pedidos são preservadas como “já tem esses valores”. Valor e quantidade não mudam por aqui.
+- **Cancelar (RF-PAR-07/08):** cancela só as parcelas pendentes selecionadas, com motivo obrigatório (até 2.000 caracteres). Nada é estornado nem desfeito: parcelas pagas continuam pagas. Opcionalmente cria, na mesma transação, uma **nova compra com o restante** (descrição, valor total, quantidade, primeiro vencimento, categoria e responsável), com as regras da H05.1 e o vínculo “substitui a compra …”. É assim que se corrige valor total ou quantidade.
+- **Revisão protegida:** a prévia devolve um `impactToken` (hash das parcelas, versões e novos valores). Ao confirmar, o servidor trava a compra e as parcelas, recalcula o impacto e recusa com `409 INSTALLMENT_IMPACT_CHANGED` se algo mudou (outra aba quitou ou corrigiu uma parcela); a tela descarta a revisão e pede para revisar de novo. A confirmação exige `Idempotency-Key`: repetir a mesma requisição devolve o mesmo resultado sem duplicar a alteração nem a nova compra; a mesma chave com outro conteúdo recebe `409 IDEMPOTENCY_CONFLICT`.
+- **Histórico:** cada parcela afetada registra “Alterado pela compra parcelada” ou “Cancelado pela compra parcelada” (com o motivo) no histórico de Despesas, ligado ao registro da alteração em `installment_purchase_changes`.
+
+```text
+POST /api/v1/installment-purchases/<id>/changes/preview
+{"fromNumber": 2, "scope": "THIS_AND_FOLLOWING", "changedFields": ["dueDate"], "dueDate": "2027-02-10"}
+→ 200 {"changeType": "CHANGE", "impactToken": "<64 hex>", "affectedAmount": "66.67", "replacement": null,
+       "affected": [{"number": 2, "expenseId": "...", "version": 1, "amount": "33.33", "dueDate": "2027-02-28",
+                     "changes": [{"field": "dueDate", "from": "2027-02-28", "to": "2027-02-10"}]}, ...],
+       "preserved": [{"number": 1, "status": "PAID", "reason": "PAID"}]}
+
+POST /api/v1/installment-purchases/<id>/changes          (Idempotency-Key: <uuid>)
+{ ...o mesmo corpo..., "impactToken": "<token da prévia>"}
+→ 200 {"changeId": "...", "changeType": "CHANGE", "affectedCount": 2, "preservedCount": 1,
+       "purchase": {...compra atualizada...}, "replacement": null, "replayed": false}
+
+POST /api/v1/installment-purchases/<id>/cancellation/preview
+{"installmentNumbers": [3], "reason": "Loja renegociou o saldo",
+ "replacement": {"description": "Sofá (restante)", "totalAmount": "33.34", "installmentCount": 2,
+                 "firstDueDate": "2027-03-10", "categoryId": null, "responsibleUserId": null}}
+POST /api/v1/installment-purchases/<id>/cancellation     (Idempotency-Key, corpo + "impactToken")
+→ 200 {..., "changeType": "CANCELLATION", "replacement": {...nova compra, "replacesPurchaseId": "<id>"...}}
+```
+
+`scope` aceita `THIS` ou `THIS_AND_FOLLOWING`; `changedFields` é um subconjunto de `description`, `categoryId`, `responsibleUserId` e `dueDate` (só os campos listados são aplicados; `categoryId`/`responsibleUserId` nulos removem o vínculo). `replacement` é opcional.
+
+Erros: `400 INSTALLMENT_VALIDATION` (campo inválido, nada a alterar, motivo ausente, parcela inexistente, `Idempotency-Key` ausente), `404 INSTALLMENT_PURCHASE_NOT_FOUND`, `409 INSTALLMENT_NOT_PENDING` (parcela escolhida paga ou cancelada), `409 INSTALLMENT_IMPACT_CHANGED`, `409 IDEMPOTENCY_CONFLICT`, erros de categoria/responsável iguais aos da H05.1 e `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`. Administrador e convidado ativos podem usar as duas ações.
+
+Teste manual (demonstração do E05):
+
+1. Crie “Sofá”, `100,00` em `3` parcelas (a última fica com `33,34`). Abra **Ver parcelas de Sofá**, marque 1/3 e quite-a (H05.2).
+2. **Alterar parcelas pendentes** → a partir de `2/3`, **Esta e as próximas pendentes**, **Alterar vencimento** para o dia 10 do mês da 2/3 → **Revisar impacto**. Resultado: “2 parcelas serão alteradas.”, cada uma com “Vencimento: … → …-10” e “Preservadas: 1 (paga, não muda)”. **Confirmar alteração** → “Alteração aplicada a 2 parcelas; 1 preservada.”
+3. Marque 3/3 → **Cancelar selecionadas (1)** → motivo “Loja renegociou o saldo” → marque **Criar nova compra com o restante** (os campos vêm preenchidos: valor da selecionada, 2 parcelas, primeiro vencimento dela) → **Revisar cancelamento**. Resultado: “1 parcela será cancelada, somando R$ 33.34.” e o resumo da nova compra. **Confirmar cancelamento** → “1 parcela cancelada; 2 preservadas. Nova compra “Sofá (restante)” criada com 2 parcelas.”
+4. Confira: 1/3 continua “Paga em …”, 3/3 aparece Cancelada, a nova compra aparece em **Compras cadastradas** e, no detalhe dela, “substitui o restante de uma compra anterior”, e em Despesas a 2/3 mostra “Alterado pela compra parcelada” e a 3/3 “Cancelado pela compra parcelada” no histórico.
+5. Conflito: revise uma alteração numa aba, quite a parcela em outra e confirme na primeira: “As parcelas mudaram desde a revisão…”, sem nada gravado.
+
+Testes (Windows; em Linux, `./mvnw verify -Dit.test=InstallmentAdjustmentPostgresIT,InstallmentProgressPostgresIT,InstallmentPurchasePostgresIT`):
+
+```powershell
+backend\scripts\run-integration-tests.ps1 -Tests InstallmentAdjustmentPostgresIT,InstallmentProgressPostgresIT,InstallmentPurchasePostgresIT
+```

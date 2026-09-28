@@ -12,7 +12,7 @@ import java.util.UUID;
 public record InstallmentPurchaseView(UUID id, String description, String totalAmount, int installmentCount,
         LocalDate firstDueDate, LocalDate lastDueDate, UUID categoryId, String categoryName, UUID responsibleUserId,
         String responsibleDisplayName, UUID createdByUserId, String createdByDisplayName, Instant createdAt,
-        String installmentsSum, InstallmentProgress progress, List<InstallmentView> installments) {
+        String installmentsSum, InstallmentProgress progress, UUID replacesPurchaseId, List<InstallmentView> installments) {
     public InstallmentPurchaseView {
         installments = List.copyOf(installments);
     }

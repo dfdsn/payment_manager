@@ -30,6 +30,10 @@ class ExpensesConfiguration {
         return new JdbcInstallmentExpenses(jdbcTemplate, UUID::randomUUID);
     }
     @Bean
+    com.malyah.accountmanager.expenses.application.InstallmentAdjuster installmentAdjuster(JdbcTemplate jdbcTemplate) {
+        return new JdbcInstallmentAdjuster(jdbcTemplate);
+    }
+    @Bean
     com.malyah.accountmanager.expenses.application.RecurringOccurrenceAdjuster recurringOccurrenceAdjuster(
             JdbcTemplate jdbcTemplate) {
         return new JdbcRecurringOccurrenceAdjuster(jdbcTemplate);
