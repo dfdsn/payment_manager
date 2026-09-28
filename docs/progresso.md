@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 28/09/2026.
 
-**Estado atual: H04.4, H04.5 e H05.1 em validação.** H05.1 (criar compra e parcelas) está implementada e aprovada nos gates (178 unitários, JaCoCo, PIT 83%, ArchUnit), em 76 ITs contra PostgreSQL 16 local (V1–V20), em 74 testes frontend e 4 smoke E2E; a CI `36478112853` (commit `25a2fc5`) aprovou os 76 ITs em Testcontainers `postgres:17.6-alpine` (V1–V20, `InstallmentPurchasePostgresIT` 8/8), além de 178 unitários, JaCoCo, PIT 83% e o job frontend. Falta o E2E full-stack. H04.4 e H04.5 seguem aguardando o E2E full-stack (a CI `36470203451` já aprovou seus ITs em Testcontainers 17.6). E01 e E02 estão concluídos, H03.3 mantém validação independente, E04 não está concluído e E05 está em andamento.
+**Estado atual: H04.4, H04.5 e H05.1 concluídas; E04 concluído.** E2E full-stack aprovado em 28/09/2026 (duas execuções seguidas, 32 s e 30 s) numa stack equivalente à `compose.full-local.yml`, sem Docker: PostgreSQL 16 com banco vazio e Flyway V1–V20 aplicado pelo modo `APP_MODE=migrate`, backend empacotado (`java -jar`) em modo runtime, Mailpit 1.27.8, frontend de produção (`ng build`) servido com proxy `/api` equivalente ao `nginx.conf`, Chromium do Playwright. A execução encontrou e corrigiu um defeito real da H04.4 (o formulário “Confirmar valor” em Recorrências recarregava a página em vez de enviar a confirmação) e duas asserções do próprio E2E. As CIs `36455395731`, `36470203451` e `36478112853` já haviam aprovado os ITs em Testcontainers `postgres:17.6-alpine`. E01, E02 e E04 estão concluídos, H03.3 mantém validação independente e E05 está em andamento (H05.2 e H05.3 não iniciadas).
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 28/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 15 de 46 concluídas; E01 e E02 concluídos, E03 depende da validação final de H03.3 e E04 e E05 estão em andamento. |
+| Histórias | 18 de 46 concluídas; E01, E02 e E04 concluídos, E03 depende da validação final de H03.3 e E05 está em andamento. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Executar `npm run e2e:full-stack` na stack local, que cobre H04.4, H04.5 e H05.1. Com isso aprovado, as três histórias e o E04 podem ser concluídos. A próxima história recomendada é H05.2, não iniciada. |
+| Próxima ação | Iniciar H05.2 (consultar e quitar parcelas). Opcional: repetir `npm run e2e:full-stack` com `compose.full-local.yml` no Windows para exercitar também as imagens Docker e o nginx. |
 
 ## Estados permitidos
 
@@ -58,9 +58,9 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H04.1 | Cadastrar recorrência e calcular calendário | Concluído | Cinco frequências, modalidade fixa/estimada, dia-base sem deslocamento, idempotência, autorização, V15, PostgreSQL e E2E aprovados. Evidência: `docs/evidencias/H04.1.md`. |
 | H04.2 | Gerar ocorrências sem duplicação | Concluído | Job PostgreSQL com lease/fencing, unicidade por recorrência/data, rollback e retomada; V16, 38 ITs selecionados e E2E aprovados. Evidência: `docs/evidencias/H04.2.md`. |
 | H04.3 | Visualizar e antecipar previsões | Concluído | Horizonte de 13 meses somente leitura, reconciliação por identidade estável e antecipação idempotente aprovados em PostgreSQL, gates e E2E. Evidência: `docs/evidencias/H04.3.md`. |
-| H04.4 | Confirmar valores variáveis | Em validação | Confirmação auditada, propagação somente para estimativas posteriores, quitação com confirmação atômica e interface implementadas; 124 Java, JaCoCo, PIT 76%, 58 ITs em PostgreSQL 16 local e em Testcontainers 17.6 na CI, 59 frontend, build e 2 smoke E2E aprovados. Falta o E2E full-stack. Evidência: `docs/evidencias/H04.4.md`. |
-| H04.5 | Alterar e encerrar recorrência | Em validação | “Este e os próximos” e encerramento com prévia de impacto, revalidação ao salvar, preservação de pagos/cancelados/confirmados/corrigidos, revisão sinalizada, auditoria e interface; V19. 146 Java, JaCoCo 91,88%/82,75%, PIT 81%, 68 ITs em PostgreSQL 16 local, 66 frontend, build e 3 smoke E2E aprovados. CI `36470203451` aprovou os 68 ITs em Testcontainers 17.6. Falta o E2E full-stack. Evidência: `docs/evidencias/H04.5.md`. |
-| H05.1 | Criar compra e parcelas | Em validação | Compra com total, 2–360 parcelas e primeiro vencimento; prévia do servidor com centavos na última parcela; criação atômica e idempotente das N despesas `INSTALLMENT` n/N; cabeçalho fora dos totais; interface `/compras-parceladas`; V20. 178 Java, JaCoCo 92,38%/83,51%, PIT 83%, 76 ITs em PostgreSQL 16 local, 74 frontend, build e 4 smoke E2E aprovados. CI `36478112853` aprovou os 76 ITs em Testcontainers 17.6. Falta o E2E full-stack. Evidência: `docs/evidencias/H05.1.md`. |
+| H04.4 | Confirmar valores variáveis | Concluído | Confirmação auditada, propagação somente para estimativas posteriores, quitação com confirmação atômica e interface implementadas; 124 Java, JaCoCo, PIT 76%, 58 ITs em PostgreSQL 16 local e em Testcontainers 17.6 na CI, 59 frontend, build e 2 smoke E2E aprovados. E2E full-stack aprovado em 28/09/2026 após corrigir o envio do formulário de confirmação na previsão. Evidência: `docs/evidencias/H04.4.md`. |
+| H04.5 | Alterar e encerrar recorrência | Concluído | “Este e os próximos” e encerramento com prévia de impacto, revalidação ao salvar, preservação de pagos/cancelados/confirmados/corrigidos, revisão sinalizada, auditoria e interface; V19. 146 Java, JaCoCo 91,88%/82,75%, PIT 81%, 68 ITs em PostgreSQL 16 local, 66 frontend, build e 3 smoke E2E aprovados. CI `36470203451` aprovou os 68 ITs em Testcontainers 17.6. E2E full-stack aprovado em 28/09/2026. Evidência: `docs/evidencias/H04.5.md`. |
+| H05.1 | Criar compra e parcelas | Concluído | Compra com total, 2–360 parcelas e primeiro vencimento; prévia do servidor com centavos na última parcela; criação atômica e idempotente das N despesas `INSTALLMENT` n/N; cabeçalho fora dos totais; interface `/compras-parceladas`; V20. 178 Java, JaCoCo 92,38%/83,51%, PIT 83%, 76 ITs em PostgreSQL 16 local, 74 frontend, build e 4 smoke E2E aprovados. CI `36478112853` aprovou os 76 ITs em Testcontainers 17.6. E2E full-stack aprovado em 28/09/2026. Evidência: `docs/evidencias/H05.1.md`. |
 | H05.2 | Consultar e quitar parcelas | Não iniciado | — |
 | H05.3 | Ajustar e cancelar parcelas pendentes | Não iniciado | — |
 | H06.1 | Consultar dashboard por vencimento | Não iniciado | — |
@@ -358,7 +358,7 @@ Próximo passo: H03.3 — anexar e acessar documentos.
 
 ```text
 História / objetivo: H04.4 — Confirmar valores variáveis.
-Estado / responsável / data: Em validação / desenvolvimento / 28/09/2026.
+Estado / responsável / data: Concluído / desenvolvimento / 28/09/2026.
 Requisitos e critérios de aceite relacionados: RF-REC-10, RF-REC-12, RF-REC-13, RF-REC-15, RF-DES-04, RF-DES-06, D20 e CA-04; distinção entre estimativa, valor confirmado e pagamento; auditoria; versão, idempotência e atomicidade; proteção contra geração e previsões; quitação individual e em lote.
 Decisões e pendências aplicáveis: T19 registrada. Nenhuma decisão de produto nova foi inventada: a referência segue o exemplo do PRD (última confirmação anterior por data prevista) e a correção de confirmados segue D20. Reflexos em relatórios, fechamentos e notificações ficam para E06–E08.
 Branch / commit / PR: branch `claude/h04-4-confirmar-valores-variaveis-usnyyj` sobre `main` `6a3b78f` (H04.3); PR draft para `main`. Nada foi publicado ou implantado.
@@ -369,15 +369,15 @@ Cobertura e mutação aplicáveis: JaCoCo (execução unitária) 917/1035 linhas
 Validação manual / integração real: sem Docker neste ambiente, os ITs rodaram contra PostgreSQL 16.13 local com as mesmas classes; a CI `36455395731` (commit `34ffc3a`) executou os mesmos 58 ITs em Testcontainers `postgres:17.6-alpine`, todos aprovados. O E2E full-stack foi estendido, mas não executado.
 Limitações e cenários futuros: despesas legadas pagas sem confirmação permanecem como estão; a confirmação a partir da previsão só confirma a versão 0 da ocorrência materializada; dashboard, fechamento e notificações validarão `chargeConfirmed`/`chargeConfirmation` em E06–E08.
 Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H04.4.md e este arquivo.
-Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36455395731` (commit `34ffc3a`)) e `npm run e2e:full-stack` aprovado com `compose.full-local.yml`.
-Próximo passo: concluir a validação acima; H04.5 não foi iniciada.
+Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36455395731` (commit `34ffc3a`)) e `npm run e2e:full-stack` aprovado (atendida em 28/09/2026 numa stack equivalente, sem Docker; ver docs/evidencias/H05.1.md).
+Próximo passo: concluída; H04.5 foi a história seguinte.
 ```
 
 ## Registro H04.5
 
 ```text
 História / objetivo: H04.5 — Alterar e encerrar recorrência.
-Estado / responsável / data: Em validação / desenvolvimento / 28/09/2026.
+Estado / responsável / data: Concluído / desenvolvimento / 28/09/2026.
 Requisitos e critérios de aceite relacionados: RF-REC-14 a RF-REC-17, D19, D20, CA-04; alcance visível antes de confirmar; preservação de pagos, cancelados e confirmados; retirada de estimados posteriores com histórico; categoria arquivada e responsável que saiu nas gerações futuras; versão, idempotência, atomicidade, concorrência e auditoria.
 Decisões e pendências aplicáveis: T20 registrada. O bloqueio localizado “edição de metadados confirmados” foi resolvido pela instrução de Diego (28/09/2026): metadados alcançam pendentes, inclusive confirmados; valores variáveis confirmados e vencimentos confirmados exigem correção individual. Interpretações adotadas estão em T20 e em docs/evidencias/H04.5.md. Reativação, pausa e exclusão física não foram implementadas por não estarem aprovadas.
 Branch / commit / PR: branch `claude/h04-4-confirmar-valores-variaveis-usnyyj` reiniciada sobre `main` `0f6e995` (H04.4 mesclada); PR draft para `main`. Nada foi publicado ou implantado.
@@ -388,15 +388,15 @@ Cobertura e mutação aplicáveis: JaCoCo (execução unitária) 1381/1503 linha
 Validação manual / integração real: sem Docker neste ambiente, os ITs rodaram contra PostgreSQL 16.13 local com as mesmas classes; a CI `36470203451` (commit `59f7988`) aprovou os 68 ITs em Testcontainers `postgres:17.6-alpine` (V1–V19, `RecurrenceChangePostgresIT` 10/10), além de 146 unitários, JaCoCo e PIT 81%, e o job frontend. O E2E full-stack foi estendido, mas não executado.
 Limitações e cenários futuros: o sinal de revisão é informativo (resolver = correção, reversão ou cancelamento individual); a prévia mostra no máximo o horizonte de 13 meses; dashboard, fechamento e notificações consumirão `recurrence_change_events`, `reviewReason` e os novos eventos em E06–E08.
 Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H04.5.md e este arquivo.
-Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36470203451`, commit `59f7988`) e `npm run e2e:full-stack` aprovado com `compose.full-local.yml`.
-Próximo passo: concluir a validação acima; E05 não foi iniciado.
+Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36470203451`, commit `59f7988`) e `npm run e2e:full-stack` aprovado (atendida em 28/09/2026 numa stack equivalente, sem Docker; ver docs/evidencias/H05.1.md).
+Próximo passo: concluída; E04 concluído.
 ```
 
 ## Registro H05.1
 
 ```text
 História / objetivo: H05.1 — Criar compra e parcelas.
-Estado / responsável / data: Em validação / desenvolvimento / 28/09/2026.
+Estado / responsável / data: Concluído / desenvolvimento / 28/09/2026.
 Requisitos e critérios de aceite relacionados: RF-PAR-01 a RF-PAR-04 e RF-PAR-07; H05.1 do backlog; instrução de Diego de 28/09/2026 (limites, divisão de centavos, calendário, atomicidade, idempotência, interface com prévia).
 Decisões e pendências aplicáveis: T21 registrada. A pendência “Limites de parcela” do backlog foi resolvida pela instrução de Diego (2–360 parcelas, R$ 0,01 por parcela). Não existe “data da compra” na documentação; foi usado só o primeiro vencimento (ponto a confirmar com Diego, sem bloqueio). Nenhuma pendência da H04.5 bloqueou esta história.
 Branch / commit / PR: branch `claude/h04-4-confirmar-valores-variaveis-usnyyj` reiniciada sobre `main` `345cbb5` (H04.5 mesclada); PR para `main`. Nada foi publicado ou implantado.
@@ -407,8 +407,8 @@ Cobertura e mutação aplicáveis: JaCoCo (execução unitária) 1503/1627 linha
 Validação manual / integração real: sem Docker neste ambiente, os ITs rodaram contra PostgreSQL 16 local com as mesmas classes; a CI `36478112853` (commit `25a2fc5`) aprovou os 76 ITs em Testcontainers `postgres:17.6-alpine` (V1–V20, `InstallmentPurchasePostgresIT` 8/8), além de 178 unitários, JaCoCo, PIT 83% e o job frontend. O E2E full-stack foi estendido, mas não executado.
 Limitações e cenários futuros: consulta por compra e quitação em grupo (H05.2), ajustes e cancelamento (H05.3) e reflexos em dashboard/fechamento/alertas (E06–E08) não implementados.
 Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H05.1.md e este arquivo.
-Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36478112853`, commit `25a2fc5`) e `npm run e2e:full-stack` aprovado com `compose.full-local.yml`.
-Próximo passo: concluir a validação acima; H05.2 não foi iniciada.
+Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36478112853`, commit `25a2fc5`) e `npm run e2e:full-stack` aprovado (atendida em 28/09/2026 numa stack equivalente, sem Docker; ver docs/evidencias/H05.1.md).
+Próximo passo: H05.2 (consultar e quitar parcelas), não iniciada.
 ```
 
 ## Registro de release: modelo
@@ -471,3 +471,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 28/09/2026 | H04.4 implementou confirmação de valores variáveis com auditoria, propagação somente para estimativas posteriores, quitação com confirmação atômica e interface. Regressão: 124 Java, 58 ITs em PostgreSQL 16 local, JaCoCo 88,60%/77,66% (unitário), PIT 76%/força 87%, 59 frontend, build e 2 smoke E2E aprovados. A CI `36455395731` (commit `34ffc3a`) aprovou 58 ITs em Testcontainers 17.6. Em validação até o E2E full-stack; H04.5 não iniciada. |
 | 28/09/2026 | H04.5 implementou alteração “este e os próximos” e encerramento de recorrências com prévia de impacto revalidada ao salvar, preservação de pagos/cancelados/confirmados/corrigidos, revisão sinalizada, auditoria e interface (V19). Regressão: 146 Java, 68 ITs em PostgreSQL 16 local, JaCoCo 91,88%/82,75%, PIT 81%/força 89%, 66 frontend, build e 3 smoke E2E aprovados. A CI `36470203451` aprovou os 68 ITs em Testcontainers 17.6. Em validação até o E2E full-stack; E04 não concluído e E05 não iniciado. |
 | 28/09/2026 | H05.1 implementou compra parcelada com prévia do servidor, centavos na última parcela, calendário mensal das recorrências, criação atômica e idempotente das parcelas n/N como despesas e interface (V20). Regressão: 178 Java, 76 ITs em PostgreSQL 16 local, JaCoCo 92,38%/83,51%, PIT 83%/força 90%, 74 frontend, build e 4 smoke E2E aprovados. A CI `36478112853` aprovou os 76 ITs em Testcontainers 17.6. Em validação até o E2E full-stack; H05.2 não iniciada. |
+| 28/09/2026 | E2E full-stack aprovado em 28/09/2026 (duas execuções seguidas, 32 s e 30 s) numa stack equivalente à `compose.full-local.yml`, sem Docker: PostgreSQL 16 com banco vazio e Flyway V1–V20 aplicado pelo modo `APP_MODE=migrate`, backend empacotado (`java -jar`) em modo runtime, Mailpit 1.27.8, frontend de produção (`ng build`) servido com proxy `/api` equivalente ao `nginx.conf`, Chromium do Playwright. A execução encontrou e corrigiu um defeito real da H04.4 (o formulário “Confirmar valor” em Recorrências recarregava a página em vez de enviar a confirmação) e duas asserções do próprio E2E. H04.4, H04.5 e H05.1 concluídas; E04 concluído. Próxima história: H05.2. |
