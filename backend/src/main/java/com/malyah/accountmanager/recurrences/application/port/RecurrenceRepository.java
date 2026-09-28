@@ -22,4 +22,20 @@ public interface RecurrenceRepository {
     List<com.malyah.accountmanager.recurrences.application.StoredOccurrence> findConfirmedCharges(UUID spaceId);
     /** Serializes a forecast confirmation with generation and other confirmations of the same recurrence. */
     void lockForChargeConfirmation(UUID spaceId, UUID recurrenceId);
+
+    /**
+     * H04.5: the definition with its segments and closure. {@code SHARE} serializes materializations with changes,
+     * {@code UPDATE} serializes changes, closures and confirmations. Throws RecurrenceNotFoundException.
+     */
+    com.malyah.accountmanager.recurrences.application.StoredSchedule loadSchedule(UUID spaceId, UUID recurrenceId,
+            com.malyah.accountmanager.recurrences.application.ScheduleLock lock);
+    List<com.malyah.accountmanager.recurrences.application.StoredSchedule> findSchedules(UUID spaceId);
+    com.malyah.accountmanager.recurrences.application.ChangeClaim claimChange(UUID spaceId, UUID actorId, UUID key,
+            String requestHash, UUID recurrenceId, Instant at);
+    void completeChange(UUID spaceId, UUID actorId, UUID key, UUID changeId, Instant at);
+    /** Persists the change event, the segments, the new header and the review flags, in the caller's transaction. */
+    void saveChange(com.malyah.accountmanager.recurrences.application.RecurrenceChangeRecord change);
+    com.malyah.accountmanager.recurrences.application.RecurrenceChangeView findChange(UUID spaceId, UUID changeId);
+    /** Applied changes and closures of the space, oldest first, grouped by recurrence. */
+    java.util.Map<UUID, List<com.malyah.accountmanager.recurrences.application.RecurrenceChangeView>> findChanges(UUID spaceId);
 }

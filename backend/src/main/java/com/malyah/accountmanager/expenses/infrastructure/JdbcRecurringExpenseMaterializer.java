@@ -34,11 +34,14 @@ public final class JdbcRecurringExpenseMaterializer implements RecurringExpenseM
             java.math.BigDecimal amount,boolean confirmed,java.time.LocalDate due,UUID categoryId,
             UUID responsibleId,UUID creatorId,java.time.Instant at) {
         var charge=confirmed?amount:referenceEstimate(recurrenceId,spaceId,amount,due);
+        // H04.5: the period is the identity, so an occurrence of the same month under another due day is reused.
         var claimed=jdbc.update("""
             insert into recurrence_occurrences(id,recurrence_id,space_id,scheduled_due_date,created_at)
-            values(?,?,?,?,?) on conflict(recurrence_id,scheduled_due_date) do nothing
+            values(?,?,?,?,?) on conflict do nothing
             """,occurrenceId,recurrenceId,spaceId,due,Timestamp.from(at));
-        if(claimed==0) return jdbc.queryForObject("select expense_id from recurrence_occurrences where recurrence_id=? and scheduled_due_date=?",UUID.class,recurrenceId,due);
+        if(claimed==0) return jdbc.queryForObject("""
+            select expense_id from recurrence_occurrences where recurrence_id=? and scheduled_month=?
+            """,UUID.class,recurrenceId,java.time.YearMonth.from(due).atDay(1));
         var expenseId=UUID.randomUUID();
         var category=eligibleCategory(spaceId,categoryId);
         var responsible=eligibleResponsible(spaceId,responsibleId);
@@ -68,7 +71,8 @@ public final class JdbcRecurringExpenseMaterializer implements RecurringExpenseM
              where o.recurrence_id=? and o.space_id=? and e.charge_confirmed=true
             """,(r,n)->new com.malyah.accountmanager.expenses.domain.VariableEstimateReference.ConfirmedCharge(
                 r.getObject(1,java.time.LocalDate.class),r.getBigDecimal(2)),recurrenceId,spaceId);
-        return com.malyah.accountmanager.expenses.domain.VariableEstimateReference.estimateFor(initial,confirmed,due);
+        var bases=RecurrenceEstimateBases.load(jdbc,recurrenceId,spaceId);
+        return bases.isEmpty()?initial:com.malyah.accountmanager.expenses.domain.VariableEstimateReference.estimateFor(bases,confirmed,due);
     }
     private UUID eligibleCategory(UUID space,UUID id){if(id==null)return null;return jdbc.query("select id from expense_categories where id=? and space_id=? and archived_at is null",(r,n)->r.getObject(1,UUID.class),id,space).stream().findFirst().orElse(null);}
     private UUID eligibleResponsible(UUID space,UUID id){if(id==null)return null;return jdbc.query("select user_id from space_memberships where user_id=? and space_id=? and active=true",(r,n)->r.getObject(1,UUID.class),id,space).stream().findFirst().orElse(null);}

@@ -47,6 +47,39 @@ class RecurrenceController {
                 request.confirmedAmount(),key));
     }
 
+    @PostMapping("/{recurrenceId}/changes/preview")
+    RecurrenceImpactView previewChange(Principal principal,@PathVariable UUID recurrenceId,
+            @Valid @RequestBody ChangeRecurrenceRequest request) {
+        return useCase.previewChange(principal.getName(),changeCommand(recurrenceId,request,null));
+    }
+
+    @PostMapping("/{recurrenceId}/changes")
+    RecurrenceChangeResult change(Principal principal,@PathVariable UUID recurrenceId,
+            @RequestHeader("Idempotency-Key") UUID key,@Valid @RequestBody ChangeRecurrenceRequest request) {
+        return useCase.change(principal.getName(),changeCommand(recurrenceId,request,key));
+    }
+
+    @PostMapping("/{recurrenceId}/closure/preview")
+    RecurrenceImpactView previewClosure(Principal principal,@PathVariable UUID recurrenceId,
+            @Valid @RequestBody CloseRecurrenceRequest request) {
+        return useCase.previewClosure(principal.getName(),closeCommand(recurrenceId,request,null));
+    }
+
+    @PostMapping("/{recurrenceId}/closure")
+    RecurrenceChangeResult close(Principal principal,@PathVariable UUID recurrenceId,
+            @RequestHeader("Idempotency-Key") UUID key,@Valid @RequestBody CloseRecurrenceRequest request) {
+        return useCase.close(principal.getName(),closeCommand(recurrenceId,request,key));
+    }
+
+    private static ChangeRecurrenceCommand changeCommand(UUID id,ChangeRecurrenceRequest r,UUID key) {
+        return new ChangeRecurrenceCommand(id,r.version(),r.effectiveDueDate(),r.description(),r.amount(),r.frequency(),
+                r.dueDay(),r.categoryId(),r.responsibleUserId(),r.impactToken(),key);
+    }
+
+    private static CloseRecurrenceCommand closeCommand(UUID id,CloseRecurrenceRequest r,UUID key) {
+        return new CloseRecurrenceCommand(id,r.version(),r.lastDueDate(),r.reason(),r.impactToken(),key);
+    }
+
     @PostMapping("/calendar-preview") List<LocalDate> preview(Principal principal,
             @Valid @RequestBody CalendarPreviewRequest request) {
         return useCase.preview(request.firstDueDate(),request.lastDueDate(),request.frequency());

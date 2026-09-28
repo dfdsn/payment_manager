@@ -1,0 +1,125 @@
+<div class="edit">
+  @if (message()) { <p class="success" role="status">{{ message() }}</p> }
+  @if (mode() === null) {
+    <div class="actions">
+      <button matButton="outlined" type="button" (click)="openChange()" [disabled]="!dates().length">Alterar a partir de um vencimento</button>
+      @if (closureDates().length) {
+        <button matButton="outlined" type="button" (click)="openClosure()">Encerrar recorrência</button>
+      }
+    </div>
+  } @else {
+    <section class="panel" [attr.aria-label]="mode() === 'change' ? 'Alterar recorrência' : 'Encerrar recorrência'">
+      @if (mode() === 'change') {
+        <h3>Alterar este e os próximos</h3>
+        <p class="hint">A alteração vale a partir do vencimento escolhido; os anteriores não mudam. Para corrigir só um lançamento,
+          use <strong>Corrigir</strong> em Despesas (antecipe a previsão antes, se ela ainda não existir).</p>
+        <p class="hint">Descrição, categoria e responsável chegam a todos os lançamentos pendentes do período, inclusive os já confirmados.
+          Valores confirmados e vencimentos corrigidos individualmente ou confirmados são preservados. Lançamentos pagos e cancelados
+          nunca são alterados.</p>
+      } @else {
+        <h3>Encerrar recorrência</h3>
+        <p class="hint">Encerrar impede novas ocorrências depois do último vencimento escolhido. Não apaga o histórico nem cancela
+          tudo: lançamentos até o término continuam como estão; depois dele, os apenas estimados saem da programação (cancelados com
+          o motivo) e os pagos, com valor confirmado ou com vencimento corrigido ficam marcados para revisão.</p>
+      }
+      @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+
+      @if (!impact()) {
+        @if (mode() === 'change') {
+          <form [formGroup]="changeForm" (ngSubmit)="review()" novalidate>
+            <label class="wide">A partir do vencimento
+              <select formControlName="effectiveDueDate" (change)="startChanged()">
+                @for (date of dates(); track date) { <option [value]="date">{{ date }}</option> }
+              </select>
+            </label>
+            <mat-form-field appearance="outline" class="wide"><mat-label>Descrição</mat-label>
+              <input matInput formControlName="description" maxlength="200">
+              <mat-error>Informe uma descrição de até 200 caracteres.</mat-error></mat-form-field>
+            <mat-form-field appearance="outline"><mat-label>{{ variable() ? 'Estimativa' : 'Valor fixo' }}</mat-label>
+              <span matTextPrefix>R$&nbsp;</span><input matInput formControlName="amount" inputmode="decimal">
+              <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error></mat-form-field>
+            <mat-form-field appearance="outline"><mat-label>Dia de vencimento</mat-label>
+              <input matInput type="number" min="1" max="31" formControlName="dueDay">
+              <mat-error>Informe um dia entre 1 e 31.</mat-error></mat-form-field>
+            <label>Frequência
+              <select formControlName="frequency">
+                <option value="MONTHLY">Mensal</option><option value="BIMONTHLY">Bimestral</option><option value="QUARTERLY">Trimestral</option>
+                <option value="SEMIANNUAL">Semestral</option><option value="ANNUAL">Anual</option>
+              </select>
+            </label>
+            <label>Categoria
+              <select formControlName="categoryId"><option value="">Sem categoria</option>
+                @for (c of categories(); track c.id) { <option [value]="c.id">{{ c.name }}</option> }
+              </select>
+            </label>
+            <label>Responsável
+              <select formControlName="responsibleUserId"><option value="">Sem responsável</option>
+                @for (m of members(); track m.userId) { <option [value]="m.userId">{{ m.displayName }}</option> }
+              </select>
+            </label>
+            @if (variable()) { <p class="hint wide">Alterar a estimativa não muda valores já confirmados; as próximas estimativas partem dela até a próxima confirmação.</p> }
+            <div class="actions wide">
+              <button matButton="filled" type="submit" [disabled]="busy()">{{ busy() ? 'Calculando…' : 'Revisar impacto' }}</button>
+              <button matButton="outlined" type="button" (click)="close()" [disabled]="busy()">Cancelar</button>
+            </div>
+          </form>
+        } @else {
+          <form [formGroup]="closureForm" (ngSubmit)="review()" novalidate>
+            <label class="wide">Último vencimento
+              <select formControlName="lastDueDate">
+                @for (date of closureDates(); track date) { <option [value]="date">{{ date }}</option> }
+              </select>
+            </label>
+            <mat-form-field appearance="outline" class="wide"><mat-label>Motivo do encerramento</mat-label>
+              <textarea matInput formControlName="reason" maxlength="2000" rows="2"></textarea>
+              <mat-error>Informe o motivo, com até 2.000 caracteres.</mat-error></mat-form-field>
+            <div class="actions wide">
+              <button matButton="filled" type="submit" [disabled]="busy()">{{ busy() ? 'Calculando…' : 'Revisar impacto' }}</button>
+              <button matButton="outlined" type="button" (click)="close()" [disabled]="busy()">Cancelar</button>
+            </div>
+          </form>
+        }
+      } @else {
+        @let i = impact()!;
+        <div class="impact" aria-live="polite">
+          <p><strong>{{ i.operation === 'CHANGE' ? 'Vale a partir de ' + i.effectiveDueDate : 'Último vencimento: ' + i.effectiveDueDate }}</strong>
+            @if (i.operation === 'CHANGE') { · campos: {{ fieldList(i.changedFields) }} }</p>
+          <p>{{ i.updatedCount }} atualizado(s) · {{ i.removedCount }} retirado(s) da programação · {{ i.reviewCount }} para revisão ·
+            {{ i.preservedCount }} preservado(s) · {{ i.forecasts.length }} previsão(ões) afetada(s)</p>
+          @if (i.occurrences.length) {
+            <ul class="effects">
+              @for (o of i.occurrences; track o.expenseId) {
+                <li [attr.data-action]="o.action">
+                  <span>{{ o.scheduledDueDate }} · R$ {{ o.amount }} · {{ reasonLabel(o) }}</span>
+                  <strong>{{ actionLabel(o.action) }}</strong>
+                  @for (c of o.changes; track c.field) {
+                    <span class="change">{{ fieldLabel(c.field) }}: {{ valueLabel(c.field, c.previousValue) }} → {{ valueLabel(c.field, c.newValue) }}</span>
+                  }
+                  @if (o.preservedFields.length) {
+                    <span class="change">Preservado: {{ fieldList(o.preservedFields) }}</span>
+                  }
+                </li>
+              }
+            </ul>
+          } @else { <p>Nenhum lançamento existente é afetado.</p> }
+          @if (i.forecasts.length) {
+            <details><summary>Previsões afetadas</summary><ul>
+              @for (f of i.forecasts; track f.month) {
+                <li>{{ f.month.slice(0, 7) }}: @switch (f.action) {
+                  @case ('REMOVED') { deixa de existir ({{ f.previousDueDate }}, R$ {{ f.previousAmount }}) }
+                  @case ('ADDED') { passa a existir ({{ f.newDueDate }}, R$ {{ f.newAmount }}) }
+                  @default { {{ f.previousDueDate }} · R$ {{ f.previousAmount }} → {{ f.newDueDate }} · R$ {{ f.newAmount }} }
+                }</li>
+              }
+            </ul></details>
+          }
+          <div class="actions">
+            <button matButton="filled" type="button" (click)="confirm()" [disabled]="busy()">
+              {{ busy() ? 'Salvando…' : (i.operation === 'CHANGE' ? 'Confirmar alteração' : 'Confirmar encerramento') }}</button>
+            <button matButton="outlined" type="button" (click)="editAgain()" [disabled]="busy()">Voltar e editar</button>
+          </div>
+        </div>
+      }
+    </section>
+  }
+</div>

@@ -29,10 +29,10 @@ class RecurrenceGenerationPostgresIT {
 
     @BeforeEach void reset(){
         var ds=new DriverManagerDataSource(POSTGRES.getJdbcUrl(),POSTGRES.getUsername(),POSTGRES.getPassword());
-        var flyway=Flyway.configure().dataSource(ds).cleanDisabled(false).load();flyway.clean();assertThat(flyway.migrate().migrationsExecuted).isEqualTo(18);
+        var flyway=Flyway.configure().dataSource(ds).cleanDisabled(false).load();flyway.clean();assertThat(flyway.migrate().migrationsExecuted).isEqualTo(19);
         jdbc=new JdbcTemplate(ds);insertSpaceAndUser();var tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         job=new JdbcRecurrenceGenerationJob(jdbc,tx,new JdbcRecurringExpenseMaterializer(jdbc,tx),
-                Clock.fixed(NOW,ZoneOffset.UTC),new RecurrenceCalendar(),Duration.ofMinutes(2),25);
+                Clock.fixed(NOW,ZoneOffset.UTC),Duration.ofMinutes(2),25);
     }
 
     @Test void generatesOnlyCurrentEligibleFixedAndVariableOccurrencesAndReplaysWithoutDuplicates(){
@@ -85,7 +85,12 @@ class RecurrenceGenerationPostgresIT {
     private UUID insertRecurrence(String description,String amount,String type,String frequency,LocalDate first,LocalDate last,UUID category,UUID responsible){var id=UUID.randomUUID();jdbc.update("""
         insert into recurrence_definitions(id,space_id,description,amount,value_type,frequency,first_due_date,base_day,last_due_date,category_id,responsible_user_id,created_by_user_id,created_at,version)
         values(?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-        """,id,SPACE,description,new java.math.BigDecimal(amount),type,frequency,first,first.getDayOfMonth(),last,category,responsible,ADMIN,Timestamp.from(NOW));return id;}
+        """,id,SPACE,description,new java.math.BigDecimal(amount),type,frequency,first,first.getDayOfMonth(),last,category,responsible,ADMIN,Timestamp.from(NOW));
+        // Since V19 every definition has its initial segment, as the application creates it.
+        jdbc.update("""
+        insert into recurrence_segments(id,recurrence_id,space_id,effective_month,base_day,frequency,description,amount,estimate_reset,category_id,responsible_user_id,created_at)
+        values(?,?,?,?,?,?,?,?,true,?,?,?)
+        """,UUID.randomUUID(),id,SPACE,first.withDayOfMonth(1),first.getDayOfMonth(),frequency,description,new java.math.BigDecimal(amount),category,responsible,Timestamp.from(NOW));return id;}
     private void insertSpaceAndUser(){jdbc.update("insert into family_spaces(id,name,currency_code,locale,time_zone,created_at) values (?, 'Casa','BRL','pt-BR','America/Sao_Paulo',?)",SPACE,Timestamp.from(NOW));jdbc.update("insert into identity_users(id,display_name,normalized_email,password_hash,email_confirmed,created_at) values (?,'Admin','admin@example.com','{test}x',true,?)",ADMIN,Timestamp.from(NOW));jdbc.update("insert into space_memberships(id,user_id,space_id,role,active,created_at) values(?,?,?,'ADMINISTRATOR',true,?)",UUID.randomUUID(),ADMIN,SPACE,Timestamp.from(NOW));}
     private UUID insertArchivedCategory(){var id=UUID.randomUUID();jdbc.update("insert into expense_categories(id,space_id,name,normalized_name,archived_at,version,created_by_user_id,created_at,updated_at) values(?,?, 'Antiga','antiga',?,1,?,?,?)",id,SPACE,Timestamp.from(NOW),ADMIN,Timestamp.from(NOW),Timestamp.from(NOW));return id;}
     private UUID insertInactiveGuest(){var id=UUID.randomUUID();jdbc.update("insert into identity_users(id,display_name,normalized_email,password_hash,email_confirmed,created_at) values (?,'Saiu','saiu@example.com','{test}x',true,?)",id,Timestamp.from(NOW));jdbc.update("insert into space_memberships(id,user_id,space_id,role,active,created_at,ended_at,ended_by_user_id,end_reason) values(?,?,?,'GUEST',false,?,?,?,'ADMIN_REMOVAL')",UUID.randomUUID(),id,SPACE,Timestamp.from(NOW),Timestamp.from(NOW),ADMIN);return id;}

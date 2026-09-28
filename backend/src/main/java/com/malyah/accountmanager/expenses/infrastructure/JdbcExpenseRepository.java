@@ -157,23 +157,26 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
                        c.old_paid_amount, c.new_paid_amount, c.old_payment_date, c.new_payment_date,
                        old_payer.display_name, new_payer.display_name,
                        c.old_category_name, c.new_category_name,
-                       c.old_responsible_name, c.new_responsible_name
+                       c.old_responsible_name, c.new_responsible_name, c.recurrence_change_id
                   from expense_correction_events c
                   join identity_users actor on actor.id=c.actor_user_id
                   left join identity_users old_payer on old_payer.id=c.old_payer_user_id
                   left join identity_users new_payer on new_payer.id=c.new_payer_user_id
                  where c.space_id=? and c.expense_id=?
                 """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
-                    "EXPENSE_CORRECTED", rs.getObject(1, UUID.class), rs.getString(2),
+                    rs.getObject(24) == null ? "EXPENSE_CORRECTED" : "RECURRENCE_CHANGE_APPLIED",
+                    rs.getObject(1, UUID.class), rs.getString(2),
                     rs.getTimestamp(3).toInstant(), null, null, rs.getLong(4), null, null, null, null,
                     rs.getString(5), null, correctionChanges(rs)), spaceId, expenseId));
         events.addAll(jdbc.query("""
-                select c.actor_user_id, actor.display_name, c.cancelled_at, c.reason, c.to_version
+                select c.actor_user_id, actor.display_name, c.cancelled_at, c.reason, c.to_version,
+                       c.recurrence_change_id
                   from expense_cancellation_events c
                   join identity_users actor on actor.id=c.actor_user_id
                  where c.space_id=? and c.expense_id=?
                 """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
-                    "EXPENSE_CANCELLED", rs.getObject(1, UUID.class), rs.getString(2),
+                    rs.getObject(6) == null ? "EXPENSE_CANCELLED" : "RECURRENCE_OCCURRENCE_REMOVED",
+                    rs.getObject(1, UUID.class), rs.getString(2),
                     rs.getTimestamp(3).toInstant(), rs.getString(4), null, rs.getLong(5), null, null, null,
                     null, null), spaceId, expenseId));
         events.addAll(jdbc.query("""
@@ -505,15 +508,15 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
                 select o.recurrence_id, o.scheduled_due_date from recurrence_occurrences o
                  where o.expense_id=? and o.space_id=?
                 """, (rs, row) -> new RecurrenceLink(rs.getObject(1, UUID.class),
-                        rs.getObject(2, java.time.LocalDate.class), null), expenseId, spaceId);
+                        rs.getObject(2, java.time.LocalDate.class), java.util.List.of()), expenseId, spaceId);
         if (links.isEmpty()) return null;
         var link = links.getFirst();
         var definition = jdbc.query("""
-                select amount, value_type from recurrence_definitions where id=? and space_id=? for no key update
-                """, (rs, row) -> "VARIABLE_ESTIMATE".equals(rs.getString(2)) ? rs.getBigDecimal(1) : null,
-                link.recurrenceId(), spaceId);
-        if (definition.isEmpty() || definition.getFirst() == null) return null;
-        return new RecurrenceLink(link.recurrenceId(), link.scheduledDueDate(), definition.getFirst());
+                select value_type from recurrence_definitions where id=? and space_id=? for no key update
+                """, (rs, row) -> "VARIABLE_ESTIMATE".equals(rs.getString(1)), link.recurrenceId(), spaceId);
+        if (definition.isEmpty() || !definition.getFirst()) return null;
+        return new RecurrenceLink(link.recurrenceId(), link.scheduledDueDate(),
+                RecurrenceEstimateBases.load(jdbc, link.recurrenceId(), spaceId));
     }
 
     /**
@@ -549,7 +552,7 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
                 arguments.toArray());
         for (var target : lockedTargets) {
             var estimate = com.malyah.accountmanager.expenses.domain.VariableEstimateReference.estimateFor(
-                    recurrence.initialEstimate(), confirmed, later.get(target.id()));
+                    recurrence.estimateBases(), confirmed, later.get(target.id()));
             if (estimate.compareTo(target.amount()) == 0) continue;
             jdbc.update("""
                     update expense_entries set charge_amount=?, version=version+1
@@ -774,7 +777,7 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
     }
 
     private record RecurrenceLink(UUID recurrenceId, java.time.LocalDate scheduledDueDate,
-            java.math.BigDecimal initialEstimate) { }
+            java.util.List<com.malyah.accountmanager.expenses.domain.VariableEstimateReference.EstimateBase> estimateBases) { }
 
     private record OccurrenceCharge(java.time.LocalDate scheduledDueDate, UUID expenseId, boolean confirmed,
             java.math.BigDecimal amount) { }

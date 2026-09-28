@@ -26,6 +26,11 @@ class ExpensesConfiguration {
         return new JdbcRecurringExpenseMaterializer(jdbcTemplate, new TransactionTemplate(transactionManager));
     }
     @Bean
+    com.malyah.accountmanager.expenses.application.RecurringOccurrenceAdjuster recurringOccurrenceAdjuster(
+            JdbcTemplate jdbcTemplate) {
+        return new JdbcRecurringOccurrenceAdjuster(jdbcTemplate);
+    }
+    @Bean
     com.malyah.accountmanager.expenses.application.AttachmentUseCase attachmentUseCase(
             JdbcTemplate jdbcTemplate, AuthenticatedUserContextQuery contextQuery,
             PlatformTransactionManager transactionManager, Clock applicationClock,

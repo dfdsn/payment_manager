@@ -13,4 +13,10 @@ public interface RecurrenceUseCase {
             java.util.UUID idempotencyKey);
     AnticipationResult confirmForecastCharge(String actorEmail, java.util.UUID recurrenceId, LocalDate scheduledDueDate,
             String confirmedAmount, java.util.UUID idempotencyKey);
+    /** H04.5: impact of a change "from this period on", without writing. */
+    RecurrenceImpactView previewChange(String actorEmail, ChangeRecurrenceCommand command);
+    RecurrenceChangeResult change(String actorEmail, ChangeRecurrenceCommand command);
+    /** H04.5: impact of ending the recurrence at a period, without writing. */
+    RecurrenceImpactView previewClosure(String actorEmail, CloseRecurrenceCommand command);
+    RecurrenceChangeResult close(String actorEmail, CloseRecurrenceCommand command);
 }

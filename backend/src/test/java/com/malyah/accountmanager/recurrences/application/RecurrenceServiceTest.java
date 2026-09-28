@@ -68,9 +68,9 @@ class RecurrenceServiceTest {
     @Test void listsOnlyTheAuthenticatedSpace() {
         var definition=new RecurrenceDefinition(ID,SPACE,"Aluguel",new BigDecimal("1000"),RecurrenceValueType.FIXED,
                 RecurrenceFrequency.MONTHLY,LocalDate.of(2027,1,10),null,null,null,ACTOR,NOW,0);
-        when(repository.findAll(SPACE)).thenReturn(List.of(new StoredRecurrence(definition,null,null,"Ana")));
+        when(repository.findSchedules(SPACE)).thenReturn(List.of(schedule(definition)));
         assertThat(service.list("ana@example.com")).singleElement().satisfies(view -> assertThat(view.description()).isEqualTo("Aluguel"));
-        verify(repository).findAll(SPACE);
+        verify(repository).findSchedules(SPACE);
     }
 
     @Test void confirmsAForecastByMaterializingTheSameOccurrenceAndConfirmingVersionZeroAtomically() {
@@ -81,8 +81,8 @@ class RecurrenceServiceTest {
                 ()->ID,new RecurrenceCalendar(),materializer,confirmation);
         var variable=definition(RecurrenceValueType.VARIABLE_ESTIMATE);
         var expense=UUID.randomUUID(); var key=UUID.randomUUID(); var due=LocalDate.of(2026,11,5);
-        when(repository.findById(SPACE,ID)).thenReturn(new StoredRecurrence(variable,null,null,"Ana"));
-        when(repository.findAll(SPACE)).thenReturn(List.of(new StoredRecurrence(variable,null,null,"Ana")));
+        when(repository.loadSchedule(eq(SPACE),eq(ID),any())).thenReturn(schedule(variable));
+        when(repository.findSchedules(SPACE)).thenReturn(List.of(schedule(variable)));
         when(repository.findOccurrences(eq(SPACE),any(),any())).thenReturn(List.of(new StoredOccurrence(ID,due,expense,
                 due,"PENDING",new BigDecimal("210.00"),true)));
         when(materializer.materializeAnticipated(any())).thenReturn(expense);
@@ -92,7 +92,7 @@ class RecurrenceServiceTest {
         var result=forecastService.confirmForecastCharge("ana@example.com",ID,due,"210",key);
 
         var order=inOrder(repository,materializer,confirmation);
-        order.verify(repository).lockForChargeConfirmation(SPACE,ID);
+        order.verify(repository).loadSchedule(SPACE,ID,ScheduleLock.UPDATE);
         order.verify(materializer).materializeAnticipated(argThat(command->command.recurrenceId().equals(ID)
                 && command.scheduledDueDate().equals(due) && !command.chargeConfirmed()));
         order.verify(confirmation).confirmCharge("ana@example.com",
@@ -110,10 +110,10 @@ class RecurrenceServiceTest {
         var forecastService=new RecurrenceService(repository,email -> new AuthenticatedUserContext(ACTOR,"Ana",email,SPACE,
                 "Casa",SpaceRole.GUEST,"BRL","pt-BR","America/Sao_Paulo"),categories,members,Clock.fixed(NOW,ZoneOffset.UTC),
                 ()->ID,new RecurrenceCalendar(),materializer,confirmation);
-        when(repository.findById(SPACE,ID)).thenReturn(new StoredRecurrence(definition(RecurrenceValueType.FIXED),null,null,"Ana"));
+        when(repository.loadSchedule(eq(SPACE),eq(ID),any())).thenReturn(schedule(definition(RecurrenceValueType.FIXED)));
         assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,LocalDate.of(2026,11,5),"10",UUID.randomUUID()))
                 .isInstanceOf(RecurrenceOccurrenceException.class).hasMessageContaining("valor estimado");
-        when(repository.findById(SPACE,ID)).thenReturn(new StoredRecurrence(definition(RecurrenceValueType.VARIABLE_ESTIMATE),null,null,"Ana"));
+        when(repository.loadSchedule(eq(SPACE),eq(ID),any())).thenReturn(schedule(definition(RecurrenceValueType.VARIABLE_ESTIMATE)));
         assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,LocalDate.of(2026,11,6),"10",UUID.randomUUID()))
                 .isInstanceOf(RecurrenceOccurrenceException.class);
         assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,LocalDate.of(2027,10,5),"10",UUID.randomUUID()))
@@ -126,7 +126,6 @@ class RecurrenceServiceTest {
                 .isInstanceOf(RecurrenceOccurrenceException.class);
         assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,null,"10",UUID.randomUUID()))
                 .isInstanceOf(RecurrenceOccurrenceException.class);
-        verify(repository,never()).lockForChargeConfirmation(any(),any());
         verifyNoInteractions(materializer,confirmation);
     }
 
@@ -135,8 +134,7 @@ class RecurrenceServiceTest {
         var fixedId=UUID.randomUUID();
         var fixed=new RecurrenceDefinition(fixedId,SPACE,"Aluguel",new BigDecimal("1000"),RecurrenceValueType.FIXED,
                 RecurrenceFrequency.MONTHLY,LocalDate.of(2026,9,5),null,null,null,ACTOR,NOW,0);
-        when(repository.findAll(SPACE)).thenReturn(List.of(new StoredRecurrence(variable,null,null,"Ana"),
-                new StoredRecurrence(fixed,null,null,"Ana")));
+        when(repository.findSchedules(SPACE)).thenReturn(List.of(schedule(variable),schedule(fixed)));
         when(repository.findOccurrences(eq(SPACE),any(),any())).thenReturn(List.of(
                 new StoredOccurrence(ID,LocalDate.of(2026,11,5),UUID.randomUUID(),LocalDate.of(2026,11,5),"PENDING",
                         new BigDecimal("195.00"),true)));
@@ -154,6 +152,13 @@ class RecurrenceServiceTest {
                 .singleElement().satisfies(o->{assertThat(o.amount()).isEqualTo("195.00");assertThat(o.state()).isEqualTo("FORECAST");});
         assertThat(occurrences).filteredOn(o->o.recurrenceId().equals(fixedId)&&o.state().equals("FORECAST"))
                 .allSatisfy(o->{assertThat(o.amount()).isEqualTo("1000.00");assertThat(o.estimated()).isFalse();});
+    }
+
+    static StoredSchedule schedule(RecurrenceDefinition d) {
+        var configuration=new RecurrenceConfiguration(d.description(),d.amount(),d.frequency(),d.firstDueDate().getDayOfMonth(),
+                d.categoryId(),d.responsibleUserId());
+        return new StoredSchedule(new StoredRecurrence(d,null,null,"Ana"),
+                List.of(new RecurrenceSegment(java.time.YearMonth.from(d.firstDueDate()),configuration,true)),List.of(),null,null,null);
     }
 
     private RecurrenceDefinition definition(RecurrenceValueType type) {

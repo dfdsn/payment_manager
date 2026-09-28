@@ -11,4 +11,12 @@ public record RecurrenceView(UUID id, String description, String amount, Recurre
         RecurrenceFrequency frequency, LocalDate firstDueDate, LocalDate lastDueDate, int baseDay,
         UUID categoryId, String categoryName, UUID responsibleUserId, String responsibleDisplayName,
         UUID createdByUserId, String createdByDisplayName, Instant createdAt, long version,
-        List<LocalDate> previewDates) { }
+        List<LocalDate> previewDates, List<LocalDate> upcomingDates, Instant closedAt, String closedByDisplayName,
+        String closureReason, List<RecurrenceSegmentView> segments, List<RecurrenceChangeView> changes) {
+    public RecurrenceView {
+        previewDates = List.copyOf(previewDates);
+        upcomingDates = List.copyOf(upcomingDates);
+        segments = List.copyOf(segments);
+        changes = List.copyOf(changes);
+    }
+}

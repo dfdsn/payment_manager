@@ -498,7 +498,9 @@ export class ExpenseComponent implements OnInit {
   historyLabel(type: string): string {
     return ({ EXPENSE_CREATED: 'Despesa cadastrada', EXPENSE_PAID: 'Quitação registrada', PAYMENT_REVERSED: 'Quitação desfeita',
       EXPENSE_CORRECTED: 'Despesa corrigida', EXPENSE_CANCELLED: 'Despesa cancelada',
-      CHARGE_CONFIRMED: 'Valor da cobrança confirmado', ESTIMATE_UPDATED: 'Estimativa atualizada por confirmação anterior' } as Record<string, string>)[type] ?? type;
+      CHARGE_CONFIRMED: 'Valor da cobrança confirmado', ESTIMATE_UPDATED: 'Estimativa atualizada por confirmação anterior',
+      RECURRENCE_CHANGE_APPLIED: 'Alterado pela recorrência (este e os próximos)',
+      RECURRENCE_OCCURRENCE_REMOVED: 'Retirado da programação da recorrência' } as Record<string, string>)[type] ?? type;
   }
 
   historyField(field: string): string {
