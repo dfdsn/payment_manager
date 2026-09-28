@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 28/09/2026.
 
-**Estado atual: H05.3 implementada e em validação (falta só a CI do PR); H05.2, H05.1, H04.4 e H04.5 concluídas; E04 concluído.** H05.3 altera parcelas pendentes por alcance, recalcula vencimentos seguintes e cancela as pendentes selecionadas com motivo e nova compra opcional com o restante, sempre depois de revisar o impacto calculado pelo servidor. Gates, 88 ITs em PostgreSQL 16 local, 6 smoke E2E e o E2E full-stack local passaram em 28/09/2026. E01, E02 e E04 estão concluídos, H03.3 mantém validação independente e E05 termina com a CI da H05.3.
+**Estado atual: H05.3 concluída; E05 concluído (H05.1–H05.3); E04 concluído.** H05.3 altera parcelas pendentes por alcance, recalcula vencimentos seguintes e cancela as pendentes selecionadas com motivo e nova compra opcional com o restante, sempre depois de revisar o impacto calculado pelo servidor. Gates, 88 ITs em PostgreSQL 16 local, 6 smoke E2E e o E2E full-stack local passaram em 28/09/2026, e a CI `36494395974` (commit `7483e3c`) aprovou os 88 ITs em Testcontainers 17.6. E01, E02, E04 e E05 estão concluídos; H03.3 mantém validação independente.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 28/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 19 de 46 concluídas; E01, E02 e E04 concluídos, E03 depende da validação final de H03.3 e E05 fecha com a CI da H05.3. |
+| Histórias | 20 de 46 concluídas; E01, E02, E04 e E05 concluídos; E03 depende da validação final de H03.3. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Confirmar a CI do PR de H05.3 e iniciar E06 (H06.1, dashboard por vencimento). Diego ainda pode responder se quer um campo informativo “data da compra” (T21), sem bloqueio. |
+| Próxima ação | Revisar e mesclar o PR #8 (H05.2 e H05.3) e iniciar E06 (H06.1, dashboard por vencimento). Diego ainda pode responder se quer um campo informativo “data da compra” (T21), sem bloqueio. |
 
 ## Estados permitidos
 
@@ -62,7 +62,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H04.5 | Alterar e encerrar recorrência | Concluído | “Este e os próximos” e encerramento com prévia de impacto, revalidação ao salvar, preservação de pagos/cancelados/confirmados/corrigidos, revisão sinalizada, auditoria e interface; V19. 146 Java, JaCoCo 91,88%/82,75%, PIT 81%, 68 ITs em PostgreSQL 16 local, 66 frontend, build e 3 smoke E2E aprovados. CI `36470203451` aprovou os 68 ITs em Testcontainers 17.6. E2E full-stack aprovado em 28/09/2026. Evidência: `docs/evidencias/H04.5.md`. |
 | H05.1 | Criar compra e parcelas | Concluído | Compra com total, 2–360 parcelas e primeiro vencimento; prévia do servidor com centavos na última parcela; criação atômica e idempotente das N despesas `INSTALLMENT` n/N; cabeçalho fora dos totais; interface `/compras-parceladas`; V20. 178 Java, JaCoCo 92,38%/83,51%, PIT 83%, 76 ITs em PostgreSQL 16 local, 74 frontend, build e 4 smoke E2E aprovados. CI `36478112853` aprovou os 76 ITs em Testcontainers 17.6. E2E full-stack aprovado em 28/09/2026. Evidência: `docs/evidencias/H05.1.md`. |
 | H05.2 | Consultar e quitar parcelas | Concluído | Lista e detalhe de compras com progresso por situação (sem saldo bancário), quitação das selecionadas pelo lote atômico de E02 e aviso contra fatura duplicada; sem migração. 186 Java, JaCoCo 92,61%/83,81%, PIT 83%, 80 ITs em PostgreSQL 16 local, 82 frontend, build, 5 smoke e E2E full-stack local aprovados. CI `36491947112` (commit `f5d9a74`) aprovou os 80 ITs em Testcontainers 17.6. Evidência: `docs/evidencias/H05.2.md`. |
-| H05.3 | Ajustar e cancelar parcelas pendentes | Em validação | Alteração de descrição, categoria, responsável e vencimento “só esta” ou “esta e as próximas pendentes” com recálculo mensal; cancelamento das pendentes selecionadas com motivo e nova compra opcional com o restante, na mesma transação; impacto revisado protegido por token; pagas preservadas; V21. 215 Java, JaCoCo 93,43%/85,36%, PIT 85%, 88 ITs em PostgreSQL 16 local, 88 frontend, build, 6 smoke e E2E full-stack local aprovados. Falta a CI do PR. Evidência: `docs/evidencias/H05.3.md`. |
+| H05.3 | Ajustar e cancelar parcelas pendentes | Concluído | Alteração de descrição, categoria, responsável e vencimento “só esta” ou “esta e as próximas pendentes” com recálculo mensal; cancelamento das pendentes selecionadas com motivo e nova compra opcional com o restante, na mesma transação; impacto revisado protegido por token; pagas preservadas; V21. 215 Java, JaCoCo 93,43%/85,36%, PIT 85%, 88 ITs em PostgreSQL 16 local, 88 frontend, build, 6 smoke e E2E full-stack local aprovados. CI `36494395974` (commit `7483e3c`) aprovou os 88 ITs em Testcontainers 17.6. Evidência: `docs/evidencias/H05.3.md`. |
 | H06.1 | Consultar dashboard por vencimento | Não iniciado | — |
 | H06.2 | Consultar pagamentos e ajustes | Não iniciado | — |
 | H06.3 | Consultar planejamento futuro integrado | Não iniciado | — |
@@ -434,7 +434,7 @@ Próximo passo: H05.3 (ajustar e cancelar parcelas pendentes).
 
 ```text
 História / objetivo: H05.3 — Ajustar e cancelar parcelas pendentes.
-Estado / responsável / data: Em validação / desenvolvimento / 28/09/2026.
+Estado / responsável / data: Concluído / desenvolvimento / 28/09/2026.
 Requisitos e critérios de aceite relacionados: H05.3 do backlog (demonstração do E05); RF-PAR-05 a RF-PAR-08; D19; instrução de Diego de 28/09/2026 (fazer H05.3 se H05.2 fechasse sem depender dele).
 Decisões e pendências aplicáveis: T23 registrada. Nenhuma decisão de Diego foi necessária; a pergunta sobre “data da compra” (T21) continua aberta e não afeta esta história.
 Branch / commit / PR: branch `claude/h04-4-confirmar-valores-variaveis-usnyyj`; commit separado do da H05.2 (`f5d9a74`) no mesmo PR #8 para `main`. Nada foi publicado ou implantado.
@@ -442,10 +442,10 @@ Arquivos e comportamento alterados: V21; módulo `installments` (domínio `Insta
 Migrações e impacto sobre dados: V21 cria `installment_purchase_changes` e `installment_change_requests`, adiciona `installment_purchases.replaces_purchase_id` e `installment_change_id` aos eventos de correção e cancelamento de despesas, com checks de origem única. Nenhum dado existente é reescrito; nenhuma migração anterior foi editada. Pagas e canceladas nunca são alteradas; `charge_amount` nunca muda.
 Testes executados: 215 unitários/HTTP/ArchUnit; 88 ITs Failsafe em PostgreSQL 16 local (8 de `InstallmentAdjustmentPostgresIT`); JaCoCo e PIT; 88 Vitest; build Angular; 6 smoke E2E; E2E full-stack local (32 s). Todos aprovados. A primeira execução full-stack revelou que o backend empacotado não subia (dois beans do tipo `InstallmentPurchaseUseCase`); corrigido, com `InstallmentsConfigurationTest` contra regressão.
 Cobertura e mutação aplicáveis: JaCoCo 1821/1949 linhas (93,43%) e 968/1134 branches (85,36%); PIT 755/885 (85%), força 92%, sem sobreviventes no módulo de parcelas; limites mantidos.
-Validação manual / integração real: sem Docker; ITs em PostgreSQL local com as mesmas classes. A CI do PR executará os ITs em Testcontainers 17.6.
+Validação manual / integração real: sem Docker; ITs em PostgreSQL local com as mesmas classes. A CI `36494395974` (commit `7483e3c`) aprovou os 88 ITs em Testcontainers `postgres:17.6-alpine` (`InstallmentAdjustmentPostgresIT` 8/8), 215 unitários, JaCoCo, PIT 85% e o job frontend.
 Limitações e cenários futuros: não há reembolso nem estorno automático (por regra); valor/quantidade só mudam por cancelamento com nova compra; dashboard, fechamento e alertas (E06–E08).
 Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H05.3.md e este arquivo.
-Condição de conclusão ou desbloqueio: CI verde no PR.
+Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36494395974` (commit `7483e3c`)).
 Próximo passo: E06 — H06.1 (consultar dashboard por vencimento).
 ```
 
@@ -511,4 +511,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 28/09/2026 | H05.1 implementou compra parcelada com prévia do servidor, centavos na última parcela, calendário mensal das recorrências, criação atômica e idempotente das parcelas n/N como despesas e interface (V20). Regressão: 178 Java, 76 ITs em PostgreSQL 16 local, JaCoCo 92,38%/83,51%, PIT 83%/força 90%, 74 frontend, build e 4 smoke E2E aprovados. A CI `36478112853` aprovou os 76 ITs em Testcontainers 17.6. Em validação até o E2E full-stack; H05.2 não iniciada. |
 | 28/09/2026 | E2E full-stack aprovado em 28/09/2026 (duas execuções seguidas, 32 s e 30 s) numa stack equivalente à `compose.full-local.yml`, sem Docker: PostgreSQL 16 com banco vazio e Flyway V1–V20 aplicado pelo modo `APP_MODE=migrate`, backend empacotado (`java -jar`) em modo runtime, Mailpit 1.27.8, frontend de produção (`ng build`) servido com proxy `/api` equivalente ao `nginx.conf`, Chromium do Playwright. A execução encontrou e corrigiu um defeito real da H04.4 (o formulário “Confirmar valor” em Recorrências recarregava a página em vez de enviar a confirmação) e duas asserções do próprio E2E. H04.4, H04.5 e H05.1 concluídas; E04 concluído. Próxima história: H05.2. |
 | 28/09/2026 | H05.2 implementou consulta de compras parceladas com progresso por situação e quitação das parcelas selecionadas pelo lote atômico de E02, sem migração. Regressão: 186 Java, 80 ITs em PostgreSQL 16 local, JaCoCo 92,61%/83,81%, PIT 83%/força 91%, 82 frontend, build, 5 smoke E2E e E2E full-stack local aprovados. CI `36491947112` aprovada; H05.2 concluída. |
-| 28/09/2026 | H05.3 implementou alteração e cancelamento de parcelas pendentes com revisão do impacto protegida por token, recálculo mensal de vencimentos, nova compra opcional com o restante na mesma transação e auditoria por parcela (V21). Regressão: 215 Java, 88 ITs em PostgreSQL 16 local, JaCoCo 93,43%/85,36%, PIT 85%/força 92%, 88 frontend, build, 6 smoke E2E e E2E full-stack local aprovados. Em validação até a CI do PR. |
+| 28/09/2026 | H05.3 implementou alteração e cancelamento de parcelas pendentes com revisão do impacto protegida por token, recálculo mensal de vencimentos, nova compra opcional com o restante na mesma transação e auditoria por parcela (V21). Regressão: 215 Java, 88 ITs em PostgreSQL 16 local, JaCoCo 93,43%/85,36%, PIT 85%/força 92%, 88 frontend, build, 6 smoke E2E e E2E full-stack local aprovados. CI `36494395974` (commit `7483e3c`) aprovada; H05.3 e E05 concluídos. |

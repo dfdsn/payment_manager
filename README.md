@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1–H04.5 e H05.1 estão concluídas, com E2E full-stack aprovado em 28/09/2026; E04 está concluído. H03.3 permanece em validação independente. H05.2 (consultar e quitar parcelas) está concluída; H05.3 (ajustar e cancelar parcelas pendentes) está implementada e em validação até a CI do PR.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1–H04.5 e H05.1 estão concluídas, com E2E full-stack aprovado em 28/09/2026; E04 está concluído. H03.3 permanece em validação independente. H05.2 e H05.3 estão concluídas, fechando o E05 (compras parceladas), com CI aprovada em 28/09/2026.
 
 ## Anexos privados (H03.3)
 
