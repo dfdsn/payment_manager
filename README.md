@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (ambas em validação; veja `docs/progresso.md`).
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (ambas em validação; veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas (em validação).
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V14 cobrem identidade, despesas e organização; V15 adiciona definições de recorrência, idempotência e auditoria, sem materializar lançamentos; V16–V17 cobrem geração e antecipação; V18 adiciona a auditoria de confirmação de valores variáveis.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V14 cobrem identidade, despesas e organização; V15 adiciona definições de recorrência, idempotência e auditoria, sem materializar lançamentos; V16–V17 cobrem geração e antecipação; V18 adiciona a auditoria de confirmação de valores variáveis; V19, alteração e encerramento de recorrências; V20, compras parceladas e a origem `INSTALLMENT` das parcelas.
 
 ## Pré-requisitos
 
@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.3 está concluída e H04.4 está em validação (falta o E2E full-stack com Docker; a CI já aprovou os ITs em PostgreSQL 17.6). H03.3 permanece em validação independente. H04.5 está implementada e em validação pelo mesmo motivo (E2E full-stack não executado). E04 só termina quando H04.4 e H04.5 forem concluídas; o próximo épico não foi iniciado.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.3 está concluída e H04.4 está em validação (falta o E2E full-stack com Docker; a CI já aprovou os ITs em PostgreSQL 17.6). H03.3 permanece em validação independente. H04.5 está implementada e em validação pelo mesmo motivo (E2E full-stack não executado). E04 só termina quando H04.4 e H04.5 forem concluídas. H05.1 (criar compra e parcelas) está implementada, com CI aprovada, e em validação pelo mesmo motivo; H05.2 não foi iniciada.
 
 ## Anexos privados (H03.3)
 
@@ -573,3 +573,69 @@ Teste manual:
 5. Clique **Encerrar recorrência**, escolha um último vencimento, informe o motivo e revise. Os lançamentos estimados posteriores aparecem como “Sai da programação”, os pagos/confirmados como “Mantido para revisão”. Confirme: o cartão mostra o encerramento, as previsões param no último período e **Ver histórico** da despesa cancelada mostra o motivo.
 
 Os reflexos em relatórios, fechamentos e notificações serão implementados em E06–E08; o contrato preparado é o histórico `recurrence_change_events`, o `reviewReason` das previsões e os novos eventos de despesa.
+
+## Criar compra parcelada (H05.1)
+
+Em `/compras-parceladas` (link **Compras parceladas** em Despesas), administrador ou convidado ativo informa descrição, **valor total final**, quantidade de parcelas (2 a 360), **vencimento da primeira parcela** e, opcionalmente, categoria e responsável. **Revisar parcelas** pede o cálculo ao backend e mostra total, quantidade, valor regular, última parcela, período de vencimentos, soma e a tabela n/N. **Confirmar e criar N parcelas** envia exatamente os dados revisados; o backend recalcula e revalida tudo ao salvar. Editar qualquer campo depois da revisão descarta a prévia.
+
+Relação compra ↔ parcelas:
+
+- A compra fica em `installment_purchases` (cabeçalho com total, quantidade, primeiro vencimento, categoria, responsável, autor e instante). O cabeçalho **não é despesa** e não entra em nenhum total.
+- Todas as N parcelas são criadas na mesma transação como lançamentos pendentes em `expense_entries`, com `origin = INSTALLMENT`, `installment_purchase_id`, `installment_number` (1..N) e `installment_count` (N). Constraints garantem numeração única por compra e 1 ≤ n ≤ N ≤ 360. A compra é finita: não é recorrência e termina na parcela N, sem depender do horizonte de previsões.
+- Cada parcela aparece em Despesas como “Parcela n/N · compra parcelada”, com vencimento, quitação e histórico próprios (regras de E02). A correção individual pode mudar descrição, vencimento, categoria, responsável e observações, mas não o valor: o valor da parcela é definido pela compra (mudar total ou quantidade será cancelar pendentes e cadastrar nova compra, H05.3).
+
+Cálculo dos valores (em centavos inteiros, sem ponto flutuante nem arredondamento por parcela): `regular = floor(total / N)`; as parcelas 1..N−1 recebem `regular`; a última recebe `regular + (total − regular × N)`. A soma é sempre exatamente o total. Sem juros, entrada ou tarifas: o total informado já é o valor final.
+
+| Total | N | Parcelas | Ajuste na última |
+|---|---|---|---|
+| R$ 1.200,00 | 12 | 12 × 100,00 | 0,00 |
+| R$ 100,00 | 3 | 33,33 · 33,33 · **33,34** | 0,01 |
+| R$ 1.000,00 | 7 | 6 × 142,85 · **142,90** | 0,05 |
+| R$ 0,02 | 2 | 0,01 · 0,01 | 0,00 |
+| R$ 0,01 | 2 | recusado: não há R$ 0,01 para cada parcela | — |
+| R$ 99.999.999,99 | 360 | 359 × 277.777,77 · **277.780,56** | 2,79 |
+
+Limites: total entre R$ 0,01 e R$ 99.999.999,99 com até duas casas; 2 a 360 parcelas; total ≥ N × R$ 0,01.
+
+Calendário: parcelas mensais a partir do primeiro vencimento, reutilizando a regra mensal das recorrências. O dia do primeiro vencimento é o dia de referência de todas as parcelas; em meses curtos usa-se o último dia do mês, sem deslocar as seguintes. Não há ajuste para fim de semana ou feriado.
+
+| Primeiro vencimento | Vencimentos seguintes |
+|---|---|
+| 31/01/2027 | 28/02/2027, 31/03/2027, 30/04/2027 |
+| 30/11/2027 | 30/12/2027, 30/01/2028, 29/02/2028 (bissexto), 30/03/2028 |
+| 15/12/2026 | 15/01/2027, 15/02/2027 (virada de ano) |
+
+Não há campo “data da compra”: a documentação aprovada define só o primeiro vencimento (decisão T21). Vencimentos passados são aceitos; parcelas já vencidas aparecem como atrasadas.
+
+Garantias: compra, parcelas e evento `PURCHASE_CREATED` são gravados numa única transação (qualquer falha desfaz tudo). `Idempotency-Key` é obrigatório e vale por espaço e autor: repetir com o mesmo conteúdo devolve a mesma compra (`200`, sem nova parcela nem auditoria), inclusive com pedidos simultâneos; reutilizar a chave com outro conteúdo retorna `409 IDEMPOTENCY_CONFLICT`. Categoria e responsável são validados no backend para o espaço do autor.
+
+```text
+POST /api/v1/installment-purchases/preview
+{"description": "Sofá", "totalAmount": "100.00", "installmentCount": 3, "firstDueDate": "2027-01-31",
+ "categoryId": null, "responsibleUserId": null}
+→ 200 {"regularAmount": "33.33", "lastAmount": "33.34", "lastInstallmentAdjustment": "0.01",
+       "installmentsSum": "100.00", "lastDueDate": "2027-03-31", "installments": [...]}
+
+POST /api/v1/installment-purchases  Idempotency-Key: <UUID>
+{ ...o mesmo corpo revisado... }
+→ 201 Location: /api/v1/installment-purchases/<id>   (repetição: 200 com a mesma compra)
+```
+
+Erros: `400 INSTALLMENT_VALIDATION` com `field` (`description`, `totalAmount`, `installmentCount`, `firstDueDate`, `responsibleUserId`, `Idempotency-Key`); `400 CATEGORY_NOT_SELECTABLE` (categoria arquivada ou de outro espaço); `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`; `409 IDEMPOTENCY_CONFLICT`.
+
+Teste manual de divisão não exata:
+
+1. Entre, abra **Despesas → Compras parceladas**.
+2. Informe “Sofá”, valor total `100,00`, `3` parcelas e primeiro vencimento `31/01/2027`; clique **Revisar parcelas**.
+3. Confira: parcelas 1/3 e 2/3 de R$ 33,33 em 31/01/2027 e 28/02/2027, 3/3 de R$ 33,34 em 31/03/2027, soma R$ 100,00 e o aviso “A última parcela tem R$ 0.01 a mais”.
+4. Mude a quantidade para 4: a prévia some. Volte para 3, revise de novo e clique **Confirmar e criar 3 parcelas**.
+5. Clique **Ver parcelas em Despesas**, busque “Sofá” e aplique os filtros: aparecem “Parcela 1/3”, “2/3” e “3/3”, pendentes. Em **Corrigir** de uma delas, o valor é somente leitura.
+6. Tente `0,01` com 2 parcelas: a revisão mostra “Valor total: O valor total não permite 2 parcelas de pelo menos R$ 0,01.”
+
+Testes da compra parcelada (Windows; em Linux, `./mvnw verify -Dit.test=InstallmentPurchasePostgresIT,ExpensePostgresIT,FlywayPostgresIT`):
+
+```powershell
+backend\scripts\run-integration-tests.ps1 -Tests InstallmentPurchasePostgresIT,ExpensePostgresIT,FlywayPostgresIT
+```
+
+Consulta específica por compra e quitação de várias parcelas (H05.2), ajustes e cancelamentos (H05.3) ainda não foram implementados.

@@ -281,7 +281,7 @@ public final class ExpenseService {
                 expense.responsibleDisplayName(), expense.notes(), expense.createdByUserId(),
                 expense.createdByDisplayName(), expense.paidByUserId(), expense.paidByDisplayName(),
                 expense.createdAt(), expense.version(), expense.paymentAudit(), history, expense.chargeConfirmed(),
-                chargeConfirmation(expense.chargeConfirmation()));
+                chargeConfirmation(expense.chargeConfirmation()), expense.installment());
     }
 
     private ChargeConfirmationView chargeConfirmation(ChargeConfirmationAudit audit) {

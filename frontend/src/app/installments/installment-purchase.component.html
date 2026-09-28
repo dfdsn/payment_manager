@@ -1,0 +1,37 @@
+<section aria-labelledby="installment-title" class="page-shell">
+  <header><div><h1 id="installment-title">Compras parceladas</h1><p>Informe a compra, revise as parcelas calculadas pelo servidor e confirme. Cada parcela vira um lançamento pendente em Despesas; a compra em si não é somada como despesa.</p></div><a routerLink="/despesas">Voltar às despesas</a></header>
+  <mat-card appearance="outlined"><mat-card-header><mat-card-title>Nova compra parcelada</mat-card-title><mat-card-subtitle>O primeiro vencimento fixa o dia das parcelas mensais. Sem juros, entrada, tarifas ou ajuste para dia útil.</mat-card-subtitle></mat-card-header><mat-card-content>
+    <form [formGroup]="form" (ngSubmit)="review()" novalidate>
+      @if(error()){<p class="error wide" role="alert">{{error()}}</p>}
+      <mat-form-field appearance="outline" class="wide"><mat-label>Descrição</mat-label><input matInput formControlName="description" maxlength="200"><mat-error>Informe a descrição com até 200 caracteres.</mat-error></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>Valor total</mat-label><span matTextPrefix>R$&nbsp;</span><input matInput formControlName="totalAmount" inputmode="decimal"><mat-error>Informe um valor com até duas casas decimais.</mat-error></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>Quantidade de parcelas</mat-label><input matInput type="number" min="2" max="360" formControlName="installmentCount"><mat-error>Informe de 2 a 360 parcelas.</mat-error></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>Vencimento da primeira parcela</mat-label><input matInput type="date" formControlName="firstDueDate"><mat-error>Informe o vencimento da primeira parcela.</mat-error></mat-form-field>
+      <label>Categoria (opcional)<select formControlName="categoryId"><option value="">Sem categoria</option>@for(c of categories();track c.id){<option [value]="c.id">{{c.name}}</option>}</select></label>
+      <label>Responsável (opcional)<select formControlName="responsibleUserId"><option value="">Sem responsável</option>@for(m of members();track m.userId){<option [value]="m.userId">{{m.displayName}}</option>}</select></label>
+      <p class="hint">Os centavos que sobram da divisão ficam na última parcela. Datas passadas são aceitas; parcelas já vencidas aparecem como atrasadas.</p>
+      <div class="actions"><button matButton="filled" type="submit" [disabled]="previewing()||submitting()">{{previewing()?'Calculando…':'Revisar parcelas'}}</button></div>
+    </form>
+  </mat-card-content></mat-card>
+
+  @if(preview(); as p){
+  <mat-card appearance="outlined" aria-labelledby="review-title"><mat-card-header><mat-card-title id="review-title">Revise antes de confirmar</mat-card-title><mat-card-subtitle>{{p.description}}</mat-card-subtitle></mat-card-header><mat-card-content>
+    <dl class="summary">
+      <div><dt>Total</dt><dd>R$ {{p.totalAmount}}</dd></div>
+      <div><dt>Parcelas</dt><dd>{{p.installmentCount}}×</dd></div>
+      <div><dt>Valor das parcelas</dt><dd>R$ {{p.regularAmount}}</dd></div>
+      <div><dt>Última parcela</dt><dd>R$ {{p.lastAmount}}</dd></div>
+      <div><dt>Vencimentos</dt><dd>{{p.firstDueDate}} a {{p.lastDueDate}}</dd></div>
+      <div><dt>Soma das parcelas</dt><dd>R$ {{p.installmentsSum}}</dd></div>
+    </dl>
+    @if(hasAdjustment(p)){<p class="adjustment" role="note">A última parcela tem R$ {{p.lastInstallmentAdjustment}} a mais para que a soma seja exatamente R$ {{p.totalAmount}}.</p>}
+    @else{<p role="note">Divisão exata: todas as parcelas têm o mesmo valor.</p>}
+    <div class="table-wrap"><table><caption class="hint">Parcelas calculadas pelo servidor</caption><thead><tr><th scope="col">Parcela</th><th scope="col">Vencimento</th><th scope="col" class="amount">Valor</th></tr></thead><tbody>
+      @for(i of p.installments;track i.number){<tr [class.last]="i.number===i.count"><td>{{i.number}}/{{i.count}}</td><td>{{i.dueDate}}</td><td class="amount">R$ {{i.amount}}</td></tr>}
+    </tbody></table></div>
+    <div class="actions"><button matButton="filled" type="button" (click)="confirm()" [disabled]="submitting()">{{submitting()?'Criando…':'Confirmar e criar '+p.installmentCount+' parcelas'}}</button></div>
+  </mat-card-content></mat-card>}
+
+  @if(created(); as c){
+  <p class="success" role="status">Compra “{{c.description}}” criada com {{c.installmentCount}} parcelas pendentes, de {{c.firstDueDate}} a {{c.lastDueDate}}, somando R$ {{c.installmentsSum}}. <a routerLink="/despesas">Ver parcelas em Despesas</a>.</p>}
+</section>

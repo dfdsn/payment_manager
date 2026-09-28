@@ -13,6 +13,7 @@ export const routes: Routes = [
   { path: 'despesas', loadComponent: () => import('./expenses/expense.component').then(module => module.ExpenseComponent) },
   { path: 'categorias', loadComponent: () => import('./expenses/category.component').then(module => module.CategoryComponent) },
   { path: 'recorrencias', loadComponent: () => import('./recurrences/recurrence.component').then(module => module.RecurrenceComponent) },
+  { path: 'compras-parceladas', loadComponent: () => import('./installments/installment-purchase.component').then(module => module.InstallmentPurchaseComponent) },
   { path: 'aceitar-convite', component: InvitationComponent, data: { mode: 'accept' } },
   { path: 'configuracao-inicial', component: InitialSetupComponent },
   { path: '**', redirectTo: 'entrar' },

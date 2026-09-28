@@ -1127,6 +1127,64 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: '`RECURRENCE_NOT_FOUND`.' }
         '409': { description: '`RECURRENCE_VERSION_CONFLICT`, `RECURRENCE_IMPACT_CHANGED` ou `IDEMPOTENCY_CONFLICT`.' }
+  /installment-purchases/preview:
+    post:
+      summary: Calcula as parcelas de uma compra sem gravar (H05.1)
+      description: >-
+        Valida descrição, total, quantidade, primeiro vencimento, categoria e responsável e devolve o cálculo do
+        servidor: valores em centavos inteiros com a diferença na última parcela e vencimentos mensais pela regra do
+        dia de referência. Nada é gravado; a criação recalcula e revalida tudo.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPurchaseRequest' } } }
+      responses:
+        '200':
+          description: Prévia calculada
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPreview' } } }
+        '400':
+          description: >-
+            `INSTALLMENT_VALIDATION` (com `field`: description, totalAmount, installmentCount, firstDueDate,
+            responsibleUserId) ou `CATEGORY_NOT_SELECTABLE`.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+  /installment-purchases:
+    post:
+      summary: Cria a compra parcelada e todas as parcelas (H05.1)
+      description: >-
+        Grava numa transação o cabeçalho da compra (que não é despesa), as N parcelas como despesas pendentes com
+        origem `INSTALLMENT` e identificação n/N, e o evento `PURCHASE_CREATED`. A chave vale por espaço e autor:
+        a mesma chave com o mesmo conteúdo devolve a compra original sem duplicar parcelas nem auditoria, inclusive
+        sob concorrência.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPurchaseRequest' } } }
+      responses:
+        '201':
+          description: Compra e parcelas criadas
+          headers:
+            Location: { schema: { type: string }, description: '/api/v1/installment-purchases/{id}' }
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPurchase' } } }
+        '200':
+          description: Repetição idempotente; devolve a compra original.
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPurchase' } } }
+        '400':
+          description: >-
+            `INSTALLMENT_VALIDATION` (inclusive `field: Idempotency-Key` quando ausente) ou `CATEGORY_NOT_SELECTABLE`.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+        '409': { description: '`IDEMPOTENCY_CONFLICT`: a chave já foi usada com outros dados.' }
 components:
   securitySchemes:
     sessionCookie:
@@ -1573,6 +1631,67 @@ components:
       properties:
         version: { type: integer, format: int64, minimum: 0 }
         reason: { type: string, minLength: 1, maxLength: 2000 }
+    InstallmentPurchaseRequest:
+      type: object
+      required: [description, totalAmount, installmentCount, firstDueDate]
+      properties:
+        description: { type: string, minLength: 1, maxLength: 200 }
+        totalAmount:
+          type: string
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          description: Valor final da compra (já com juros, se houver), de 0.01 a 99999999.99 e ao menos 0.01 por parcela.
+        installmentCount: { type: integer, minimum: 2, maximum: 360 }
+        firstDueDate:
+          type: string
+          format: date
+          description: Vencimento da primeira parcela; o dia é a referência mensal. Datas passadas são aceitas.
+        categoryId: { type: [string, "null"], format: uuid }
+        responsibleUserId: { type: [string, "null"], format: uuid }
+    InstallmentView:
+      type: object
+      required: [number, count, amount, dueDate]
+      properties:
+        number: { type: integer, minimum: 1 }
+        count: { type: integer, minimum: 2, maximum: 360 }
+        amount: { type: string, pattern: '^\d+\.\d{2}$' }
+        dueDate: { type: string, format: date }
+        expenseId: { type: [string, "null"], format: uuid, description: Nulo na prévia. }
+        status: { type: [string, "null"], enum: [PENDING, PAID, CANCELLED, null], description: Nulo na prévia. }
+    InstallmentPreview:
+      type: object
+      required: [description, totalAmount, installmentCount, firstDueDate, lastDueDate, regularAmount, lastAmount,
+        lastInstallmentAdjustment, installmentsSum, installments]
+      properties:
+        description: { type: string }
+        totalAmount: { type: string }
+        installmentCount: { type: integer }
+        firstDueDate: { type: string, format: date }
+        lastDueDate: { type: string, format: date }
+        regularAmount: { type: string, description: Valor das parcelas 1..N-1. }
+        lastAmount: { type: string, description: Valor da parcela N (regular + centavos restantes). }
+        lastInstallmentAdjustment: { type: string, description: 'lastAmount - regularAmount; "0.00" em divisão exata.' }
+        installmentsSum: { type: string, description: Sempre igual a totalAmount. }
+        installments: { type: array, items: { $ref: '#/components/schemas/InstallmentView' } }
+    InstallmentPurchase:
+      type: object
+      required: [id, description, totalAmount, installmentCount, firstDueDate, lastDueDate, createdByUserId,
+        createdByDisplayName, createdAt, installmentsSum, installments]
+      properties:
+        id: { type: string, format: uuid }
+        description: { type: string }
+        totalAmount: { type: string }
+        installmentCount: { type: integer }
+        firstDueDate: { type: string, format: date }
+        lastDueDate: { type: string, format: date }
+        categoryId: { type: [string, "null"], format: uuid }
+        categoryName: { type: [string, "null"] }
+        responsibleUserId: { type: [string, "null"], format: uuid }
+        responsibleDisplayName: { type: [string, "null"] }
+        createdByUserId: { type: string, format: uuid }
+        createdByDisplayName: { type: string }
+        createdAt: { type: string, format: date-time }
+        installmentsSum: { type: string }
+        installments: { type: array, items: { $ref: '#/components/schemas/InstallmentView' } }
     Expense:
       type: object
       required: [id, origin, chargeConfirmed, description, amount, currency, status, referenceDate, overdue,
@@ -1581,8 +1700,17 @@ components:
         id: { type: string, format: uuid }
         origin:
           type: string
-          enum: [ONE_OFF, RECURRENCE]
-          description: Origem avulsa ou ocorrência materializada de uma recorrência.
+          enum: [ONE_OFF, RECURRENCE, INSTALLMENT]
+          description: Origem avulsa, ocorrência materializada de uma recorrência ou parcela de compra parcelada (H05.1).
+        installment:
+          type: [object, "null"]
+          description: >-
+            Somente para `INSTALLMENT`: compra de origem e posição n/N. O valor da parcela não muda por correção
+            individual (`400` com `field: amount`).
+          properties:
+            purchaseId: { type: string, format: uuid }
+            number: { type: integer, minimum: 1 }
+            count: { type: integer, minimum: 2, maximum: 360 }
         chargeConfirmed:
           type: boolean
           description: >-
