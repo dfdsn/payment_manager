@@ -360,7 +360,8 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await variableCard.getByRole('button', { name: 'Revisar impacto' }).click();
   await variableCard.getByRole('button', { name: 'Confirmar encerramento' }).click();
   await expect(variableCard.getByText(/Encerrada: último vencimento/)).toBeVisible();
-  await expect(variableCard.getByText(/Troca de fornecedor/)).toBeVisible();
+  // The reason appears in the closure notice and again in the change history.
+  await expect(variableCard.locator('p.closed')).toContainText('motivo: Troca de fornecedor');
 
   // H05.1: installment purchase reviewed through the backend preview, then materialized as n/N entries.
   await page.goto('/compras-parceladas');
@@ -375,6 +376,9 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByText(/criada com 3 parcelas pendentes, de 2027-01-31 a 2027-03-31, somando R\$ 100\.00/)).toBeVisible();
   await page.getByRole('link', { name: 'Ver parcelas em Despesas' }).click();
   await page.getByLabel('Buscar na descrição').fill('Sofá parcelado');
+  // Without dates the list shows only the current month (H03.4); the installments fall in 2027.
+  await page.getByLabel('Data inicial').fill('2027-01-01');
+  await page.getByLabel('Data final').fill('2027-03-31');
   await page.getByRole('button', { name: 'Aplicar filtros' }).click();
   await expect(page.getByText('Parcela 1/3 · compra parcelada')).toBeVisible();
   await expect(page.getByText('Parcela 3/3 · compra parcelada')).toBeVisible();

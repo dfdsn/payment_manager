@@ -105,4 +105,24 @@ describe('RecurrenceComponent', () => {
     expect(component.reviewLabel({ ...item, reviewReason: 'OUTSIDE_SCHEDULE' })).toContain('fora da nova programação');
     expect(component.reviewLabel({ ...item, reviewReason: null })).toBeNull();
   });
+  it('submits the forecast confirmation through the form instead of reloading the page', () => {
+    const component = fixture.componentInstance;
+    const item = { recurrenceId: 'rec-1', description: 'Energia', amount: '180.00', estimated: true,
+      scheduledDueDate: '2026-11-10', state: 'FORECAST' as const, expenseId: null, actualDueDate: null,
+      expenseStatus: null, chargeConfirmed: false };
+    api.confirmForecastCharge.mockReturnValueOnce(of({ occurrence: { ...item, state: 'MATERIALIZED', amount: '201.00',
+      expenseId: 'expense-7', chargeConfirmed: true }, replayed: false }));
+    component.forecasts.set([item]);
+    component.openConfirm(item);
+    fixture.detectChanges();
+    const form = fixture.nativeElement.querySelector('form.forecast-confirm') as HTMLFormElement;
+    const input = form.querySelector('input') as HTMLInputElement;
+    input.value = '201,00';
+    input.dispatchEvent(new Event('input'));
+    const submit = new Event('submit', { cancelable: true });
+    form.dispatchEvent(submit);
+    expect(submit.defaultPrevented).toBe(true);
+    expect(api.confirmForecastCharge).toHaveBeenCalledWith(item, '201.00', 'key');
+    expect(component.message()).toContain('confirmado em R$ 201.00');
+  });
 });

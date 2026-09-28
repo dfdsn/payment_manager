@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (ambas em validação; veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas (em validação).
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.3 está concluída e H04.4 está em validação (falta o E2E full-stack com Docker; a CI já aprovou os ITs em PostgreSQL 17.6). H03.3 permanece em validação independente. H04.5 está implementada e em validação pelo mesmo motivo (E2E full-stack não executado). E04 só termina quando H04.4 e H04.5 forem concluídas. H05.1 (criar compra e parcelas) está implementada, com CI aprovada, e em validação pelo mesmo motivo; H05.2 não foi iniciada.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1–H04.5 e H05.1 estão concluídas, com E2E full-stack aprovado em 28/09/2026; E04 está concluído. H03.3 permanece em validação independente. A próxima história é H05.2, não iniciada.
 
 ## Anexos privados (H03.3)
 
@@ -629,7 +629,7 @@ Teste manual de divisão não exata:
 2. Informe “Sofá”, valor total `100,00`, `3` parcelas e primeiro vencimento `31/01/2027`; clique **Revisar parcelas**.
 3. Confira: parcelas 1/3 e 2/3 de R$ 33,33 em 31/01/2027 e 28/02/2027, 3/3 de R$ 33,34 em 31/03/2027, soma R$ 100,00 e o aviso “A última parcela tem R$ 0.01 a mais”.
 4. Mude a quantidade para 4: a prévia some. Volte para 3, revise de novo e clique **Confirmar e criar 3 parcelas**.
-5. Clique **Ver parcelas em Despesas**, busque “Sofá” e aplique os filtros: aparecem “Parcela 1/3”, “2/3” e “3/3”, pendentes. Em **Corrigir** de uma delas, o valor é somente leitura.
+5. Clique **Ver parcelas em Despesas**, busque “Sofá”, informe o período de 01/01/2027 a 31/03/2027 (sem datas a lista mostra só o mês atual) e aplique os filtros: aparecem “Parcela 1/3”, “2/3” e “3/3”, pendentes. Em **Corrigir** de uma delas, o valor é somente leitura.
 6. Tente `0,01` com 2 parcelas: a revisão mostra “Valor total: O valor total não permite 2 parcelas de pelo menos R$ 0,01.”
 
 Testes da compra parcelada (Windows; em Linux, `./mvnw verify -Dit.test=InstallmentPurchasePostgresIT,ExpensePostgresIT,FlywayPostgresIT`):
