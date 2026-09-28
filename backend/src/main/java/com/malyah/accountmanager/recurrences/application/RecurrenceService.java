@@ -21,6 +21,9 @@ import java.util.UUID;
 import com.malyah.accountmanager.expenses.application.port.CategoryRepository;
 import com.malyah.accountmanager.expenses.application.AnticipatedRecurringExpenseCommand;
 import com.malyah.accountmanager.expenses.application.RecurringExpenseMaterializer;
+import com.malyah.accountmanager.expenses.application.ChargeConfirmationUseCase;
+import com.malyah.accountmanager.expenses.application.ConfirmChargeCommand;
+import com.malyah.accountmanager.expenses.domain.VariableEstimateReference;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.identity.application.FinancialMemberAccess;
 import com.malyah.accountmanager.recurrences.application.port.RecurrenceRepository;
@@ -38,14 +41,22 @@ public final class RecurrenceService implements RecurrenceUseCase {
     private final java.util.function.Supplier<UUID> identifiers;
     private final RecurrenceCalendar calendar;
     private final RecurringExpenseMaterializer materializer;
+    private final ChargeConfirmationUseCase chargeConfirmation;
+
+    public RecurrenceService(RecurrenceRepository repository, AuthenticatedUserContextQuery context,
+            CategoryRepository categories, FinancialMemberAccess members, Clock clock,
+            java.util.function.Supplier<UUID> identifiers, RecurrenceCalendar calendar,
+            RecurringExpenseMaterializer materializer, ChargeConfirmationUseCase chargeConfirmation) {
+        this.repository = repository; this.context = context; this.categories = categories;
+        this.members = members; this.clock = clock; this.identifiers = identifiers; this.calendar = calendar;
+        this.materializer = materializer; this.chargeConfirmation = chargeConfirmation;
+    }
 
     public RecurrenceService(RecurrenceRepository repository, AuthenticatedUserContextQuery context,
             CategoryRepository categories, FinancialMemberAccess members, Clock clock,
             java.util.function.Supplier<UUID> identifiers, RecurrenceCalendar calendar,
             RecurringExpenseMaterializer materializer) {
-        this.repository = repository; this.context = context; this.categories = categories;
-        this.members = members; this.clock = clock; this.identifiers = identifiers; this.calendar = calendar;
-        this.materializer = materializer;
+        this(repository, context, categories, members, clock, identifiers, calendar, materializer, null);
     }
 
     @Override
@@ -84,6 +95,41 @@ public final class RecurrenceService implements RecurrenceUseCase {
             throw new RecurrenceOccurrenceException("Informe a recorrência, o vencimento previsto e a chave de repetição.");
         var actor=context.findByEmail(actorEmail);
         members.requireActiveParticipants(actor.spaceId(),actor.userId(),null);
+        var d=scheduledOccurrence(actor,recurrenceId,scheduledDueDate);
+        var claim=repository.claimAnticipation(actor.spaceId(),actor.userId(),recurrenceId,scheduledDueDate,
+                idempotencyKey,fingerprint(recurrenceId,scheduledDueDate),clock.instant());
+        UUID expenseId=claim.expenseId();
+        if(!claim.replayed()) {
+            expenseId=materialize(actor.spaceId(),actor.userId(),d,scheduledDueDate);
+            repository.completeAnticipation(actor.spaceId(),actor.userId(),idempotencyKey,expenseId,clock.instant());
+        }
+        return new AnticipationResult(reconciled(actor.spaceId(),recurrenceId,scheduledDueDate),claim.replayed());
+    }
+
+    /**
+     * H04.4: confirming a forecast reuses the anticipation materialization (same occurrence identity) and then the
+     * expense confirmation contract, atomically. The forecast was seen unmaterialized, so version 0 is expected.
+     */
+    @Override public AnticipationResult confirmForecastCharge(String actorEmail,UUID recurrenceId,
+            LocalDate scheduledDueDate,String confirmedAmount,UUID idempotencyKey) {
+        if(recurrenceId==null||scheduledDueDate==null||idempotencyKey==null)
+            throw new RecurrenceOccurrenceException("Informe a recorrência, o vencimento previsto e a chave de repetição.");
+        Objects.requireNonNull(chargeConfirmation,"chargeConfirmation");
+        var actor=context.findByEmail(actorEmail);
+        members.requireActiveParticipants(actor.spaceId(),actor.userId(),null);
+        var d=scheduledOccurrence(actor,recurrenceId,scheduledDueDate);
+        if(d.valueType()!=com.malyah.accountmanager.recurrences.domain.RecurrenceValueType.VARIABLE_ESTIMATE)
+            throw new RecurrenceOccurrenceException("Somente recorrências de valor estimado têm valor a confirmar.");
+        repository.lockForChargeConfirmation(actor.spaceId(),recurrenceId);
+        var expenseId=materialize(actor.spaceId(),actor.userId(),d,scheduledDueDate);
+        var result=chargeConfirmation.confirmCharge(actorEmail,
+                new ConfirmChargeCommand(expenseId,0,confirmedAmount,idempotencyKey));
+        return new AnticipationResult(reconciled(actor.spaceId(),recurrenceId,scheduledDueDate),result.replayed());
+    }
+
+    private RecurrenceDefinition scheduledOccurrence(
+            com.malyah.accountmanager.identity.application.AuthenticatedUserContext actor,UUID recurrenceId,
+            LocalDate scheduledDueDate) {
         var current=YearMonth.now(clock.withZone(ZoneId.of(actor.timeZone())));
         var month=YearMonth.from(scheduledDueDate);
         if(month.isBefore(current)||month.isAfter(current.plusMonths(12)))
@@ -97,34 +143,41 @@ public final class RecurrenceService implements RecurrenceUseCase {
         var expected=calendar.occurrenceInMonth(d.firstDueDate(),d.lastDueDate(),d.frequency(),month);
         if(expected.isEmpty()||!expected.get().equals(scheduledDueDate))
             throw new RecurrenceOccurrenceException("A data não corresponde ao calendário atual da recorrência.");
-        var claim=repository.claimAnticipation(actor.spaceId(),actor.userId(),recurrenceId,scheduledDueDate,
-                idempotencyKey,fingerprint(recurrenceId,scheduledDueDate),clock.instant());
-        UUID expenseId=claim.expenseId();
-        if(!claim.replayed()) {
-            expenseId=materializer.materializeAnticipated(new AnticipatedRecurringExpenseCommand(identifiers.get(),
-                    recurrenceId,actor.spaceId(),d.description(),d.amount(),
-                    d.valueType()==com.malyah.accountmanager.recurrences.domain.RecurrenceValueType.FIXED,
-                    scheduledDueDate,d.categoryId(),d.responsibleUserId(),actor.userId(),clock.instant()));
-            repository.completeAnticipation(actor.spaceId(),actor.userId(),idempotencyKey,expenseId,clock.instant());
-        }
-        var occurrence=forecasts(actor.spaceId(),month,month).occurrences().stream()
+        return d;
+    }
+
+    private UUID materialize(UUID spaceId,UUID actorId,RecurrenceDefinition d,LocalDate scheduledDueDate) {
+        return materializer.materializeAnticipated(new AnticipatedRecurringExpenseCommand(identifiers.get(),
+                d.id(),spaceId,d.description(),d.amount(),
+                d.valueType()==com.malyah.accountmanager.recurrences.domain.RecurrenceValueType.FIXED,
+                scheduledDueDate,d.categoryId(),d.responsibleUserId(),actorId,clock.instant()));
+    }
+
+    private ForecastView reconciled(UUID spaceId,UUID recurrenceId,LocalDate scheduledDueDate) {
+        var month=YearMonth.from(scheduledDueDate);
+        return forecasts(spaceId,month,month).occurrences().stream()
                 .filter(item->recurrenceId.equals(item.recurrenceId())&&scheduledDueDate.equals(item.scheduledDueDate()))
                 .findFirst().orElseThrow(()->new RecurrenceOccurrenceException("Não foi possível reconciliar o lançamento antecipado."));
-        return new AnticipationResult(occurrence,claim.replayed());
     }
 
     private ForecastPeriodView forecasts(UUID spaceId,YearMonth from,YearMonth to) {
         var definitions=repository.findAll(spaceId);
         Map<OccurrenceKey,StoredOccurrence> actual=repository.findOccurrences(spaceId,from.atDay(1),to.atEndOfMonth())
                 .stream().collect(Collectors.toMap(o->new OccurrenceKey(o.recurrenceId(),o.scheduledDueDate()),Function.identity()));
+        Map<UUID,List<VariableEstimateReference.ConfirmedCharge>> confirmed=repository.findConfirmedCharges(spaceId)
+                .stream().collect(Collectors.groupingBy(StoredOccurrence::recurrenceId,Collectors.mapping(
+                        o->new VariableEstimateReference.ConfirmedCharge(o.scheduledDueDate(),o.amount()),
+                        Collectors.toList())));
         var result=new ArrayList<ForecastView>();
         for(var stored:definitions) for(var month=from;!month.isAfter(to);month=month.plusMonths(1)) {
             var d=stored.definition();
+            var variable=d.valueType()==com.malyah.accountmanager.recurrences.domain.RecurrenceValueType.VARIABLE_ESTIMATE;
             calendar.occurrenceInMonth(d.firstDueDate(),d.lastDueDate(),d.frequency(),month).ifPresent(date->{
                 var materialized=actual.get(new OccurrenceKey(d.id(),date));
-                if(materialized==null) result.add(new ForecastView(d.id(),d.description(),d.amount().setScale(2).toPlainString(),
-                        d.valueType()==com.malyah.accountmanager.recurrences.domain.RecurrenceValueType.VARIABLE_ESTIMATE,
-                        date,"FORECAST",null,null,null,false));
+                var projected=variable ? VariableEstimateReference.estimateFor(d.amount(),
+                        confirmed.getOrDefault(d.id(),List.of()),date) : d.amount();
+                if(materialized==null) result.add(new ForecastView(d.id(),d.description(),projected.setScale(2).toPlainString(),
+                        variable,date,"FORECAST",null,null,null,false));
                 else result.add(new ForecastView(d.id(),d.description(),materialized.amount().setScale(2).toPlainString(),
                         !materialized.chargeConfirmed(),date,"MATERIALIZED",materialized.expenseId(),
                         materialized.actualDueDate(),materialized.status(),materialized.chargeConfirmed()));

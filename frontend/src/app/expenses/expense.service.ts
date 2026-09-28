@@ -65,11 +65,20 @@ export interface Expense {
   createdAt: string;
   version: number;
   paymentAudit?: { recordedByDisplayName: string; recordedByUserId: string; recordedAt: string; notes: string | null } | null;
+  chargeConfirmation?: ChargeConfirmation | null;
   history: ExpenseHistoryEvent[];
 }
 
+export interface ChargeConfirmation {
+  estimatedAmount: string;
+  confirmedAt: string;
+  confirmedByUserId: string;
+  confirmedByDisplayName: string;
+}
+
 export interface ExpenseHistoryEvent {
-  type: 'EXPENSE_CREATED' | 'EXPENSE_PAID' | 'PAYMENT_REVERSED' | 'EXPENSE_CORRECTED' | 'EXPENSE_CANCELLED';
+  type: 'EXPENSE_CREATED' | 'EXPENSE_PAID' | 'PAYMENT_REVERSED' | 'EXPENSE_CORRECTED' | 'EXPENSE_CANCELLED'
+    | 'CHARGE_CONFIRMED' | 'ESTIMATE_UPDATED';
   actorUserId: string;
   actorDisplayName: string;
   occurredAt: string;
@@ -187,7 +196,13 @@ export class ExpenseService {
     );
   }
 
-  settle(id: string, data: { version: number; paidAmount: string; paymentDate: string; paidByUserId: string; paymentNotes: string | null }, key: string) {
+  confirmCharge(id: string, data: { version: number; confirmedAmount: string }, key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
+      this.http.post<Expense>(`${this.endpoint}/${id}/charge-confirmation`, data, { headers: { 'Idempotency-Key': key } })));
+  }
+
+  settle(id: string, data: { version: number; paidAmount: string; paymentDate: string; paidByUserId: string;
+    paymentNotes: string | null; confirmedChargeAmount?: string }, key: string) {
     return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
       this.http.post<Expense>(`${this.endpoint}/${id}/payment`, data, { headers: { 'Idempotency-Key': key } })));
   }

@@ -105,7 +105,17 @@ class ExpenseController {
             @Valid @RequestBody PaymentRequest request) {
         return useCase.settle(principal.getName(), new com.malyah.accountmanager.expenses.application.SettleExpenseCommand(
                 id, request.version(), request.paidAmount(), request.paymentDate(),
-                request.paidByUserId(), request.paymentNotes(), key)).expense();
+                request.paidByUserId(), request.paymentNotes(), key, request.confirmedChargeAmount())).expense();
+    }
+
+    @PostMapping("/{id}/charge-confirmation")
+    ExpenseView confirmCharge(Principal principal,
+            @org.springframework.web.bind.annotation.PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") UUID key,
+            @Valid @RequestBody ChargeConfirmationRequest request) {
+        return useCase.confirmCharge(principal.getName(),
+                new com.malyah.accountmanager.expenses.application.ConfirmChargeCommand(
+                        id, request.version(), request.confirmedAmount(), key)).expense();
     }
 
     @PostMapping("/batch-payment")
@@ -145,7 +155,12 @@ class ExpenseController {
     record PaymentRequest(@jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version,
             @jakarta.validation.constraints.NotBlank String paidAmount,
             @jakarta.validation.constraints.NotNull java.time.LocalDate paymentDate,
-            @jakarta.validation.constraints.NotNull UUID paidByUserId, String paymentNotes) { }
+            @jakarta.validation.constraints.NotNull UUID paidByUserId, String paymentNotes,
+            String confirmedChargeAmount) { }
+
+    record ChargeConfirmationRequest(
+            @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.PositiveOrZero Long version,
+            @jakarta.validation.constraints.NotBlank String confirmedAmount) { }
 
     record BatchPaymentRequest(
             @jakarta.validation.constraints.NotEmpty java.util.List<@Valid BatchPaymentItemRequest> items,

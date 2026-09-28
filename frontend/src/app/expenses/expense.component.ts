@@ -1,6 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -13,6 +13,10 @@ import { Category, CategoryService } from './category.service';
 import {
   Expense, ExpenseService, ExpenseSort, ExpenseStatus, SortDirection,
 } from './expense.service';
+
+const MONEY = /^\d{1,8}([.,]\d{1,2})?$/;
+const positiveAmount = (control: AbstractControl<string>): ValidationErrors | null =>
+  control.value && Number(control.value.replace(',', '.')) <= 0 ? { positive: true } : null;
 
 @Component({
   selector: 'app-expense',
@@ -35,6 +39,8 @@ export class ExpenseComponent implements OnInit {
   readonly settling = signal<Expense | null>(null);
   readonly editing = signal<Expense | null>(null);
   readonly conflictCurrent = signal<Expense | null>(null);
+  readonly confirmingCharge = signal<Expense | null>(null);
+  readonly chargeConflictCurrent = signal<Expense | null>(null);
   readonly lifecycleAction = signal<{ expense: Expense; type: 'REVERSE' | 'CANCEL' } | null>(null);
   readonly detail = signal<Expense | null>(null);
   readonly history = signal<import('./expense.service').ExpenseHistoryEvent[]>([]);
@@ -50,6 +56,7 @@ export class ExpenseComponent implements OnInit {
   private paymentKey = '';
   private correctionKey = '';
   private actionKey = '';
+  private chargeKey = '';
   private batchKey = '';
   private today = '';
   private spaceTimeZone = 'America/Sao_Paulo';
@@ -58,6 +65,10 @@ export class ExpenseComponent implements OnInit {
     paymentDate: ['', Validators.required],
     paidByUserId: ['', Validators.required],
     paymentNotes: ['', Validators.maxLength(2000)],
+    confirmedChargeAmount: [''],
+  });
+  readonly chargeForm = this.formBuilder.nonNullable.group({
+    confirmedAmount: ['', [Validators.required, Validators.pattern(MONEY), positiveAmount]],
   });
   readonly editForm = this.formBuilder.nonNullable.group({
     description: ['', [Validators.required, Validators.maxLength(200)]],
@@ -178,7 +189,11 @@ export class ExpenseComponent implements OnInit {
     this.settling.set(expense);
     this.paymentKey = this.expensesApi.newIdempotencyKey();
     this.paymentForm.reset({ paidAmount: expense.amount, paymentDate: this.today,
-      paidByUserId: this.members().find(member => member.currentUser)?.userId ?? '', paymentNotes: '' });
+      paidByUserId: this.members().find(member => member.currentUser)?.userId ?? '', paymentNotes: '',
+      confirmedChargeAmount: '' });
+    const confirmed = this.paymentForm.controls.confirmedChargeAmount;
+    confirmed.setValidators(this.isEstimated(expense) ? [Validators.required, Validators.pattern(MONEY), positiveAmount] : []);
+    confirmed.updateValueAndValidity();
     this.errorMessage.set(null);
     this.message.set(null);
   }
@@ -187,19 +202,76 @@ export class ExpenseComponent implements OnInit {
     const expense = this.settling();
     if (!expense || this.submitting()) return;
     if (this.paymentForm.invalid) { this.paymentForm.markAllAsTouched(); return; }
-    const values = this.paymentForm.getRawValue();
+    const { confirmedChargeAmount, ...values } = this.paymentForm.getRawValue();
     this.submitting.set(true);
     this.errorMessage.set(null);
     this.expensesApi.settle(expense.id, { ...values, version: expense.version,
       paidAmount: values.paidAmount.replace(',', '.'), paymentNotes: values.paymentNotes.trim() || null,
+      ...(this.isEstimated(expense) ? { confirmedChargeAmount: confirmedChargeAmount.replace(',', '.') } : {}),
     }, this.paymentKey).pipe(finalize(() => this.submitting.set(false))).subscribe({
       next: () => { this.settling.set(null); this.message.set('Quitação registrada com sucesso.'); this.load(); },
       error: error => this.handleError(error, 'Não foi possível quitar. Os campos foram preservados para nova tentativa.'),
     });
   }
 
+  isEstimated(expense: Expense): boolean {
+    return expense.origin === 'RECURRENCE' && expense.status === 'PENDING' && !expense.chargeConfirmed;
+  }
+
+  openChargeConfirmation(expense: Expense): void {
+    if (!this.isEstimated(expense)) return;
+    this.confirmingCharge.set(expense);
+    this.chargeConflictCurrent.set(null);
+    this.chargeKey = this.expensesApi.newIdempotencyKey();
+    this.chargeForm.reset({ confirmedAmount: '' });
+    this.errorMessage.set(null);
+    this.message.set(null);
+  }
+
+  closeChargeConfirmation(): void {
+    this.confirmingCharge.set(null);
+    this.chargeConflictCurrent.set(null);
+  }
+
+  confirmChargeAmount(): void {
+    const expense = this.confirmingCharge();
+    if (!expense || this.submitting()) return;
+    if (this.chargeForm.invalid) { this.chargeForm.markAllAsTouched(); return; }
+    const confirmedAmount = this.chargeForm.controls.confirmedAmount.value.replace(',', '.');
+    this.submitting.set(true);
+    this.errorMessage.set(null);
+    this.chargeConflictCurrent.set(null);
+    this.expensesApi.confirmCharge(expense.id, { version: expense.version, confirmedAmount }, this.chargeKey)
+      .pipe(finalize(() => this.submitting.set(false))).subscribe({
+        next: confirmed => {
+          this.confirmingCharge.set(null);
+          this.message.set(`Valor da cobrança confirmado em ${this.formatCurrency(confirmed.amount)}. A despesa continua pendente de quitação.`);
+          this.load();
+        },
+        error: error => {
+          if (error instanceof HttpErrorResponse && error.status === 409) {
+            this.handleError(error, 'A cobrança mudou antes da confirmação. O valor digitado foi preservado.');
+            this.expensesApi.get(expense.id).subscribe({
+              next: current => this.chargeConflictCurrent.set(current),
+              error: refreshError => this.handleError(refreshError, 'Houve conflito e não foi possível consultar os dados atuais.'),
+            });
+            this.load(false);
+          } else this.handleError(error, 'Não foi possível confirmar o valor. O valor digitado foi preservado para nova tentativa.');
+        },
+      });
+  }
+
+  useCurrentChargeVersion(): void {
+    const current = this.chargeConflictCurrent();
+    if (!current || !this.isEstimated(current)) return;
+    this.confirmingCharge.set(current);
+    this.chargeConflictCurrent.set(null);
+    this.chargeKey = this.expensesApi.newIdempotencyKey();
+    this.errorMessage.set(null);
+  }
+
   toggleBatch(expense: Expense): void {
-    if (expense.status !== 'PENDING') return;
+    if (expense.status !== 'PENDING' || this.isEstimated(expense)) return;
     const selection = new Map(this.selectedForBatch());
     if (selection.has(expense.id)) selection.delete(expense.id);
     else selection.set(expense.id, expense);
@@ -425,7 +497,8 @@ export class ExpenseComponent implements OnInit {
 
   historyLabel(type: string): string {
     return ({ EXPENSE_CREATED: 'Despesa cadastrada', EXPENSE_PAID: 'Quitação registrada', PAYMENT_REVERSED: 'Quitação desfeita',
-      EXPENSE_CORRECTED: 'Despesa corrigida', EXPENSE_CANCELLED: 'Despesa cancelada' } as Record<string, string>)[type] ?? type;
+      EXPENSE_CORRECTED: 'Despesa corrigida', EXPENSE_CANCELLED: 'Despesa cancelada',
+      CHARGE_CONFIRMED: 'Valor da cobrança confirmado', ESTIMATE_UPDATED: 'Estimativa atualizada por confirmação anterior' } as Record<string, string>)[type] ?? type;
   }
 
   historyField(field: string): string {

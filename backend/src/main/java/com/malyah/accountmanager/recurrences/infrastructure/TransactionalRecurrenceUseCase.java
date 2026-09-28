@@ -22,4 +22,8 @@ final class TransactionalRecurrenceUseCase implements RecurrenceUseCase {
             java.util.UUID key) {
         return Objects.requireNonNull(transactions.execute(status->delegate.anticipate(email,recurrenceId,due,key)));
     }
+    @Override public AnticipationResult confirmForecastCharge(String email,java.util.UUID recurrenceId,LocalDate due,
+            String amount,java.util.UUID key) {
+        return Objects.requireNonNull(transactions.execute(status->delegate.confirmForecastCharge(email,recurrenceId,due,amount,key)));
+    }
 }

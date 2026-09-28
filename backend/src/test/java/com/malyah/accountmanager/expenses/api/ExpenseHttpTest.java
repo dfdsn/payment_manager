@@ -275,6 +275,52 @@ class ExpenseHttpTest {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPENSE_STATE_CONFLICT"));
     }
 
+    @Test void chargeConfirmationRequiresSessionCsrfVersionAmountAndMapsConflicts() throws Exception {
+        var path = "/expenses/" + EXPENSE + "/charge-confirmation";
+        var body = "{\"version\":2,\"confirmedAmount\":\"195.40\"}";
+        mvc.perform(post(path).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isUnauthorized());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isBadRequest());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content("{\"version\":2}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors[0].field").value("confirmedAmount"));
+        given(useCase.confirmCharge(any(), any())).willReturn(new ExpenseCreationResult(view(), false));
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(EXPENSE.toString()));
+        then(useCase).should().confirmCharge("guest@example.com",
+                new com.malyah.accountmanager.expenses.application.ConfirmChargeCommand(EXPENSE, 2, "195.40", KEY));
+        willThrow(new com.malyah.accountmanager.expenses.application.ChargeAlreadyConfirmedException())
+                .given(useCase).confirmCharge(any(), any());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CHARGE_ALREADY_CONFIRMED"));
+        willThrow(new com.malyah.accountmanager.expenses.domain.ExpenseValidationException("confirmedAmount", "Inválido"))
+                .given(useCase).confirmCharge(any(), any());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors[0].field").value("confirmedAmount"));
+    }
+
+    @Test void settlementOfAnEstimateCarriesItsConfirmationAndReportsWhenItIsMissing() throws Exception {
+        var path = "/expenses/" + EXPENSE + "/payment";
+        var body = "{\"version\":0,\"paidAmount\":\"201.00\",\"paymentDate\":\"2026-10-01\",\"paidByUserId\":\""
+                + KEY + "\",\"confirmedChargeAmount\":\"199.90\"}";
+        given(useCase.settle(any(), any())).willReturn(new ExpenseCreationResult(view(), false));
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+        then(useCase).should().settle(org.mockito.ArgumentMatchers.eq("guest@example.com"), org.mockito.ArgumentMatchers.argThat(
+                command -> "199.90".equals(command.confirmedChargeAmount()) && "201.00".equals(command.paidAmount())));
+        willThrow(new com.malyah.accountmanager.expenses.application.ChargeConfirmationRequiredException())
+                .given(useCase).settle(any(), any());
+        mvc.perform(post(path).with(user("guest@example.com")).session(activeSession()).with(csrf())
+                .header("Idempotency-Key", KEY).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CHARGE_CONFIRMATION_REQUIRED"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("confirmedChargeAmount"));
+    }
+
     private String validCorrectionBody() {
         return """
                 {"version":0,"status":"PENDING","description":"Energia corrigida",

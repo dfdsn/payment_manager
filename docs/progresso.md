@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 28/09/2026.
 
-**Estado atual: H04.3 concluída.** A consulta reconciliada do mês atual mais 12 meses e a antecipação idempotente foram aprovadas. E01 e E02 estão concluídos e H03.3 mantém validação independente.
+**Estado atual: H04.4 em validação.** A confirmação de valores variáveis está implementada e aprovada nos gates, em PostgreSQL local e no smoke E2E; a CI `36455395731` (commit `34ffc3a`) aprovou 58 ITs em Testcontainers/PostgreSQL 17.6. Falta o E2E full-stack. E01 e E02 estão concluídos e H03.3 mantém validação independente.
 
 ## Resumo
 
@@ -13,7 +13,7 @@ Versão 1.0 • Atualizado em 28/09/2026.
 | Histórias | 15 de 46 concluídas; E01 e E02 concluídos, E03 depende da validação final de H03.3 e E04 está em andamento. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | H04.4 — Confirmar valores variáveis. |
+| Próxima ação | Concluir a validação de H04.4 com `npm run e2e:full-stack` na stack local. Depois, H04.5 — Alterar e encerrar recorrência, não iniciada. |
 
 ## Estados permitidos
 
@@ -58,7 +58,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H04.1 | Cadastrar recorrência e calcular calendário | Concluído | Cinco frequências, modalidade fixa/estimada, dia-base sem deslocamento, idempotência, autorização, V15, PostgreSQL e E2E aprovados. Evidência: `docs/evidencias/H04.1.md`. |
 | H04.2 | Gerar ocorrências sem duplicação | Concluído | Job PostgreSQL com lease/fencing, unicidade por recorrência/data, rollback e retomada; V16, 38 ITs selecionados e E2E aprovados. Evidência: `docs/evidencias/H04.2.md`. |
 | H04.3 | Visualizar e antecipar previsões | Concluído | Horizonte de 13 meses somente leitura, reconciliação por identidade estável e antecipação idempotente aprovados em PostgreSQL, gates e E2E. Evidência: `docs/evidencias/H04.3.md`. |
-| H04.4 | Confirmar valores variáveis | Não iniciado | — |
+| H04.4 | Confirmar valores variáveis | Em validação | Confirmação auditada, propagação somente para estimativas posteriores, quitação com confirmação atômica e interface implementadas; 124 Java, JaCoCo, PIT 76%, 58 ITs em PostgreSQL 16 local e em Testcontainers 17.6 na CI, 59 frontend, build e 2 smoke E2E aprovados. Falta o E2E full-stack. Evidência: `docs/evidencias/H04.4.md`. |
 | H04.5 | Alterar e encerrar recorrência | Não iniciado | — |
 | H05.1 | Criar compra e parcelas | Não iniciado | — |
 | H05.2 | Consultar e quitar parcelas | Não iniciado | — |
@@ -354,6 +354,25 @@ Condição de conclusão ou desbloqueio: critérios executáveis da H03.2 satisf
 Próximo passo: H03.3 — anexar e acessar documentos.
 ```
 
+## Registro H04.4
+
+```text
+História / objetivo: H04.4 — Confirmar valores variáveis.
+Estado / responsável / data: Em validação / desenvolvimento / 28/09/2026.
+Requisitos e critérios de aceite relacionados: RF-REC-10, RF-REC-12, RF-REC-13, RF-REC-15, RF-DES-04, RF-DES-06, D20 e CA-04; distinção entre estimativa, valor confirmado e pagamento; auditoria; versão, idempotência e atomicidade; proteção contra geração e previsões; quitação individual e em lote.
+Decisões e pendências aplicáveis: T19 registrada. Nenhuma decisão de produto nova foi inventada: a referência segue o exemplo do PRD (última confirmação anterior por data prevista) e a correção de confirmados segue D20. Reflexos em relatórios, fechamentos e notificações ficam para E06–E08.
+Branch / commit / PR: branch `claude/h04-4-confirmar-valores-variaveis-usnyyj` sobre `main` `6a3b78f` (H04.3); PR draft para `main`. Nada foi publicado ou implantado.
+Arquivos e comportamento alterados: V18; domínio `ChargeConfirmationEligibility` e `VariableEstimateReference`; caso de uso, repositório JDBC e endpoint `POST /expenses/{id}/charge-confirmation`; `confirmedChargeAmount` na quitação; materialização usando a referência; `POST /recurrences/{id}/occurrences/{data}/charge-confirmation`; previsões com a referência; histórico `CHARGE_CONFIRMED`/`ESTIMATE_UPDATED`; telas de despesas e recorrências; OpenAPI, README, decisões e evidência.
+Migrações e impacto sobre dados: V18 adiciona colunas nulas de auditoria em `expense_entries` e a tabela `expense_charge_events`, com constraints e índice único de confirmação. Nenhum dado existente é reescrito; nenhuma migração anterior foi editada.
+Testes executados: 124 unitários/HTTP/ArchUnit; 58 ITs Failsafe em PostgreSQL 16.13 local (8 específicos de H04.4); JaCoCo e PIT; 59 Vitest; build Angular; 2 E2E smoke. Todos aprovados. Os ITs de identidade esperavam 12 migrações e estavam vermelhos no `main`; foram atualizados para 18.
+Cobertura e mutação aplicáveis: JaCoCo (execução unitária) 917/1035 linhas (88,60%) e 452/582 branches (77,66%); PIT 358/469 (76%), força 87%; limites mantidos.
+Validação manual / integração real: sem Docker neste ambiente, os ITs rodaram contra PostgreSQL 16.13 local com as mesmas classes; a CI `36455395731` (commit `34ffc3a`) executou os mesmos 58 ITs em Testcontainers `postgres:17.6-alpine`, todos aprovados. O E2E full-stack foi estendido, mas não executado.
+Limitações e cenários futuros: despesas legadas pagas sem confirmação permanecem como estão; a confirmação a partir da previsão só confirma a versão 0 da ocorrência materializada; dashboard, fechamento e notificações validarão `chargeConfirmed`/`chargeConfirmation` em E06–E08.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H04.4.md e este arquivo.
+Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36455395731` (commit `34ffc3a`)) e `npm run e2e:full-stack` aprovado com `compose.full-local.yml`.
+Próximo passo: concluir a validação acima; H04.5 não foi iniciada.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -411,3 +430,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 27/09/2026 | H04.1 implementou cadastro/listagem de definições fixa ou estimada, cinco frequências e prévia reutilizável por dia-base, com autorização, categoria/responsável elegíveis, idempotência, auditoria e V15, sem gerar despesas. Regressão final: 110 Java, 3 ITs PostgreSQL selecionados, JaCoCo 95,24%/83,67%, PIT 75%/força 85%, 49 frontend, build e 1 E2E full-stack aprovados. H04.1 concluída; próxima história H04.2. |
 | 28/09/2026 | H04.2 implementou geração mensal idempotente com fila PostgreSQL, `SKIP LOCKED`, lease/fencing, retomada após falha, rollback atômico, origem recorrente e distinção fixa/estimada. Regressão final: 111 Java, 38 ITs PostgreSQL 17.6 selecionados, JaCoCo aprovado, PIT 75%/força 86%, 49 frontend, build e 1 E2E full-stack aprovado. H04.2 concluída; próxima história H04.3. |
 | 28/09/2026 | H04.3 implementou horizonte somente leitura do mês atual + 12, reconciliação por identidade estável e antecipação confirmada/idempotente usando a materialização da H04.2. Regressão: 111 Java, 9 ITs selecionados e repetição específica de 5 ITs com concorrência em PostgreSQL 17.6/V17, JaCoCo aprovado, PIT 71%/força 86%, 51 frontend, build e 1 E2E full-stack aprovado. H04.3 concluída; próxima história H04.4. |
+| 28/09/2026 | H04.4 implementou confirmação de valores variáveis com auditoria, propagação somente para estimativas posteriores, quitação com confirmação atômica e interface. Regressão: 124 Java, 58 ITs em PostgreSQL 16 local, JaCoCo 88,60%/77,66% (unitário), PIT 76%/força 87%, 59 frontend, build e 2 smoke E2E aprovados. A CI `36455395731` (commit `34ffc3a`) aprovou 58 ITs em Testcontainers 17.6. Em validação até o E2E full-stack; H04.5 não iniciada. |

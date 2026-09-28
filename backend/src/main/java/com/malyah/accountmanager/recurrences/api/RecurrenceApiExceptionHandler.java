@@ -29,6 +29,22 @@ class RecurrenceApiExceptionHandler {
     ResponseEntity<?> occurrence(RuntimeException error) {
         return error(HttpStatus.CONFLICT,"RECURRENCE_OCCURRENCE_CONFLICT",error.getMessage(),"scheduledDueDate");
     }
+    @ExceptionHandler(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class)
+    ResponseEntity<?> amount(com.malyah.accountmanager.expenses.domain.ExpenseValidationException error) {
+        return error(HttpStatus.BAD_REQUEST,"RECURRENCE_VALIDATION",error.getMessage(),"confirmedAmount");
+    }
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ChargeAlreadyConfirmedException.class)
+    ResponseEntity<?> alreadyConfirmed(RuntimeException error) {
+        return error(HttpStatus.CONFLICT,"CHARGE_ALREADY_CONFIRMED",error.getMessage(),"confirmedAmount");
+    }
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class)
+    ResponseEntity<?> expenseConflict(RuntimeException error) {
+        return error(HttpStatus.CONFLICT,"EXPENSE_STATE_CONFLICT",error.getMessage(),"");
+    }
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseIdempotencyConflictException.class)
+    ResponseEntity<?> expenseIdempotency(RuntimeException error) {
+        return error(HttpStatus.CONFLICT,"IDEMPOTENCY_CONFLICT",error.getMessage(),"Idempotency-Key");
+    }
     @ExceptionHandler(com.malyah.accountmanager.expenses.application.CategoryNotFoundException.class)
     ResponseEntity<?> category() { return error(HttpStatus.BAD_REQUEST,"CATEGORY_NOT_SELECTABLE","A categoria não está disponível no espaço.","categoryId"); }
     @ExceptionHandler(com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException.class)

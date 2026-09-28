@@ -330,6 +330,21 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.reload();
   await expect(page.getByText('Energia estimada automática', { exact: true })).toBeVisible();
   await expect(page.getByText(/Gerada por recorrência · valor estimado a confirmar/)).toBeVisible();
+  const estimatedRow = page.locator('mat-card.expense-row').filter({ hasText: 'Energia estimada automática' });
+  await estimatedRow.getByRole('button', { name: 'Confirmar valor da cobrança' }).click();
+  await page.getByLabel('Valor confirmado da cobrança').fill('195,30');
+  await page.locator('.charge-confirmation-card').getByRole('button', { name: 'Confirmar valor da cobrança' }).click();
+  await expect(page.getByText(/continua pendente de quitação/)).toBeVisible();
+  await expect(estimatedRow.getByText(/Valor da cobrança confirmado por Diego/)).toBeVisible();
+  await expect(estimatedRow.getByText(/estimativa anterior R\$\s*180,50/)).toBeVisible();
+  await page.goto('/recorrencias');
+  const nextEstimate = page.locator('article.forecast').filter({ hasText: 'Energia estimada automática' })
+    .filter({ hasText: 'Previsão estimada' }).first();
+  await expect(nextEstimate.getByText(/R\$ 195\.30/)).toBeVisible();
+  await nextEstimate.getByRole('button', { name: 'Confirmar valor da cobrança' }).click();
+  await page.locator('form.forecast-confirm').getByLabel('Valor confirmado da cobrança').fill('201,00');
+  await page.locator('form.forecast-confirm').getByRole('button', { name: 'Confirmar valor' }).click();
+  await expect(page.getByText(/confirmado em R\$ 201\.00/)).toBeVisible();
 
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);

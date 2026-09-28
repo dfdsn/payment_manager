@@ -255,6 +255,75 @@ class ExpenseServiceTest {
                 .settleBatch(any(), any(), any(), any(), any());
     }
 
+    @Test void confirmsEstimatedChargeWithCanonicalMoneyAndExposesPreservedEstimate() {
+        var confirmedAt = NOW.plusSeconds(60);
+        var confirmed = new StoredExpense(EXPENSE, SPACE, "Energia", new BigDecimal("195.00"), ExpenseStatus.PENDING,
+                LocalDate.of(2026, 10, 5), null, null, null, USER, "Pessoa", null, null, NOW, 1, null, null, null,
+                null, null, "RECURRENCE", true,
+                new ChargeConfirmationAudit(new BigDecimal("180.00"), confirmedAt, USER, "Pessoa"));
+        given(repository.confirmCharge(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(confirmed, false));
+        var command = new ConfirmChargeCommand(EXPENSE, 0, "195", KEY);
+
+        var result = service.confirmCharge("guest@example.com", command);
+
+        assertThat(result.expense().amount()).isEqualTo("195.00");
+        assertThat(result.expense().chargeConfirmed()).isTrue();
+        assertThat(result.expense().status()).isEqualTo(ExpenseStatus.PENDING);
+        assertThat(result.expense().chargeConfirmation().estimatedAmount()).isEqualTo("180.00");
+        assertThat(result.expense().chargeConfirmation().confirmedAt()).isEqualTo(confirmedAt);
+        assertThat(result.expense().chargeConfirmation().confirmedByDisplayName()).isEqualTo("Pessoa");
+        org.mockito.Mockito.verify(repository).confirmCharge(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(command),
+                org.mockito.ArgumentMatchers.argThat(amount -> amount.canonical().equals("195.00")),
+                org.mockito.ArgumentMatchers.eq(NOW));
+    }
+
+    @Test void rejectsInvalidConfirmationsBeforePersistence() {
+        for (var invalid : List.of(
+                new ConfirmChargeCommand(null, 0, "10", KEY),
+                new ConfirmChargeCommand(EXPENSE, -1, "10", KEY),
+                new ConfirmChargeCommand(EXPENSE, 0, "10", null)))
+            assertThatThrownBy(() -> service.confirmCharge("guest@example.com", invalid))
+                    .isInstanceOf(ExpenseQueryValidationException.class);
+        assertThatThrownBy(() -> service.confirmCharge("guest@example.com", null))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+        for (var amount : java.util.Arrays.asList("0", "0.00", "-1", "10.001", "100000000.00", "abc", " ", null))
+            assertThatThrownBy(() -> service.confirmCharge("guest@example.com", new ConfirmChargeCommand(EXPENSE, 0, amount, KEY)))
+                    .isInstanceOfSatisfying(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class,
+                            error -> assertThat(error.field()).isEqualTo("confirmedAmount"));
+        given(repository.confirmCharge(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(stored(ExpenseStatus.PENDING, LocalDate.of(2026, 10, 5), null), true));
+        assertThat(service.confirmCharge("guest@example.com", new ConfirmChargeCommand(EXPENSE, 0, "99999999.99", KEY))
+                .replayed()).isTrue();
+        org.mockito.Mockito.verify(repository).confirmCharge(any(), any(), any(),
+                org.mockito.ArgumentMatchers.argThat(amount -> amount.canonical().equals("99999999.99")), any());
+    }
+
+    @Test void settlingAnEstimateConfirmsItFirstInTheSameCallAndSettlesTheNextVersion() {
+        given(repository.settle(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(stored(ExpenseStatus.PAID, LocalDate.of(2026, 9, 24), LocalDate.of(2026, 10, 1)), false));
+        var command = new SettleExpenseCommand(EXPENSE, 2, "205.10", LocalDate.of(2026, 10, 1), USER, null, KEY, "200");
+
+        service.settle("guest@example.com", command);
+
+        var order = org.mockito.Mockito.inOrder(repository);
+        order.verify(repository).confirmCharge(org.mockito.ArgumentMatchers.eq(SPACE), org.mockito.ArgumentMatchers.eq(USER),
+                org.mockito.ArgumentMatchers.eq(new ConfirmChargeCommand(EXPENSE, 2, "200.00", KEY)),
+                org.mockito.ArgumentMatchers.argThat(amount -> amount.canonical().equals("200.00")),
+                org.mockito.ArgumentMatchers.eq(NOW));
+        order.verify(repository).settle(org.mockito.ArgumentMatchers.eq(SPACE), org.mockito.ArgumentMatchers.eq(USER),
+                org.mockito.ArgumentMatchers.argThat(settle -> settle.version() == 3
+                        && "200.00".equals(settle.confirmedChargeAmount())),
+                org.mockito.ArgumentMatchers.argThat(payment -> payment.amount().canonical().equals("205.10")),
+                org.mockito.ArgumentMatchers.eq(NOW));
+        assertThatThrownBy(() -> service.settle("guest@example.com",
+                new SettleExpenseCommand(EXPENSE, 2, "205.10", LocalDate.of(2026, 10, 1), USER, null, KEY, "0")))
+                .isInstanceOfSatisfying(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class,
+                        error -> assertThat(error.field()).isEqualTo("confirmedChargeAmount"));
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.times(1)).confirmCharge(any(), any(), any(), any(), any());
+    }
+
     private StoredExpense stored(ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate) {
         return new StoredExpense(EXPENSE, SPACE, status == ExpenseStatus.PAID ? "Mercado" : "Energia",
                 new BigDecimal("150.00"), status, dueDate, paymentDate,

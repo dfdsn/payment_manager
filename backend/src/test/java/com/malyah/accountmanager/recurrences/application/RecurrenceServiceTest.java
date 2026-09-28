@@ -72,4 +72,92 @@ class RecurrenceServiceTest {
         assertThat(service.list("ana@example.com")).singleElement().satisfies(view -> assertThat(view.description()).isEqualTo("Aluguel"));
         verify(repository).findAll(SPACE);
     }
+
+    @Test void confirmsAForecastByMaterializingTheSameOccurrenceAndConfirmingVersionZeroAtomically() {
+        var materializer=mock(RecurringExpenseMaterializer.class);
+        var confirmation=mock(com.malyah.accountmanager.expenses.application.ChargeConfirmationUseCase.class);
+        var forecastService=new RecurrenceService(repository,email -> new AuthenticatedUserContext(ACTOR,"Ana",email,SPACE,
+                "Casa",SpaceRole.GUEST,"BRL","pt-BR","America/Sao_Paulo"),categories,members,Clock.fixed(NOW,ZoneOffset.UTC),
+                ()->ID,new RecurrenceCalendar(),materializer,confirmation);
+        var variable=definition(RecurrenceValueType.VARIABLE_ESTIMATE);
+        var expense=UUID.randomUUID(); var key=UUID.randomUUID(); var due=LocalDate.of(2026,11,5);
+        when(repository.findById(SPACE,ID)).thenReturn(new StoredRecurrence(variable,null,null,"Ana"));
+        when(repository.findAll(SPACE)).thenReturn(List.of(new StoredRecurrence(variable,null,null,"Ana")));
+        when(repository.findOccurrences(eq(SPACE),any(),any())).thenReturn(List.of(new StoredOccurrence(ID,due,expense,
+                due,"PENDING",new BigDecimal("210.00"),true)));
+        when(materializer.materializeAnticipated(any())).thenReturn(expense);
+        when(confirmation.confirmCharge(anyString(),any())).thenReturn(
+                new com.malyah.accountmanager.expenses.application.ExpenseCreationResult(null,false));
+
+        var result=forecastService.confirmForecastCharge("ana@example.com",ID,due,"210",key);
+
+        var order=inOrder(repository,materializer,confirmation);
+        order.verify(repository).lockForChargeConfirmation(SPACE,ID);
+        order.verify(materializer).materializeAnticipated(argThat(command->command.recurrenceId().equals(ID)
+                && command.scheduledDueDate().equals(due) && !command.chargeConfirmed()));
+        order.verify(confirmation).confirmCharge("ana@example.com",
+                new com.malyah.accountmanager.expenses.application.ConfirmChargeCommand(expense,0,"210",key));
+        assertThat(result.replayed()).isFalse();
+        assertThat(result.occurrence().state()).isEqualTo("MATERIALIZED");
+        assertThat(result.occurrence().estimated()).isFalse();
+        assertThat(result.occurrence().amount()).isEqualTo("210.00");
+        verify(members).requireActiveParticipants(SPACE,ACTOR,null);
+    }
+
+    @Test void rejectsForecastConfirmationOfFixedValuesOrDatesOutsideTheCalendarWithoutWriting() {
+        var materializer=mock(RecurringExpenseMaterializer.class);
+        var confirmation=mock(com.malyah.accountmanager.expenses.application.ChargeConfirmationUseCase.class);
+        var forecastService=new RecurrenceService(repository,email -> new AuthenticatedUserContext(ACTOR,"Ana",email,SPACE,
+                "Casa",SpaceRole.GUEST,"BRL","pt-BR","America/Sao_Paulo"),categories,members,Clock.fixed(NOW,ZoneOffset.UTC),
+                ()->ID,new RecurrenceCalendar(),materializer,confirmation);
+        when(repository.findById(SPACE,ID)).thenReturn(new StoredRecurrence(definition(RecurrenceValueType.FIXED),null,null,"Ana"));
+        assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,LocalDate.of(2026,11,5),"10",UUID.randomUUID()))
+                .isInstanceOf(RecurrenceOccurrenceException.class).hasMessageContaining("valor estimado");
+        when(repository.findById(SPACE,ID)).thenReturn(new StoredRecurrence(definition(RecurrenceValueType.VARIABLE_ESTIMATE),null,null,"Ana"));
+        assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,LocalDate.of(2026,11,6),"10",UUID.randomUUID()))
+                .isInstanceOf(RecurrenceOccurrenceException.class);
+        assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,LocalDate.of(2027,10,5),"10",UUID.randomUUID()))
+                .isInstanceOf(RecurrenceOccurrenceException.class);
+        assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,LocalDate.of(2026,8,5),"10",UUID.randomUUID()))
+                .isInstanceOf(RecurrenceOccurrenceException.class);
+        assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,LocalDate.of(2026,11,5),"10",null))
+                .isInstanceOf(RecurrenceOccurrenceException.class);
+        assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",null,LocalDate.of(2026,11,5),"10",UUID.randomUUID()))
+                .isInstanceOf(RecurrenceOccurrenceException.class);
+        assertThatThrownBy(()->forecastService.confirmForecastCharge("ana@example.com",ID,null,"10",UUID.randomUUID()))
+                .isInstanceOf(RecurrenceOccurrenceException.class);
+        verify(repository,never()).lockForChargeConfirmation(any(),any());
+        verifyNoInteractions(materializer,confirmation);
+    }
+
+    @Test void forecastsOfVariableRecurrencesUseTheLatestPriorConfirmationAndFixedOnesKeepTheirValue() {
+        var variable=definition(RecurrenceValueType.VARIABLE_ESTIMATE);
+        var fixedId=UUID.randomUUID();
+        var fixed=new RecurrenceDefinition(fixedId,SPACE,"Aluguel",new BigDecimal("1000"),RecurrenceValueType.FIXED,
+                RecurrenceFrequency.MONTHLY,LocalDate.of(2026,9,5),null,null,null,ACTOR,NOW,0);
+        when(repository.findAll(SPACE)).thenReturn(List.of(new StoredRecurrence(variable,null,null,"Ana"),
+                new StoredRecurrence(fixed,null,null,"Ana")));
+        when(repository.findOccurrences(eq(SPACE),any(),any())).thenReturn(List.of(
+                new StoredOccurrence(ID,LocalDate.of(2026,11,5),UUID.randomUUID(),LocalDate.of(2026,11,5),"PENDING",
+                        new BigDecimal("195.00"),true)));
+        when(repository.findConfirmedCharges(SPACE)).thenReturn(List.of(
+                new StoredOccurrence(ID,LocalDate.of(2026,11,5),UUID.randomUUID(),LocalDate.of(2026,11,5),"PENDING",
+                        new BigDecimal("195.00"),true),
+                new StoredOccurrence(fixedId,LocalDate.of(2026,10,5),UUID.randomUUID(),LocalDate.of(2026,10,5),"PENDING",
+                        new BigDecimal("900.00"),true)));
+
+        var occurrences=service.forecasts("ana@example.com").occurrences();
+
+        assertThat(occurrences).filteredOn(o->o.recurrenceId().equals(ID)&&o.scheduledDueDate().equals(LocalDate.of(2026,10,5)))
+                .singleElement().satisfies(o->{assertThat(o.amount()).isEqualTo("180.00");assertThat(o.estimated()).isTrue();});
+        assertThat(occurrences).filteredOn(o->o.recurrenceId().equals(ID)&&o.scheduledDueDate().equals(LocalDate.of(2026,12,5)))
+                .singleElement().satisfies(o->{assertThat(o.amount()).isEqualTo("195.00");assertThat(o.state()).isEqualTo("FORECAST");});
+        assertThat(occurrences).filteredOn(o->o.recurrenceId().equals(fixedId)&&o.state().equals("FORECAST"))
+                .allSatisfy(o->{assertThat(o.amount()).isEqualTo("1000.00");assertThat(o.estimated()).isFalse();});
+    }
+
+    private RecurrenceDefinition definition(RecurrenceValueType type) {
+        return new RecurrenceDefinition(ID,SPACE,"Energia",new BigDecimal("180.00"),type,RecurrenceFrequency.MONTHLY,
+                LocalDate.of(2026,9,5),null,null,null,ACTOR,NOW,0);
+    }
 }

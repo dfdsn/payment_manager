@@ -54,7 +54,7 @@ class MembershipPostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(12);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(18);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var repository = new JdbcMembershipRepository(jdbc);

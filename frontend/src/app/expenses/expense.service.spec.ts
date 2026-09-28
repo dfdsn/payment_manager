@@ -117,4 +117,21 @@ describe('ExpenseService', () => {
       request.flush({});
     }
   });
+
+  it('confirms a charge and settles with the confirmed charge amount using the given keys', () => {
+    service.confirmCharge('bill', { version: 2, confirmedAmount: '205.40' }, 'confirm-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({});
+    const confirm = http.expectOne('/api/v1/expenses/bill/charge-confirmation');
+    expect(confirm.request.method).toBe('POST');
+    expect(confirm.request.headers.get('Idempotency-Key')).toBe('confirm-key');
+    expect(confirm.request.body).toEqual({ version: 2, confirmedAmount: '205.40' });
+    confirm.flush({});
+    const payment = { version: 2, paidAmount: '205.00', paymentDate: '2026-10-10', paidByUserId: 'actor',
+      paymentNotes: null, confirmedChargeAmount: '200.00' };
+    service.settle('bill', payment, 'pay-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({});
+    const settle = http.expectOne('/api/v1/expenses/bill/payment');
+    expect(settle.request.body).toEqual(payment);
+    settle.flush({});
+  });
 });
