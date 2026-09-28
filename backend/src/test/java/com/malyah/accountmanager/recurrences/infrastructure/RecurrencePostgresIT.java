@@ -37,14 +37,16 @@ class RecurrencePostgresIT {
     @BeforeEach void reset() {
         var ds=new DriverManagerDataSource(POSTGRES.getJdbcUrl(),POSTGRES.getUsername(),POSTGRES.getPassword());
         var flyway=Flyway.configure().dataSource(ds).cleanDisabled(false).load(); flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(16);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(17);
         jdbc=new JdbcTemplate(ds); insertSpace(SPACE,"Casa"); insertUser(ADMIN,"Admin","admin@example.com",SPACE,"ADMINISTRATOR");
         insertUser(GUEST,"Convidado","guest@example.com",SPACE,"GUEST"); insertSpace(OTHER,"Outra");
         var context=new AuthenticatedUserContextService(contextRepository());
         CategoryRepository categories=new NoCategoryRepository();
+        var transaction=new TransactionTemplate(new DataSourceTransactionManager(ds));
         var service=new RecurrenceService(new JdbcRecurrenceRepository(jdbc),context,categories,
-                new com.malyah.accountmanager.identity.infrastructure.JdbcFinancialMemberAccess(jdbc),Clock.fixed(NOW,ZoneOffset.UTC),UUID::randomUUID,new RecurrenceCalendar());
-        useCase=new TransactionalRecurrenceUseCase(service,new TransactionTemplate(new DataSourceTransactionManager(ds)));
+                new com.malyah.accountmanager.identity.infrastructure.JdbcFinancialMemberAccess(jdbc),Clock.fixed(NOW,ZoneOffset.UTC),UUID::randomUUID,new RecurrenceCalendar(),
+                new com.malyah.accountmanager.expenses.infrastructure.JdbcRecurringExpenseMaterializer(jdbc,transaction));
+        useCase=new TransactionalRecurrenceUseCase(service,transaction);
     }
 
     @Test void persistsReplaysListsAndReproducesTheBaseDayCalendarWithoutExpenses() {
@@ -68,6 +70,70 @@ class RecurrencePostgresIT {
         assertThatThrownBy(() -> useCase.create("admin@example.com",command(UUID.randomUUID(),"12",RecurrenceValueType.FIXED,GUEST)))
                 .isInstanceOf(RuntimeException.class);
         assertThat(jdbc.queryForObject("select count(*) from recurrence_definitions",Integer.class)).isEqualTo(1);
+    }
+
+    @Test void forecastsThirteenMonthsWithoutWritingAndAnticipatesOnceWithStableIdentity() {
+        var created=useCase.create("admin@example.com",new CreateRecurrenceCommand("Internet","149.90",
+                RecurrenceValueType.VARIABLE_ESTIMATE,RecurrenceFrequency.MONTHLY,LocalDate.of(2026,10,3),null,
+                null,null,UUID.randomUUID()));
+        var before=jdbc.queryForObject("select count(*) from expense_entries",Integer.class);
+        var forecast=useCase.forecasts("guest@example.com");
+        assertThat(forecast.from()).isEqualTo(YearMonth.of(2026,9));
+        assertThat(forecast.to()).isEqualTo(YearMonth.of(2027,9));
+        assertThat(forecast.occurrences()).hasSize(12).allSatisfy(item->{
+            assertThat(item.state()).isEqualTo("FORECAST"); assertThat(item.estimated()).isTrue();
+        });
+        assertThat(jdbc.queryForObject("select count(*) from expense_entries",Integer.class)).isEqualTo(before);
+
+        var key=UUID.randomUUID();
+        var anticipated=useCase.anticipate("guest@example.com",created.recurrence().id(),LocalDate.of(2026,10,3),key);
+        var replay=useCase.anticipate("guest@example.com",created.recurrence().id(),LocalDate.of(2026,10,3),key);
+        assertThat(anticipated.replayed()).isFalse();assertThat(replay.replayed()).isTrue();
+        assertThat(replay.occurrence().expenseId()).isEqualTo(anticipated.occurrence().expenseId());
+        assertThat(replay.occurrence().state()).isEqualTo("MATERIALIZED");
+        assertThat(replay.occurrence().chargeConfirmed()).isFalse();
+        assertThat(jdbc.queryForObject("select count(*) from expense_entries",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from recurrence_occurrence_events",Integer.class)).isEqualTo(1);
+    }
+
+    @Test void realExpenseWinsInForecastAndInvalidOrChangedIdempotentRequestsDoNotWrite() {
+        var created=useCase.create("admin@example.com",new CreateRecurrenceCommand("Seguro","200.00",
+                RecurrenceValueType.FIXED,RecurrenceFrequency.MONTHLY,LocalDate.of(2026,10,31),null,
+                null,null,UUID.randomUUID()));
+        var key=UUID.randomUUID();
+        var result=useCase.anticipate("admin@example.com",created.recurrence().id(),LocalDate.of(2026,10,31),key);
+        jdbc.update("""
+                update expense_entries set due_date=?,reference_date=?,status='CANCELLED',cancelled_at=?,
+                    cancelled_by_user_id=?,cancellation_reason='Teste de reconciliação',version=version+1 where id=?
+                """,LocalDate.of(2026,10,30),LocalDate.of(2026,10,30),Timestamp.from(NOW),ADMIN,
+                result.occurrence().expenseId());
+        var actual=useCase.forecasts("admin@example.com").occurrences().stream()
+                .filter(item->item.recurrenceId().equals(created.recurrence().id())).findFirst().orElseThrow();
+        assertThat(actual.state()).isEqualTo("MATERIALIZED");
+        assertThat(actual.actualDueDate()).isEqualTo(LocalDate.of(2026,10,30));
+        assertThat(actual.expenseStatus()).isEqualTo("CANCELLED");
+        assertThatThrownBy(()->useCase.anticipate("admin@example.com",created.recurrence().id(),LocalDate.of(2026,11,30),key))
+                .isInstanceOf(RecurrenceIdempotencyConflictException.class);
+        assertThatThrownBy(()->useCase.anticipate("admin@example.com",created.recurrence().id(),LocalDate.of(2026,11,29),UUID.randomUUID()))
+                .isInstanceOf(RecurrenceOccurrenceException.class);
+        assertThat(jdbc.queryForObject("select count(*) from expense_entries",Integer.class)).isEqualTo(1);
+    }
+
+    @Test void concurrentAnticipationsConvergeOnOneExpenseAndOneMaterializationEvent() throws Exception {
+        var created=useCase.create("admin@example.com",new CreateRecurrenceCommand("IPTU","900.00",
+                RecurrenceValueType.FIXED,RecurrenceFrequency.ANNUAL,LocalDate.of(2026,12,10),null,
+                null,null,UUID.randomUUID()));
+        var start=new java.util.concurrent.CountDownLatch(1);
+        try(var executor=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var first=executor.submit(()->{start.await();return useCase.anticipate("admin@example.com",
+                    created.recurrence().id(),LocalDate.of(2026,12,10),UUID.randomUUID());});
+            var second=executor.submit(()->{start.await();return useCase.anticipate("guest@example.com",
+                    created.recurrence().id(),LocalDate.of(2026,12,10),UUID.randomUUID());});
+            start.countDown();
+            assertThat(first.get().occurrence().expenseId()).isEqualTo(second.get().occurrence().expenseId());
+        }
+        assertThat(jdbc.queryForObject("select count(*) from expense_entries",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from recurrence_occurrence_events",Integer.class)).isEqualTo(1);
     }
 
     private CreateRecurrenceCommand command(UUID key,String amount,RecurrenceValueType type,UUID responsible) {

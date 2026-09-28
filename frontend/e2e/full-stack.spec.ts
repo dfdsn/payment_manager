@@ -296,15 +296,28 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByText('2027-03-31')).toBeVisible();
   await page.getByRole('button', { name: 'Cadastrar recorrência' }).click();
   await expect(page.getByText(/em até 30 segundos/)).toBeVisible();
-  await expect(page.getByText('Condomínio recorrente', { exact: true })).toBeVisible();
+  await expect(page.locator('mat-card-title').getByText('Condomínio recorrente', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cadastrar recorrência' })).toBeEnabled();
+  const futureForecast = page.locator('article.forecast').filter({ hasText: 'Condomínio recorrente' }).first();
+  await expect(futureForecast.getByText('Previsão fixa')).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await futureForecast.getByRole('button', { name: 'Antecipar lançamento' }).click();
+  await expect(page.getByText(/Lançamento antecipado sem alterar/)).toBeVisible();
+  await expect(page.locator('article.forecast').filter({ hasText: 'Condomínio recorrente' }).first().getByText('Lançamento confirmado')).toBeVisible();
+  await page.goto('/despesas');
+  await page.getByLabel('Buscar na descrição').fill('Condomínio recorrente');
+  await page.getByLabel('Data inicial').fill('2027-01-01');
+  await page.getByLabel('Data final').fill('2027-01-31');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByText('Condomínio recorrente', { exact: true })).toBeVisible();
+  await page.goto('/recorrencias');
 
   await page.getByLabel('Descrição').fill('Energia estimada automática');
   await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('180,50');
   await page.getByLabel('Tipo do valor').selectOption('VARIABLE_ESTIMATE');
   await page.getByLabel('Primeiro vencimento').fill('2026-09-30');
   await page.getByRole('button', { name: 'Cadastrar recorrência' }).click();
-  await expect(page.getByText('Energia estimada automática', { exact: true })).toBeVisible();
+  await expect(page.locator('mat-card-title').getByText('Energia estimada automática', { exact: true })).toBeVisible();
   await page.goto('/despesas');
   await expect.poll(() => page.evaluate(async () => {
     const response = await fetch('/api/v1/expenses?search=Energia%20estimada%20autom%C3%A1tica', {

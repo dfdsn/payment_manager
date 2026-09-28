@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import com.malyah.accountmanager.expenses.application.port.CategoryRepository;
+import com.malyah.accountmanager.expenses.application.RecurringExpenseMaterializer;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContext;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.identity.application.FinancialMemberAccess;
@@ -32,7 +33,8 @@ class RecurrenceServiceTest {
     @BeforeEach void setup() {
         repository=mock(RecurrenceRepository.class); categories=mock(CategoryRepository.class); members=mock(FinancialMemberAccess.class);
         AuthenticatedUserContextQuery context=email -> new AuthenticatedUserContext(ACTOR,"Ana",email,SPACE,"Casa",SpaceRole.GUEST,"BRL","pt-BR","America/Sao_Paulo");
-        service=new RecurrenceService(repository,context,categories,members,Clock.fixed(NOW,ZoneOffset.UTC),()->ID,new RecurrenceCalendar());
+        service=new RecurrenceService(repository,context,categories,members,Clock.fixed(NOW,ZoneOffset.UTC),()->ID,
+                new RecurrenceCalendar(),mock(RecurringExpenseMaterializer.class));
         when(repository.createIdempotently(any(),any(),any(),anyString(),any())).thenAnswer(invocation -> {
             var definition=invocation.<RecurrenceDefinition>getArgument(0);
             return new StoredRecurrenceCreation(new StoredRecurrence(definition,"Moradia","Beto","Ana"),false);

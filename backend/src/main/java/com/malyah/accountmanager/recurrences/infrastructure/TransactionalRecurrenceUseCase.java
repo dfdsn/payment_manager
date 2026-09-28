@@ -17,4 +17,9 @@ final class TransactionalRecurrenceUseCase implements RecurrenceUseCase {
     @Override public List<LocalDate> preview(LocalDate first, LocalDate last, RecurrenceFrequency frequency) {
         return delegate.preview(first,last,frequency);
     }
+    @Override public ForecastPeriodView forecasts(String email) { return delegate.forecasts(email); }
+    @Override public AnticipationResult anticipate(String email,java.util.UUID recurrenceId,LocalDate due,
+            java.util.UUID key) {
+        return Objects.requireNonNull(transactions.execute(status->delegate.anticipate(email,recurrenceId,due,key)));
+    }
 }

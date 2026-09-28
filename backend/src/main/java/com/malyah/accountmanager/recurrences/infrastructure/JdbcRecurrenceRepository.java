@@ -10,6 +10,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.malyah.accountmanager.recurrences.application.RecurrenceIdempotencyConflictException;
 import com.malyah.accountmanager.recurrences.application.StoredRecurrence;
 import com.malyah.accountmanager.recurrences.application.StoredRecurrenceCreation;
+import com.malyah.accountmanager.recurrences.application.AnticipationClaim;
+import com.malyah.accountmanager.recurrences.application.StoredOccurrence;
 import com.malyah.accountmanager.recurrences.application.port.RecurrenceRepository;
 import com.malyah.accountmanager.recurrences.domain.RecurrenceDefinition;
 import com.malyah.accountmanager.recurrences.domain.RecurrenceFrequency;
@@ -33,7 +35,7 @@ final class JdbcRecurrenceRepository implements RecurrenceRepository {
                     """, (rs,row) -> new Request(rs.getString(1), rs.getObject(2, UUID.class)), d.spaceId(), actorId, key);
             if (existing == null || !requestHash.equals(existing.hash()) || existing.id() == null)
                 throw new RecurrenceIdempotencyConflictException();
-            return new StoredRecurrenceCreation(find(d.spaceId(), existing.id()), true);
+            return new StoredRecurrenceCreation(findById(d.spaceId(), existing.id()), true);
         }
         jdbc.update("""
                 insert into recurrence_definitions(id,space_id,description,amount,value_type,frequency,first_due_date,
@@ -50,15 +52,54 @@ final class JdbcRecurrenceRepository implements RecurrenceRepository {
                 update recurrence_idempotency_requests set recurrence_id=?,completed_at=?
                  where space_id=? and actor_user_id=? and idempotency_key=?
                 """, d.id(), Timestamp.from(at), d.spaceId(), actorId, key);
-        return new StoredRecurrenceCreation(find(d.spaceId(), d.id()), false);
+        return new StoredRecurrenceCreation(findById(d.spaceId(), d.id()), false);
     }
 
     @Override public List<StoredRecurrence> findAll(UUID spaceId) {
         return jdbc.query(selectBase()+" where r.space_id=? order by r.created_at,r.id", this::map, spaceId);
     }
 
-    private StoredRecurrence find(UUID spaceId, UUID id) {
+    @Override public StoredRecurrence findById(UUID spaceId, UUID id) {
         return jdbc.queryForObject(selectBase()+" where r.space_id=? and r.id=?", this::map, spaceId, id);
+    }
+
+    @Override public List<StoredOccurrence> findOccurrences(UUID spaceId, java.time.LocalDate from,
+            java.time.LocalDate to) {
+        return jdbc.query("""
+                select o.recurrence_id,o.scheduled_due_date,o.expense_id,e.due_date,e.status,
+                       e.charge_amount,e.charge_confirmed
+                  from recurrence_occurrences o
+                  join expense_entries e on e.id=o.expense_id and e.space_id=o.space_id
+                 where o.space_id=? and o.scheduled_due_date between ? and ?
+                 order by o.scheduled_due_date,o.recurrence_id
+                """, (rs,row) -> new StoredOccurrence(rs.getObject(1,UUID.class),
+                        rs.getObject(2,java.time.LocalDate.class),rs.getObject(3,UUID.class),
+                        rs.getObject(4,java.time.LocalDate.class),rs.getString(5),rs.getBigDecimal(6),rs.getBoolean(7)),
+                spaceId,from,to);
+    }
+
+    @Override public AnticipationClaim claimAnticipation(UUID spaceId, UUID actorId, UUID recurrenceId,
+            java.time.LocalDate dueDate, UUID key, String requestHash, Instant at) {
+        var claimed=jdbc.update("""
+                insert into recurrence_anticipation_requests(space_id,actor_user_id,idempotency_key,request_hash,
+                    recurrence_id,scheduled_due_date,created_at)
+                values(?,?,?,?,?,?,?) on conflict do nothing
+                """,spaceId,actorId,key,requestHash,recurrenceId,dueDate,Timestamp.from(at));
+        if(claimed==1) return new AnticipationClaim(false,null);
+        var existing=jdbc.queryForObject("""
+                select request_hash,expense_id from recurrence_anticipation_requests
+                 where space_id=? and actor_user_id=? and idempotency_key=? for update
+                """,(rs,row)->new Request(rs.getString(1),rs.getObject(2,UUID.class)),spaceId,actorId,key);
+        if(existing==null||!requestHash.equals(existing.hash())||existing.id()==null)
+            throw new RecurrenceIdempotencyConflictException();
+        return new AnticipationClaim(true,existing.id());
+    }
+
+    @Override public void completeAnticipation(UUID spaceId,UUID actorId,UUID key,UUID expenseId,Instant at) {
+        jdbc.update("""
+                update recurrence_anticipation_requests set expense_id=?,completed_at=?
+                 where space_id=? and actor_user_id=? and idempotency_key=?
+                """,expenseId,Timestamp.from(at),spaceId,actorId,key);
     }
 
     private String selectBase() { return """

@@ -28,6 +28,17 @@ class RecurrenceController {
 
     @GetMapping List<RecurrenceView> list(Principal principal) { return useCase.list(principal.getName()); }
 
+    @GetMapping("/forecasts") ForecastPeriodView forecasts(Principal principal) {
+        return useCase.forecasts(principal.getName());
+    }
+
+    @PostMapping("/{recurrenceId}/occurrences/{scheduledDueDate}/anticipation")
+    ResponseEntity<AnticipationResult> anticipate(Principal principal,@PathVariable UUID recurrenceId,
+            @PathVariable LocalDate scheduledDueDate,@RequestHeader("Idempotency-Key") UUID key,
+            @Valid @RequestBody AnticipateOccurrenceRequest request) {
+        return ResponseEntity.ok(useCase.anticipate(principal.getName(),recurrenceId,scheduledDueDate,key));
+    }
+
     @PostMapping("/calendar-preview") List<LocalDate> preview(Principal principal,
             @Valid @RequestBody CalendarPreviewRequest request) {
         return useCase.preview(request.firstDueDate(),request.lastDueDate(),request.frequency());

@@ -25,6 +25,10 @@ class RecurrenceApiExceptionHandler {
     ResponseEntity<?> conflict(RecurrenceIdempotencyConflictException error) {
         return error(HttpStatus.CONFLICT,"IDEMPOTENCY_CONFLICT",error.getMessage(),"Idempotency-Key");
     }
+    @ExceptionHandler(com.malyah.accountmanager.recurrences.application.RecurrenceOccurrenceException.class)
+    ResponseEntity<?> occurrence(RuntimeException error) {
+        return error(HttpStatus.CONFLICT,"RECURRENCE_OCCURRENCE_CONFLICT",error.getMessage(),"scheduledDueDate");
+    }
     @ExceptionHandler(com.malyah.accountmanager.expenses.application.CategoryNotFoundException.class)
     ResponseEntity<?> category() { return error(HttpStatus.BAD_REQUEST,"CATEGORY_NOT_SELECTABLE","A categoria não está disponível no espaço.","categoryId"); }
     @ExceptionHandler(com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException.class)

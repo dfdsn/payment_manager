@@ -32,4 +32,18 @@ describe('RecurrenceService', () => {
     expect(request.request.body).toEqual(data);
     request.flush({});
   });
+
+  it('loads forecasts and anticipates one occurrence with explicit confirmation', () => {
+    service.forecasts().subscribe();
+    http.expectOne('/api/v1/recurrences/forecasts').flush({ from: '2026-09', to: '2027-09', occurrences: [] });
+    const item = { recurrenceId: 'rec-1', description: 'Seguro', amount: '100.00', estimated: false,
+      scheduledDueDate: '2026-10-03', state: 'FORECAST' as const, expenseId: null, actualDueDate: null,
+      expenseStatus: null, chargeConfirmed: false };
+    service.anticipate(item, 'anticipation-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({});
+    const request = http.expectOne('/api/v1/recurrences/rec-1/occurrences/2026-10-03/anticipation');
+    expect(request.request.headers.get('Idempotency-Key')).toBe('anticipation-key');
+    expect(request.request.body).toEqual({ confirmed: true });
+    request.flush({ occurrence: item, replayed: false });
+  });
 });
