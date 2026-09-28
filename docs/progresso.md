@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 28/09/2026.
 
-**Estado atual: H04.4 e H04.5 em validação.** A alteração “este e os próximos” e o encerramento de recorrências (H04.5) estão implementados e aprovados nos gates, em 68 ITs contra PostgreSQL local e no smoke E2E; aguardam a CI com Testcontainers no PR e o E2E full-stack. H04.4 também aguarda o E2E full-stack. E01 e E02 estão concluídos, H03.3 mantém validação independente e E04 não está concluído.
+**Estado atual: H04.4 e H04.5 em validação.** A alteração “este e os próximos” e o encerramento de recorrências (H04.5) estão implementados e aprovados nos gates, em 68 ITs contra PostgreSQL local e no smoke E2E; a CI `36470203451` (commit `59f7988`) aprovou os 68 ITs em Testcontainers `postgres:17.6-alpine` (V1–V19, `RecurrenceChangePostgresIT` 10/10), além de 146 unitários, JaCoCo e PIT 81%, e o job frontend. Falta o E2E full-stack. H04.4 também aguarda o E2E full-stack. E01 e E02 estão concluídos, H03.3 mantém validação independente e E04 não está concluído.
 
 ## Resumo
 
@@ -13,7 +13,7 @@ Versão 1.0 • Atualizado em 28/09/2026.
 | Histórias | 15 de 46 concluídas; E01 e E02 concluídos, E03 depende da validação final de H03.3 e E04 está em andamento. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Confirmar a CI do PR da H04.5 e executar `npm run e2e:full-stack` na stack local, que cobre H04.4 e H04.5. Com ambos aprovados, H04.4, H04.5 e E04 podem ser concluídos. O próximo épico (E05) não foi iniciado. |
+| Próxima ação | Executar `npm run e2e:full-stack` na stack local, que cobre H04.4 e H04.5. Com ambos aprovados, H04.4, H04.5 e E04 podem ser concluídos. O próximo épico (E05) não foi iniciado. |
 
 ## Estados permitidos
 
@@ -59,7 +59,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H04.2 | Gerar ocorrências sem duplicação | Concluído | Job PostgreSQL com lease/fencing, unicidade por recorrência/data, rollback e retomada; V16, 38 ITs selecionados e E2E aprovados. Evidência: `docs/evidencias/H04.2.md`. |
 | H04.3 | Visualizar e antecipar previsões | Concluído | Horizonte de 13 meses somente leitura, reconciliação por identidade estável e antecipação idempotente aprovados em PostgreSQL, gates e E2E. Evidência: `docs/evidencias/H04.3.md`. |
 | H04.4 | Confirmar valores variáveis | Em validação | Confirmação auditada, propagação somente para estimativas posteriores, quitação com confirmação atômica e interface implementadas; 124 Java, JaCoCo, PIT 76%, 58 ITs em PostgreSQL 16 local e em Testcontainers 17.6 na CI, 59 frontend, build e 2 smoke E2E aprovados. Falta o E2E full-stack. Evidência: `docs/evidencias/H04.4.md`. |
-| H04.5 | Alterar e encerrar recorrência | Em validação | “Este e os próximos” e encerramento com prévia de impacto, revalidação ao salvar, preservação de pagos/cancelados/confirmados/corrigidos, revisão sinalizada, auditoria e interface; V19. 146 Java, JaCoCo 91,88%/82,75%, PIT 81%, 68 ITs em PostgreSQL 16 local, 66 frontend, build e 3 smoke E2E aprovados. Faltam CI do PR e E2E full-stack. Evidência: `docs/evidencias/H04.5.md`. |
+| H04.5 | Alterar e encerrar recorrência | Em validação | “Este e os próximos” e encerramento com prévia de impacto, revalidação ao salvar, preservação de pagos/cancelados/confirmados/corrigidos, revisão sinalizada, auditoria e interface; V19. 146 Java, JaCoCo 91,88%/82,75%, PIT 81%, 68 ITs em PostgreSQL 16 local, 66 frontend, build e 3 smoke E2E aprovados. CI `36470203451` aprovou os 68 ITs em Testcontainers 17.6. Falta o E2E full-stack. Evidência: `docs/evidencias/H04.5.md`. |
 | H05.1 | Criar compra e parcelas | Não iniciado | — |
 | H05.2 | Consultar e quitar parcelas | Não iniciado | — |
 | H05.3 | Ajustar e cancelar parcelas pendentes | Não iniciado | — |
@@ -385,10 +385,10 @@ Arquivos e comportamento alterados: V19; domínio `RecurrenceSchedule`, `Recurre
 Migrações e impacto sobre dados: V19 cria `recurrence_segments` (preenchida a partir das definições existentes), `recurrence_change_events` e `recurrence_change_requests`; adiciona colunas de encerramento à definição, `scheduled_month` gerado com índice único e sinal de revisão às ocorrências, estado `SKIPPED` aos jobs e `recurrence_change_id` aos eventos de correção e cancelamento. Nenhum dado existente é reescrito; nenhuma migração anterior foi editada.
 Testes executados: 146 unitários/HTTP/ArchUnit; 68 ITs Failsafe em PostgreSQL 16.13 local (10 de `RecurrenceChangePostgresIT`, repetido 4 vezes sem falha); JaCoCo e PIT; 66 Vitest; build Angular; 3 E2E smoke. Todos aprovados.
 Cobertura e mutação aplicáveis: JaCoCo (execução unitária) 1381/1503 linhas (91,88%) e 758/916 branches (82,75%); PIT 570/701 (81%), força 89%; limites mantidos.
-Validação manual / integração real: sem Docker neste ambiente, os ITs rodaram contra PostgreSQL 16.13 local com as mesmas classes; a CI do PR executará os mesmos ITs com Testcontainers. O E2E full-stack foi estendido, mas não executado.
+Validação manual / integração real: sem Docker neste ambiente, os ITs rodaram contra PostgreSQL 16.13 local com as mesmas classes; a CI `36470203451` (commit `59f7988`) aprovou os 68 ITs em Testcontainers `postgres:17.6-alpine` (V1–V19, `RecurrenceChangePostgresIT` 10/10), além de 146 unitários, JaCoCo e PIT 81%, e o job frontend. O E2E full-stack foi estendido, mas não executado.
 Limitações e cenários futuros: o sinal de revisão é informativo (resolver = correção, reversão ou cancelamento individual); a prévia mostra no máximo o horizonte de 13 meses; dashboard, fechamento e notificações consumirão `recurrence_change_events`, `reviewReason` e os novos eventos em E06–E08.
 Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H04.5.md e este arquivo.
-Condição de conclusão ou desbloqueio: CI verde no PR e `npm run e2e:full-stack` aprovado com `compose.full-local.yml`.
+Condição de conclusão ou desbloqueio: CI verde no PR (atendida: CI `36470203451`, commit `59f7988`) e `npm run e2e:full-stack` aprovado com `compose.full-local.yml`.
 Próximo passo: concluir a validação acima; E05 não foi iniciado.
 ```
 
@@ -450,4 +450,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 28/09/2026 | H04.2 implementou geração mensal idempotente com fila PostgreSQL, `SKIP LOCKED`, lease/fencing, retomada após falha, rollback atômico, origem recorrente e distinção fixa/estimada. Regressão final: 111 Java, 38 ITs PostgreSQL 17.6 selecionados, JaCoCo aprovado, PIT 75%/força 86%, 49 frontend, build e 1 E2E full-stack aprovado. H04.2 concluída; próxima história H04.3. |
 | 28/09/2026 | H04.3 implementou horizonte somente leitura do mês atual + 12, reconciliação por identidade estável e antecipação confirmada/idempotente usando a materialização da H04.2. Regressão: 111 Java, 9 ITs selecionados e repetição específica de 5 ITs com concorrência em PostgreSQL 17.6/V17, JaCoCo aprovado, PIT 71%/força 86%, 51 frontend, build e 1 E2E full-stack aprovado. H04.3 concluída; próxima história H04.4. |
 | 28/09/2026 | H04.4 implementou confirmação de valores variáveis com auditoria, propagação somente para estimativas posteriores, quitação com confirmação atômica e interface. Regressão: 124 Java, 58 ITs em PostgreSQL 16 local, JaCoCo 88,60%/77,66% (unitário), PIT 76%/força 87%, 59 frontend, build e 2 smoke E2E aprovados. A CI `36455395731` (commit `34ffc3a`) aprovou 58 ITs em Testcontainers 17.6. Em validação até o E2E full-stack; H04.5 não iniciada. |
-| 28/09/2026 | H04.5 implementou alteração “este e os próximos” e encerramento de recorrências com prévia de impacto revalidada ao salvar, preservação de pagos/cancelados/confirmados/corrigidos, revisão sinalizada, auditoria e interface (V19). Regressão: 146 Java, 68 ITs em PostgreSQL 16 local, JaCoCo 91,88%/82,75%, PIT 81%/força 89%, 66 frontend, build e 3 smoke E2E aprovados. Em validação até a CI do PR e o E2E full-stack; E04 não concluído e E05 não iniciado. |
+| 28/09/2026 | H04.5 implementou alteração “este e os próximos” e encerramento de recorrências com prévia de impacto revalidada ao salvar, preservação de pagos/cancelados/confirmados/corrigidos, revisão sinalizada, auditoria e interface (V19). Regressão: 146 Java, 68 ITs em PostgreSQL 16 local, JaCoCo 91,88%/82,75%, PIT 81%/força 89%, 66 frontend, build e 3 smoke E2E aprovados. A CI `36470203451` aprovou os 68 ITs em Testcontainers 17.6. Em validação até o E2E full-stack; E04 não concluído e E05 não iniciado. |
