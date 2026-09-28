@@ -12,14 +12,27 @@ export interface InstallmentPurchaseData {
   responsibleUserId: string | null;
 }
 export interface InstallmentItem { number: number; count: number; amount: string; dueDate: string;
-  expenseId: string | null; status: 'PENDING' | 'PAID' | 'CANCELLED' | null; }
+  expenseId: string | null; status: 'PENDING' | 'PAID' | 'CANCELLED' | null; version?: number | null;
+  overdue?: boolean; description?: string | null; categoryId?: string | null; categoryName?: string | null;
+  responsibleUserId?: string | null; responsibleDisplayName?: string | null; paymentDate?: string | null;
+  paidAmount?: string | null; }
+/** H05.2: progress derived only from the installments' situations; never a bank or card balance. */
+export interface InstallmentProgress { installmentCount: number; paidCount: number; pendingCount: number;
+  overdueCount: number; cancelledCount: number; paidAmount: string; pendingAmount: string; overdueAmount: string;
+  cancelledAmount: string; nextDueDate: string | null; }
+export interface InstallmentPurchaseSummary { id: string; description: string; totalAmount: string;
+  installmentCount: number; firstDueDate: string; lastDueDate: string | null; categoryName: string | null;
+  responsibleDisplayName: string | null; createdAt: string; progress: InstallmentProgress; }
+export interface InstallmentPurchasePage { items: InstallmentPurchaseSummary[]; page: number; size: number;
+  totalItems: number; }
 export interface InstallmentPreview { description: string; totalAmount: string; installmentCount: number;
   firstDueDate: string; lastDueDate: string; regularAmount: string; lastAmount: string;
   lastInstallmentAdjustment: string; installmentsSum: string; installments: InstallmentItem[]; }
 export interface InstallmentPurchase { id: string; description: string; totalAmount: string; installmentCount: number;
   firstDueDate: string; lastDueDate: string; categoryId: string | null; categoryName: string | null;
   responsibleUserId: string | null; responsibleDisplayName: string | null; createdByUserId: string;
-  createdByDisplayName: string; createdAt: string; installmentsSum: string; installments: InstallmentItem[]; }
+  createdByDisplayName: string; createdAt: string; installmentsSum: string; progress?: InstallmentProgress;
+  installments: InstallmentItem[]; }
 
 @Injectable({ providedIn: 'root' })
 export class InstallmentPurchaseService {
@@ -30,6 +43,12 @@ export class InstallmentPurchaseService {
   preview(data: InstallmentPurchaseData) {
     return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>
       this.http.post<InstallmentPreview>(`${this.endpoint}/preview`, data)));
+  }
+  list(page = 0, size = 20) {
+    return this.http.get<InstallmentPurchasePage>(this.endpoint, { params: { page, size } });
+  }
+  get(id: string) {
+    return this.http.get<InstallmentPurchase>(`${this.endpoint}/${id}`);
   }
   create(data: InstallmentPurchaseData, key: string) {
     return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() =>

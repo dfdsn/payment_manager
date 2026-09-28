@@ -374,6 +374,16 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByText(/A última parcela tem R\$ 0\.01 a mais/)).toBeVisible();
   await page.getByRole('button', { name: 'Confirmar e criar 3 parcelas' }).click();
   await expect(page.getByText(/criada com 3 parcelas pendentes, de 2027-01-31 a 2027-03-31, somando R\$ 100\.00/)).toBeVisible();
+  // H05.2: progress comes from the installments; paying selected ones uses the atomic batch of Despesas.
+  await expect(page.getByText('0 de 3 pagas · 3 pendentes')).toBeVisible();
+  await page.getByRole('button', { name: 'Ver parcelas de Sofá parcelado' }).click();
+  await page.getByLabel('Selecionar parcela 1/3').check();
+  await page.getByRole('button', { name: 'Quitar selecionadas (1)' }).click();
+  await page.getByLabel(/Confirmo a quitação integral da parcela selecionada/).check();
+  await page.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(page.getByText('1 parcela quitada.')).toBeVisible();
+  await expect(page.getByText('1 de 3 pagas · 2 pendentes')).toBeVisible();
+  await expect(page.getByRole('row', { name: /1\/3 2027-01-31 R\$ 33\.33 Paga em/ })).toBeVisible();
   await page.getByRole('link', { name: 'Ver parcelas em Despesas' }).click();
   await page.getByLabel('Buscar na descrição').fill('Sofá parcelado');
   // Without dates the list shows only the current month (H03.4); the installments fall in 2027.

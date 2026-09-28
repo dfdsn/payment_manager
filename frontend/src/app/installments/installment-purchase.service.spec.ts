@@ -33,4 +33,15 @@ describe('InstallmentPurchaseService', () => {
     expect(request.request.body).toEqual(data);
     request.flush({});
   });
+
+  it('reads purchases with progress and one purchase detail without writing anything', () => {
+    service.list(2, 5).subscribe();
+    const list = http.expectOne(r => r.url === '/api/v1/installment-purchases');
+    expect(list.request.method).toBe('GET');
+    expect(list.request.params.get('page')).toBe('2');
+    expect(list.request.params.get('size')).toBe('5');
+    list.flush({ items: [], page: 2, size: 5, totalItems: 0 });
+    service.get('p-1').subscribe();
+    http.expectOne('/api/v1/installment-purchases/p-1').flush({});
+  });
 });

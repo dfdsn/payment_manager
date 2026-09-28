@@ -157,6 +157,8 @@ test('reviews an installment purchase with the cent remainder on the last instal
   await page.route('**/api/v1/identity/members', route => route.fulfill(json([{ userId: 'actor', displayName: 'Diego', currentUser: true }])));
   await page.route('**/api/v1/categories**', route => route.fulfill(json([{ id: 'cat-1', name: 'Casa', active: true }])));
   await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ headerName: 'X-XSRF-TOKEN' })));
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/installment-purchases?**', route => route.fulfill(json({ items: [], page: 0, size: 10, totalItems: 0 })));
   const previews: unknown[] = [];
   await page.route('**/api/v1/installment-purchases/preview', async route => {
     previews.push(route.request().postDataJSON());
@@ -192,4 +194,58 @@ test('reviews an installment purchase with the cent remainder on the last instal
   expect(creations).toHaveLength(2);
   expect(creations[1].key).toBe(creations[0].key);
   expect(creations[1].body).toEqual(previews[0]);
+});
+
+test('shows purchase progress and pays only the selected pending installments in one batch', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const item = (number: number, status: string, extra: Record<string, unknown> = {}) => ({ number, count: 3,
+    amount: number === 3 ? '33.34' : '33.33', dueDate: `2026-${String(8 + number).padStart(2, '0')}-15`,
+    expenseId: `e-${number}`, status, version: number, overdue: false, description: 'Sofá', categoryName: null,
+    responsibleDisplayName: null, paymentDate: null, paidAmount: null, ...extra });
+  const progress = (paid: number) => ({ installmentCount: 3, paidCount: paid, pendingCount: 3 - paid,
+    overdueCount: paid === 0 ? 1 : 0, cancelledCount: 0, paidAmount: paid ? '66.66' : '0.00',
+    pendingAmount: paid ? '33.34' : '100.00', overdueAmount: paid ? '0.00' : '33.33', cancelledAmount: '0.00',
+    nextDueDate: paid ? '2026-11-15' : '2026-09-15' });
+  let paid = 0;
+  const summary = () => ({ id: 'p-1', description: 'Sofá', totalAmount: '100.00', installmentCount: 3,
+    firstDueDate: '2026-09-15', lastDueDate: '2026-11-15', categoryName: null, responsibleDisplayName: null,
+    createdAt: '2026-08-01T12:00:00Z', progress: progress(paid) });
+  const detail = () => ({ ...summary(), categoryId: null, responsibleUserId: null, createdByUserId: 'actor',
+    createdByDisplayName: 'Diego', installmentsSum: '100.00', installments: paid
+      ? [item(1, 'PAID', { paymentDate: '2026-09-28', paidAmount: '33.33' }), item(2, 'PAID', { paymentDate: '2026-09-28', paidAmount: '33.33' }), item(3, 'PENDING')]
+      : [item(1, 'PENDING', { overdue: true }), item(2, 'PENDING'), item(3, 'PENDING')] });
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/identity/members', route => route.fulfill(json([{ userId: 'actor', displayName: 'Diego', currentUser: true }])));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([])));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ headerName: 'X-XSRF-TOKEN' })));
+  await page.route('**/api/v1/installment-purchases?**', route => route.fulfill(json({ items: [summary()], page: 0, size: 10, totalItems: 1 })));
+  await page.route('**/api/v1/installment-purchases/p-1', route => route.fulfill(json(detail())));
+  const batches: { body: { items: unknown[] }; key: string | undefined }[] = [];
+  await page.route('**/api/v1/expenses/batch-payment', async route => {
+    batches.push({ body: route.request().postDataJSON(), key: route.request().headers()['idempotency-key'] });
+    paid = 2;
+    await route.fulfill(json({ operationId: 'op-1', replayed: false, items: batches[0].body.items }));
+  });
+
+  await page.goto('/compras-parceladas');
+  await expect(page.getByText('0 de 3 pagas · 3 pendentes (1 atrasadas)')).toBeVisible();
+  await expect(page.getByText(/não é saldo bancário/)).toBeVisible();
+  await page.getByRole('button', { name: 'Ver parcelas de Sofá' }).click();
+  await expect(page.getByRole('row', { name: /1\/3 2026-09-15 R\$ 33\.33 Atrasada/ })).toBeVisible();
+  await page.getByLabel('Selecionar parcela 1/3').check();
+  await page.getByLabel('Selecionar parcela 2/3').check();
+  await page.getByRole('button', { name: 'Quitar selecionadas (2)' }).click();
+  await expect(page.getByText('Confirmo a quitação integral das 2 parcelas, no total de R$ 66.66.')).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(page.getByText('Confirme a quitação para continuar.')).toBeVisible();
+  expect(batches).toHaveLength(0);
+  await page.getByLabel(/Confirmo a quitação integral/).check();
+  await page.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(page.getByText('2 parcelas quitadas de uma vez.')).toBeVisible();
+  await expect(page.getByText('2 de 3 pagas · 1 pendentes')).toBeVisible();
+  await expect(page.getByRole('row', { name: /2\/3 2026-10-15 R\$ 33\.33 Paga em 2026-09-28/ })).toBeVisible();
+  expect(batches).toHaveLength(1);
+  expect(batches[0].key).toBeTruthy();
+  expect(batches[0].body).toMatchObject({ items: [{ expenseId: 'e-1', version: 1 }, { expenseId: 'e-2', version: 2 }],
+    paidByUserId: 'actor', confirmed: true });
 });

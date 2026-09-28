@@ -5,11 +5,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import com.malyah.accountmanager.expenses.application.InstallmentExpenseSnapshot;
 import com.malyah.accountmanager.expenses.application.InstallmentExpenses;
 import com.malyah.accountmanager.expenses.application.InstallmentExpensesCommand;
@@ -28,6 +31,7 @@ import com.malyah.accountmanager.installments.domain.InstallmentValidationExcept
  * the same calculation; creation recalculates and revalidates everything, so a preview never replaces validation.
  */
 public final class InstallmentPurchaseService implements InstallmentPurchaseUseCase {
+    static final int MAX_PAGE_SIZE = 100;
     private final InstallmentPurchaseRepository repository;
     private final InstallmentExpenses expenses;
     private final AuthenticatedUserContextQuery context;
@@ -100,17 +104,55 @@ public final class InstallmentPurchaseService implements InstallmentPurchaseUseC
         categories.requireSelectable(actor.spaceId(), command.categoryId());
     }
 
+    @Override
+    public InstallmentPurchasePage list(String actorEmail, int page, int size) {
+        if (page < 0) throw new InstallmentValidationException("page", "Informe uma página válida.");
+        if (size < 1 || size > MAX_PAGE_SIZE)
+            throw new InstallmentValidationException("size", "Informe de 1 a " + MAX_PAGE_SIZE + " compras por página.");
+        var actor = context.findByEmail(actorEmail);
+        var today = today(actor);
+        var purchases = repository.list(actor.spaceId(), Math.multiplyExact(page, size), size);
+        var installments = expenses.findByPurchases(actor.spaceId(),
+                        purchases.stream().map(StoredInstallmentPurchase::id).toList()).stream()
+                .collect(Collectors.groupingBy(InstallmentExpenseSnapshot::purchaseId));
+        var items = purchases.stream().map(purchase -> {
+            var entries = installments.getOrDefault(purchase.id(), List.of());
+            return new InstallmentPurchaseSummary(purchase.id(), purchase.description(),
+                    purchase.totalAmount().toPlainString(), purchase.installmentCount(), purchase.firstDueDate(),
+                    lastDueDate(entries), purchase.categoryName(), purchase.responsibleDisplayName(),
+                    purchase.createdAt(), InstallmentProgress.of(entries, today));
+        }).toList();
+        return new InstallmentPurchasePage(items, page, size, repository.count(actor.spaceId()));
+    }
+
+    @Override
+    public InstallmentPurchaseView get(String actorEmail, UUID purchaseId) {
+        return view(context.findByEmail(actorEmail), purchaseId);
+    }
+
     private InstallmentPurchaseView view(AuthenticatedUserContext actor, UUID purchaseId) {
-        var purchase = repository.find(actor.spaceId(), purchaseId);
+        var purchase = repository.find(actor.spaceId(), purchaseId)
+                .orElseThrow(InstallmentPurchaseNotFoundException::new);
         var entries = expenses.find(actor.spaceId(), purchaseId);
+        var today = today(actor);
         var views = entries.stream().map(e -> new InstallmentView(e.number(), e.count(), e.amount().toPlainString(),
-                e.dueDate(), e.expenseId(), e.status())).toList();
+                e.dueDate(), e.expenseId(), e.status(), e.version(), InstallmentProgress.isOverdue(e, today),
+                e.description(), e.categoryId(), e.categoryName(), e.responsibleUserId(), e.responsibleDisplayName(),
+                e.paymentDate(), e.paidAmount() == null ? null : e.paidAmount().toPlainString())).toList();
         return new InstallmentPurchaseView(purchase.id(), purchase.description(), purchase.totalAmount().toPlainString(),
-                purchase.installmentCount(), purchase.firstDueDate(),
-                entries.isEmpty() ? null : entries.getLast().dueDate(), purchase.categoryId(), purchase.categoryName(),
-                purchase.responsibleUserId(), purchase.responsibleDisplayName(), purchase.createdByUserId(),
-                purchase.createdByDisplayName(), purchase.createdAt(),
-                sum(entries.stream().map(InstallmentExpenseSnapshot::amount).toList()), views);
+                purchase.installmentCount(), purchase.firstDueDate(), lastDueDate(entries), purchase.categoryId(),
+                purchase.categoryName(), purchase.responsibleUserId(), purchase.responsibleDisplayName(),
+                purchase.createdByUserId(), purchase.createdByDisplayName(), purchase.createdAt(),
+                sum(entries.stream().map(InstallmentExpenseSnapshot::amount).toList()),
+                InstallmentProgress.of(entries, today), views);
+    }
+
+    private LocalDate today(AuthenticatedUserContext actor) {
+        return LocalDate.now(clock.withZone(ZoneId.of(actor.timeZone())));
+    }
+
+    private static LocalDate lastDueDate(List<InstallmentExpenseSnapshot> entries) {
+        return entries.isEmpty() ? null : entries.getLast().dueDate();
     }
 
     private static String sum(List<BigDecimal> amounts) {

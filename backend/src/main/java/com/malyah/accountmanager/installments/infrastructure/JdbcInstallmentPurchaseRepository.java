@@ -1,7 +1,12 @@
 package com.malyah.accountmanager.installments.infrastructure;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import com.malyah.accountmanager.installments.application.InstallmentIdempotencyConflictException;
@@ -56,19 +61,38 @@ final class JdbcInstallmentPurchaseRepository implements InstallmentPurchaseRepo
     }
 
     @Override
-    public StoredInstallmentPurchase find(UUID spaceId, UUID purchaseId) {
-        return jdbc.queryForObject("""
-                select p.id, p.space_id, p.description, p.total_amount, p.installment_count, p.first_due_date,
-                       p.category_id, category.name, p.responsible_user_id, responsible.display_name,
-                       p.created_by_user_id, creator.display_name, p.created_at
-                  from installment_purchases p
-                  join identity_users creator on creator.id = p.created_by_user_id
-                  left join expense_categories category on category.id = p.category_id and category.space_id = p.space_id
-                  left join identity_users responsible on responsible.id = p.responsible_user_id
-                 where p.space_id = ? and p.id = ?
-                """, (rs, row) -> new StoredInstallmentPurchase(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
-                rs.getString(3), rs.getBigDecimal(4), rs.getInt(5), rs.getObject(6, java.time.LocalDate.class),
-                rs.getObject(7, UUID.class), rs.getString(8), rs.getObject(9, UUID.class), rs.getString(10),
-                rs.getObject(11, UUID.class), rs.getString(12), rs.getTimestamp(13).toInstant()), spaceId, purchaseId);
+    public Optional<StoredInstallmentPurchase> find(UUID spaceId, UUID purchaseId) {
+        return jdbc.query(SELECT + " where p.space_id = ? and p.id = ?", this::map, spaceId, purchaseId).stream()
+                .findFirst();
     }
+
+    @Override
+    public List<StoredInstallmentPurchase> list(UUID spaceId, int offset, int limit) {
+        return jdbc.query(SELECT + " where p.space_id = ? order by p.created_at desc, p.id desc limit ? offset ?",
+                this::map, spaceId, limit, offset);
+    }
+
+    @Override
+    public long count(UUID spaceId) {
+        var count = jdbc.queryForObject("select count(*) from installment_purchases where space_id = ?", Long.class,
+                spaceId);
+        return count == null ? 0 : count;
+    }
+
+    private StoredInstallmentPurchase map(ResultSet rs, int row) throws SQLException {
+        return new StoredInstallmentPurchase(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
+                rs.getString(3), rs.getBigDecimal(4), rs.getInt(5), rs.getObject(6, LocalDate.class),
+                rs.getObject(7, UUID.class), rs.getString(8), rs.getObject(9, UUID.class), rs.getString(10),
+                rs.getObject(11, UUID.class), rs.getString(12), rs.getTimestamp(13).toInstant());
+    }
+
+    private static final String SELECT = """
+            select p.id, p.space_id, p.description, p.total_amount, p.installment_count, p.first_due_date,
+                   p.category_id, category.name, p.responsible_user_id, responsible.display_name,
+                   p.created_by_user_id, creator.display_name, p.created_at
+              from installment_purchases p
+              join identity_users creator on creator.id = p.created_by_user_id
+              left join expense_categories category on category.id = p.category_id and category.space_id = p.space_id
+              left join identity_users responsible on responsible.id = p.responsible_user_id
+            """;
 }

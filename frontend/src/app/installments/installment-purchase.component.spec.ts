@@ -21,7 +21,8 @@ const expected = { description: 'Sofá', totalAmount: '100.00', installmentCount
 
 describe('InstallmentPurchaseComponent', () => {
   let fixture: ComponentFixture<InstallmentPurchaseComponent>;
-  const api = { newIdempotencyKey: vi.fn(), preview: vi.fn(), create: vi.fn() };
+  const api = { newIdempotencyKey: vi.fn(), preview: vi.fn(), create: vi.fn(),
+    list: vi.fn(() => of({ items: [], page: 0, size: 10, totalItems: 0 })), get: vi.fn() };
   const text = () => fixture.nativeElement.textContent as string;
   const fill = () => fixture.componentInstance.form.setValue({ description: ' Sofá ', totalAmount: '100,00',
     installmentCount: 3, firstDueDate: '2027-01-31', categoryId: 'cat-1', responsibleUserId: '' });
@@ -33,7 +34,8 @@ describe('InstallmentPurchaseComponent', () => {
     await TestBed.configureTestingModule({ imports: [InstallmentPurchaseComponent], providers: [provideRouter([]),
       { provide: InstallmentPurchaseService, useValue: api },
       { provide: CategoryService, useValue: { list: () => of([{ id: 'cat-1', name: 'Casa' }]) } },
-      { provide: AccountAccessService, useValue: { members: () => of([{ userId: 'actor', displayName: 'Ana' }]) } }] }).compileComponents();
+      { provide: AccountAccessService, useValue: { members: () => of([{ userId: 'actor', displayName: 'Ana' }]),
+        context: () => of({ userId: 'actor', timeZone: 'America/Sao_Paulo' }) } }] }).compileComponents();
     fixture = TestBed.createComponent(InstallmentPurchaseComponent);
     fixture.detectChanges();
   });

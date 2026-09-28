@@ -1,5 +1,6 @@
 package com.malyah.accountmanager.expenses.application;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,4 +13,7 @@ public interface InstallmentExpenses {
     List<InstallmentExpenseSnapshot> create(InstallmentExpensesCommand command);
 
     List<InstallmentExpenseSnapshot> find(UUID spaceId, UUID purchaseId);
+
+    /** H05.2: installments of several purchases of the same space, ordered by purchase and number. */
+    List<InstallmentExpenseSnapshot> findByPurchases(UUID spaceId, Collection<UUID> purchaseIds);
 }

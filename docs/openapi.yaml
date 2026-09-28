@@ -1185,6 +1185,44 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
         '409': { description: '`IDEMPOTENCY_CONFLICT`: a chave já foi usada com outros dados.' }
+    get:
+      summary: Lista as compras parceladas do espaço com o progresso (H05.2)
+      description: >-
+        Compras do espaço ativo, das mais recentes para as mais antigas. O progresso é derivado apenas da situação
+        das parcelas (pagas, pendentes, atrasadas no fuso do espaço e canceladas); não representa saldo bancário.
+        As parcelas são quitadas pelo lote atômico de despesas (`POST /expenses/batch-payment`).
+      security:
+        - sessionCookie: []
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Página de compras
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPurchasePage' } } }
+        '400':
+          description: '`INSTALLMENT_VALIDATION` com `field` `page` ou `size`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+  /installment-purchases/{id}:
+    get:
+      summary: Detalha uma compra com a situação de cada parcela (H05.2)
+      description: >-
+        Cabeçalho da compra (valores informados na criação), progresso e as parcelas com situação, versão,
+        atraso, data e valor pagos e a descrição, categoria e responsável atuais de cada uma.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Compra e parcelas
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPurchase' } } }
+        '400': { description: '`INSTALLMENT_VALIDATION` (identificador inválido).' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+        '404': { description: '`INSTALLMENT_PURCHASE_NOT_FOUND`: inexistente ou de outro espaço.' }
 components:
   securitySchemes:
     sessionCookie:
@@ -1657,6 +1695,53 @@ components:
         dueDate: { type: string, format: date }
         expenseId: { type: [string, "null"], format: uuid, description: Nulo na prévia. }
         status: { type: [string, "null"], enum: [PENDING, PAID, CANCELLED, null], description: Nulo na prévia. }
+        version: { type: [integer, "null"], format: int64, description: Versão otimista da parcela; nula na prévia. }
+        overdue: { type: boolean, description: Pendente com vencimento anterior a hoje no fuso do espaço. }
+        description: { type: [string, "null"], description: Descrição atual da parcela; nula na prévia. }
+        categoryId: { type: [string, "null"], format: uuid }
+        categoryName: { type: [string, "null"] }
+        responsibleUserId: { type: [string, "null"], format: uuid }
+        responsibleDisplayName: { type: [string, "null"] }
+        paymentDate: { type: [string, "null"], format: date }
+        paidAmount: { type: [string, "null"], description: Valor efetivamente pago, quando quitada. }
+    InstallmentProgress:
+      type: object
+      description: Derivado só da situação das parcelas; valores são somas das cobranças por situação, não saldo bancário.
+      required: [installmentCount, paidCount, pendingCount, overdueCount, cancelledCount, paidAmount, pendingAmount,
+        overdueAmount, cancelledAmount]
+      properties:
+        installmentCount: { type: integer }
+        paidCount: { type: integer }
+        pendingCount: { type: integer, description: Inclui as atrasadas. }
+        overdueCount: { type: integer }
+        cancelledCount: { type: integer }
+        paidAmount: { type: string }
+        pendingAmount: { type: string, description: Quanto falta pagar (atrasadas incluídas). }
+        overdueAmount: { type: string }
+        cancelledAmount: { type: string }
+        nextDueDate: { type: [string, "null"], format: date, description: Menor vencimento pendente. }
+    InstallmentPurchaseSummary:
+      type: object
+      required: [id, description, totalAmount, installmentCount, firstDueDate, createdAt, progress]
+      properties:
+        id: { type: string, format: uuid }
+        description: { type: string }
+        totalAmount: { type: string }
+        installmentCount: { type: integer }
+        firstDueDate: { type: string, format: date }
+        lastDueDate: { type: [string, "null"], format: date }
+        categoryName: { type: [string, "null"] }
+        responsibleDisplayName: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        progress: { $ref: '#/components/schemas/InstallmentProgress' }
+    InstallmentPurchasePage:
+      type: object
+      required: [items, page, size, totalItems]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InstallmentPurchaseSummary' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer, format: int64 }
     InstallmentPreview:
       type: object
       required: [description, totalAmount, installmentCount, firstDueDate, lastDueDate, regularAmount, lastAmount,
@@ -1691,6 +1776,7 @@ components:
         createdByDisplayName: { type: string }
         createdAt: { type: string, format: date-time }
         installmentsSum: { type: string }
+        progress: { $ref: '#/components/schemas/InstallmentProgress' }
         installments: { type: array, items: { $ref: '#/components/schemas/InstallmentView' } }
     Expense:
       type: object

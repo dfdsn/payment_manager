@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, e H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1–H04.5 e H05.1 estão concluídas, com E2E full-stack aprovado em 28/09/2026; E04 está concluído. H03.3 permanece em validação independente. A próxima história é H05.2, não iniciada.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1–H04.5 e H05.1 estão concluídas, com E2E full-stack aprovado em 28/09/2026; E04 está concluído. H03.3 permanece em validação independente. H05.2 (consultar e quitar parcelas) está implementada e em validação até a CI do PR.
 
 ## Anexos privados (H03.3)
 
@@ -638,4 +638,45 @@ Testes da compra parcelada (Windows; em Linux, `./mvnw verify -Dit.test=Installm
 backend\scripts\run-integration-tests.ps1 -Tests InstallmentPurchasePostgresIT,ExpensePostgresIT,FlywayPostgresIT
 ```
 
-Consulta específica por compra e quitação de várias parcelas (H05.2), ajustes e cancelamentos (H05.3) ainda não foram implementados.
+A consulta por compra e a quitação de várias parcelas estão na seção seguinte (H05.2).
+
+## Consultar e quitar parcelas (H05.2)
+
+Abaixo do formulário de `/compras-parceladas`, **Compras cadastradas** lista as compras do espaço, das mais recentes para as mais antigas (10 por página), com total, quantidade, barra de parcelas pagas, contagem de pagas, pendentes, atrasadas e canceladas, quanto falta pagar e o próximo vencimento. **Ver parcelas de …** abre a tabela n/N com vencimento, valor, situação (Pendente, Atrasada, Cancelada ou “Paga em data (R$ valor pago)”) e a descrição, categoria e responsável atuais de cada parcela.
+
+- **Progresso sem saldo bancário:** tudo vem da situação das parcelas. “Pagas” soma o valor das parcelas quitadas; “Falta pagar” soma as pendentes (atrasadas incluídas); nada representa saldo de conta ou limite de cartão. Atraso usa a data de hoje no fuso do espaço.
+- **Quitar selecionadas:** só parcelas pendentes podem ser marcadas. **Quitar selecionadas (k)** abre data do pagamento, pagador (você por padrão) e a confirmação “Confirmo a quitação integral…”, e chama o mesmo lote atômico de Despesas (`POST /expenses/batch-payment`, T12/D19): cada parcela é quitada pelo seu valor, com versão e `Idempotency-Key`. Se alguma mudou, nenhuma é quitada; a tela recarrega a compra e mantém selecionadas só as que continuam pendentes. Falha de rede mantém a chave, então repetir não quita duas vezes.
+- **Continuam valendo os fluxos de Despesas:** cada parcela pode ser quitada individualmente (inclusive com valor pago diferente), desfeita ou cancelada em Despesas, e aparece nos filtros e buscas; a compra reflete o resultado.
+- **Sem fatura duplicada:** a tela avisa para não cadastrar a fatura completa do cartão como outra despesa, porque as parcelas já estão em Despesas.
+
+```text
+GET /api/v1/installment-purchases?page=0&size=20        (size de 1 a 100)
+→ 200 {"items": [{"id": "...", "description": "Sofá", "totalAmount": "100.00", "installmentCount": 3,
+        "progress": {"installmentCount": 3, "paidCount": 1, "pendingCount": 2, "overdueCount": 0,
+                     "cancelledCount": 0, "paidAmount": "33.33", "pendingAmount": "66.67",
+                     "overdueAmount": "0.00", "cancelledAmount": "0.00", "nextDueDate": "2027-02-28"}}],
+       "page": 0, "size": 20, "totalItems": 1}
+
+GET /api/v1/installment-purchases/<id>
+→ 200 { ...cabeçalho..., "progress": {...}, "installments": [{"number": 1, "count": 3, "amount": "33.33",
+        "dueDate": "2027-01-31", "expenseId": "...", "status": "PAID", "version": 1, "overdue": false,
+        "paymentDate": "2027-01-30", "paidAmount": "33.33", "description": "Sofá", ...}]}
+```
+
+Erros: `404 INSTALLMENT_PURCHASE_NOT_FOUND` (inexistente ou de outro espaço), `400 INSTALLMENT_VALIDATION` (`page`, `size` ou identificador inválido), `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`. A quitação usa os erros do lote de Despesas (`409` rejeita o lote inteiro).
+
+Teste manual:
+
+1. Crie “Sofá”, `100,00` em `3` parcelas a partir de uma data do mês passado (por exemplo, o dia 15). Em **Compras cadastradas** aparecem “0 de 3 pagas · 3 pendentes (1 atrasadas)”, “Falta pagar R$ 100.00” e o próximo vencimento.
+2. Clique **Ver parcelas de Sofá**: a parcela 1/3 aparece como Atrasada; nenhuma caixa de seleção existe para parcelas pagas ou canceladas.
+3. Marque 1/3 e 2/3, clique **Quitar selecionadas (2)**, confira “no total de R$ 66.66”, marque a confirmação e clique **Confirmar quitação**. Resultado: “2 parcelas quitadas de uma vez.”, “2 de 3 pagas · 1 pendentes” e as duas linhas como “Paga em …”.
+4. Em Despesas, filtre o período das parcelas: as duas aparecem pagas pelo mesmo lote, a 3/3 pendente. Desfaça a quitação de uma delas e volte à compra: ela aparece de novo como pendente.
+5. Conflito: abra a compra em duas abas, quite a 3/3 numa delas e tente quitá-la na outra. A segunda recebe “Nenhuma parcela foi quitada…” e a seleção é atualizada.
+
+Testes (Windows; em Linux, `./mvnw verify -Dit.test=InstallmentProgressPostgresIT,InstallmentPurchasePostgresIT,ExpensePostgresIT`):
+
+```powershell
+backend\scripts\run-integration-tests.ps1 -Tests InstallmentProgressPostgresIT,InstallmentPurchasePostgresIT,ExpensePostgresIT
+```
+
+Ajustes em grupo e cancelamento de parcelas pendentes (H05.3) ainda não foram implementados.
