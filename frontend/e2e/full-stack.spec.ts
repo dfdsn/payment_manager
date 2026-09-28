@@ -7,7 +7,7 @@ const guestEmail = 'guest@example.com';
 const guestPassword = 'senha convidada 2026';
 
 test('runs setup, email confirmation, login, reset and session revocation against real services', async ({ browser, page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(110_000);
   await page.goto('/configuracao-inicial');
   await page.getByLabel('Segredo temporário').fill('local-only-setup-secret-change-me');
   await page.getByLabel('Nome do administrador').fill('Diego');
@@ -36,14 +36,28 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
 
-  await page.getByRole('link', { name: 'Cadastrar e consultar despesas' }).click();
+  await page.goto('/categorias');
+  for (const initial of ['Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Educação', 'Lazer', 'Outros']) {
+    await expect(page.getByText(initial, { exact: true })).toBeVisible();
+  }
+  await page.getByLabel('Nova categoria').fill('Pets');
+  await page.getByRole('button', { name: 'Criar categoria' }).click();
+  await expect(page.getByText('Categoria criada.')).toBeVisible();
+
+  await page.goto('/despesas');
   await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Energia');
   await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('150,25');
-  await page.getByLabel('Vencimento').fill('2026-09-24');
+  await page.getByLabel('Vencimento', { exact: true }).fill('2026-09-24');
+  await page.getByLabel('Categoria (opcional)').selectOption({ label: 'Pets' });
   await page.getByRole('button', { name: 'Salvar despesa' }).click();
   await expect(page.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
   await expect(page.getByText('Energia')).toBeVisible();
-  await expect(page.getByText('Atrasada')).toBeVisible();
+  await expect(page.getByText('Atrasada', { exact: true })).toBeVisible();
+  await page.getByLabel('Buscar na descrição').fill('inexistente');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByText('Nenhum lançamento corresponde aos filtros.')).toBeVisible();
+  await page.getByRole('button', { name: 'Limpar' }).click();
+  await expect(page.getByText('Energia')).toBeVisible();
 
   await page.goto('/membros');
   await page.getByLabel('Email do convidado').fill(guestEmail);
@@ -72,14 +86,145 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(guestPage.getByText(/como convidado/)).toBeVisible();
   await guestPage.getByRole('link', { name: 'Cadastrar e consultar despesas' }).click();
   await expect(guestPage.getByText('Energia')).toBeVisible();
+  await guestPage.goto('/categorias');
+  const pets = guestPage.locator('mat-card').filter({ hasText: 'Pets' });
+  await pets.getByRole('button', { name: 'Renomear' }).click();
+  await guestPage.getByLabel('Novo nome').fill('Casa');
+  await guestPage.getByRole('button', { name: 'Salvar nome' }).click();
+  await expect(guestPage.getByText('Categoria renomeada.')).toBeVisible();
+  const house = guestPage.locator('mat-card').filter({ hasText: 'Casa' });
+  await house.getByRole('button', { name: 'Arquivar' }).click();
+  await expect(guestPage.getByText(/Despesas existentes foram preservadas/)).toBeVisible();
+  await guestPage.goto('/despesas');
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Energia' }).getByText(/Categoria: Casa/)).toBeVisible();
+  await expect(guestPage.getByLabel('Categoria (opcional)').getByRole('option', { name: 'Casa' })).toHaveCount(0);
+  const assignedEnergy = guestPage.locator('.expense-row').filter({ hasText: 'Energia' });
+  await assignedEnergy.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await guestPage.getByLabel('Responsável corrigido (opcional)').selectOption({ label: 'Pessoa Convidada' });
+  await guestPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(guestPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+  await expect(assignedEnergy.getByText(/Responsável: Pessoa Convidada/)).toBeVisible();
+  await assignedEnergy.getByRole('button', { name: 'Ver histórico' }).click();
+  await expect(guestPage.getByText('Despesa cadastrada', { exact: true })).toBeVisible();
+  await expect(guestPage.getByText(/Responsável: Não definido → Pessoa Convidada/)).toBeVisible();
+  await guestPage.getByRole('button', { name: 'Fechar histórico' }).click();
+  await guestPage.getByRole('button', { name: 'Quitar despesa' }).click();
+  await guestPage.getByRole('textbox', { name: 'Valor efetivamente pago' }).fill('155,00');
+  await guestPage.getByLabel('Data da quitação').fill('2026-09-25');
+  await guestPage.getByLabel('Pagador da quitação').selectOption({ label: 'Diego' });
+  await guestPage.getByLabel('Observação da quitação').fill('Juros confirmados');
+  await guestPage.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(guestPage.getByText('Quitação registrada com sucesso.')).toBeVisible();
+  await expect(guestPage.getByText('Valor pago: R$ 155,00')).toBeVisible();
+  await expect(guestPage.getByText('Pagamento em 25/09/2026 por Diego.')).toBeVisible();
+  await expect(guestPage.getByText('Registrado por Pessoa Convidada.')).toBeVisible();
   await guestPage.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Mercado');
   await guestPage.getByRole('textbox', { name: 'Valor', exact: true }).fill('25,50');
-  await guestPage.getByLabel('Situação').selectOption('PAID');
+  await guestPage.locator('form').first().getByLabel('Situação').selectOption('PAID');
   await guestPage.getByLabel('Data do pagamento').fill('2026-09-25');
   await guestPage.getByRole('button', { name: 'Salvar despesa' }).click();
   await expect(guestPage.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
-  await expect(guestPage.getByText('Mercado')).toBeVisible();
-  await expect(guestPage.getByText('Paga', { exact: true })).toBeVisible();
+  const marketExpense = guestPage.locator('.expense-row').filter({ hasText: 'Mercado' });
+  await expect(marketExpense).toBeVisible();
+  await expect(marketExpense.getByText('Paga', { exact: true })).toBeVisible();
+  await marketExpense.getByRole('button', { name: 'Desfazer quitação' }).click();
+  await expect(guestPage.getByText(/corrija a despesa e informe um vencimento/)).toBeVisible();
+  await expect(guestPage.getByRole('button', { name: 'Confirmar reversão' })).toBeDisabled();
+  await guestPage.getByRole('button', { name: 'Voltar sem alterar' }).click();
+  await marketExpense.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await guestPage.getByLabel('Vencimento corrigido (opcional)').fill('2026-09-25');
+  await guestPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(guestPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+
+  const concurrentPage = await guestContext.newPage();
+  await concurrentPage.goto('/despesas');
+  const firstCopy = concurrentPage.locator('.expense-row').filter({ hasText: 'Energia' });
+  const staleCopy = guestPage.locator('.expense-row').filter({ hasText: 'Energia' });
+  await firstCopy.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await staleCopy.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await concurrentPage.getByLabel('Descrição da correção').fill('Energia conferida');
+  await concurrentPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(concurrentPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+
+  await guestPage.getByLabel('Descrição da correção').fill('Energia final');
+  await guestPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(guestPage.getByText(/Outra alteração foi salva antes da sua/)).toBeVisible();
+  await expect(guestPage.getByText(/Energia conferida/)).toBeVisible();
+  await expect(guestPage.getByLabel('Descrição da correção')).toHaveValue('Energia final');
+  await guestPage.getByRole('button', { name: 'Revisei: usar versão atual mantendo meus campos' }).click();
+  await guestPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(guestPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Energia final' })).toBeVisible();
+  await concurrentPage.close();
+
+  const finalEnergy = guestPage.locator('.expense-row').filter({ hasText: 'Energia final' });
+  await finalEnergy.getByRole('button', { name: 'Desfazer quitação' }).click();
+  await guestPage.getByLabel('Motivo obrigatório').fill('Pagamento lançado na conta errada');
+  await guestPage.getByRole('button', { name: 'Confirmar reversão' }).click();
+  await expect(guestPage.getByText(/voltou a ficar pendente/)).toBeVisible();
+  await expect(finalEnergy.getByRole('button', { name: 'Quitar despesa' })).toBeVisible();
+  await finalEnergy.getByRole('button', { name: 'Quitar despesa' }).click();
+  await guestPage.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(guestPage.getByText('Quitação registrada com sucesso.')).toBeVisible();
+
+  await finalEnergy.getByRole('button', { name: 'Desfazer quitação' }).click();
+  await guestPage.getByLabel('Motivo obrigatório').fill('Despesa será cancelada');
+  await guestPage.getByRole('button', { name: 'Confirmar reversão' }).click();
+  await expect(guestPage.getByText(/voltou a ficar pendente/)).toBeVisible();
+  await finalEnergy.getByRole('button', { name: 'Cancelar despesa' }).click();
+  await guestPage.getByLabel('Motivo obrigatório').fill('Cobrança duplicada');
+  await guestPage.getByRole('button', { name: 'Confirmar cancelamento' }).click();
+  await expect(guestPage.getByText(/removida da lista ativa/)).toBeVisible();
+  await expect(finalEnergy).toHaveCount(0);
+  await expect(guestPage.getByText('Situação atual: Cancelada')).toBeVisible();
+  await expect(guestPage.getByText('Quitação desfeita', { exact: false })).toHaveCount(2);
+  await expect(guestPage.getByText('Despesa cancelada', { exact: true })).toBeVisible();
+
+  await guestPage.getByRole('button', { name: 'Fechar histórico' }).click();
+  for (const [description, amount] of [['Água', '80,00'], ['Internet', '99,90']] as const) {
+    await guestPage.getByRole('textbox', { name: 'Descrição', exact: true }).fill(description);
+    await guestPage.getByRole('textbox', { name: 'Valor', exact: true }).fill(amount);
+    await guestPage.getByLabel('Vencimento', { exact: true }).fill('2026-09-28');
+    await guestPage.getByRole('button', { name: 'Salvar despesa' }).click();
+    await expect(guestPage.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
+  }
+  await guestPage.getByLabel('Selecionar para quitação em lote: Água').check();
+  await guestPage.getByLabel('Selecionar para quitação em lote: Internet').check();
+  await guestPage.getByRole('button', { name: 'Quitar selecionadas (2)' }).click();
+  await expect(guestPage.getByText('2 lançamentos · total R$ 179,90')).toBeVisible();
+  await guestPage.getByLabel('Data da quitação do lote').fill('2026-10-01');
+  await guestPage.getByLabel('Pagador do lote').selectOption({ label: 'Diego' });
+  await guestPage.getByLabel(/Confirmo a quitação integral/).check();
+
+  const batchConflictPage = await guestContext.newPage();
+  await batchConflictPage.goto('/despesas');
+  const waterCopy = batchConflictPage.locator('.expense-row').filter({ hasText: 'Água' });
+  await waterCopy.getByRole('button', { name: 'Corrigir despesa' }).click();
+  await batchConflictPage.getByLabel('Descrição da correção').fill('Água conferida');
+  await batchConflictPage.getByRole('button', { name: 'Salvar correção' }).click();
+  await expect(batchConflictPage.getByText('Despesa corrigida com sucesso.')).toBeVisible();
+  await batchConflictPage.close();
+
+  await guestPage.getByRole('button', { name: 'Quitar todos ou nenhum' }).click();
+  await expect(guestPage.getByText(/lote inteiro foi rejeitado/)).toBeVisible();
+  await expect(guestPage.getByLabel('Data da quitação do lote')).toHaveValue('2026-10-01');
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Internet' })
+    .getByRole('button', { name: 'Quitar despesa' })).toBeVisible();
+
+  await guestPage.reload();
+  await guestPage.getByLabel('Selecionar para quitação em lote: Água conferida').check();
+  await guestPage.getByLabel('Selecionar para quitação em lote: Internet').check();
+  await guestPage.getByRole('button', { name: 'Quitar selecionadas (2)' }).click();
+  await guestPage.getByLabel('Data da quitação do lote').fill('2026-10-01');
+  await guestPage.getByLabel('Pagador do lote').selectOption({ label: 'Diego' });
+  await guestPage.getByLabel(/Confirmo a quitação integral/).check();
+  await guestPage.getByRole('button', { name: 'Quitar todos ou nenhum' }).click();
+  await expect(guestPage.getByText(/2 lançamentos quitados no lote/)).toBeVisible();
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Água conferida' })
+    .getByText('Paga', { exact: true })).toBeVisible();
+  await expect(guestPage.locator('.expense-row').filter({ hasText: 'Internet' })
+    .getByText('Paga', { exact: true })).toBeVisible();
+
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();
 
@@ -141,6 +286,55 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByLabel('Senha').fill(newPassword);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
+
+  await page.goto('/recorrencias');
+  await page.getByLabel('Descrição').fill('Condomínio recorrente');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('500,00');
+  await page.getByLabel('Primeiro vencimento').fill('2027-01-31');
+  await page.getByRole('button', { name: 'Calcular próximas datas' }).click();
+  await expect(page.getByText('2027-02-28')).toBeVisible();
+  await expect(page.getByText('2027-03-31')).toBeVisible();
+  await page.getByRole('button', { name: 'Cadastrar recorrência' }).click();
+  await expect(page.getByText(/em até 30 segundos/)).toBeVisible();
+  await expect(page.locator('mat-card-title').getByText('Condomínio recorrente', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cadastrar recorrência' })).toBeEnabled();
+  const futureForecast = page.locator('article.forecast').filter({ hasText: 'Condomínio recorrente' }).first();
+  await expect(futureForecast.getByText('Previsão fixa')).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await futureForecast.getByRole('button', { name: 'Antecipar lançamento' }).click();
+  await expect(page.getByText(/Lançamento antecipado sem alterar/)).toBeVisible();
+  await expect(page.locator('article.forecast').filter({ hasText: 'Condomínio recorrente' }).first().getByText('Lançamento confirmado')).toBeVisible();
+  await page.goto('/despesas');
+  await page.getByLabel('Buscar na descrição').fill('Condomínio recorrente');
+  await page.getByLabel('Data inicial').fill('2027-01-01');
+  await page.getByLabel('Data final').fill('2027-01-31');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByText('Condomínio recorrente', { exact: true })).toBeVisible();
+  await page.goto('/recorrencias');
+
+  await page.getByLabel('Descrição').fill('Energia estimada automática');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('180,50');
+  await page.getByLabel('Tipo do valor').selectOption('VARIABLE_ESTIMATE');
+  await page.getByLabel('Primeiro vencimento').fill('2026-09-30');
+  await page.getByRole('button', { name: 'Cadastrar recorrência' }).click();
+  await expect(page.locator('mat-card-title').getByText('Energia estimada automática', { exact: true })).toBeVisible();
+  await page.goto('/despesas');
+  await expect.poll(() => page.evaluate(async () => {
+    const response = await fetch('/api/v1/expenses?search=Energia%20estimada%20autom%C3%A1tica', {
+      credentials: 'include', headers: { 'X-User-Activity': 'true' },
+    });
+    if (!response.ok) return false;
+    const result = await response.json() as { content?: { description: string }[] };
+    return result.content?.some(item => item.description === 'Energia estimada automática') ?? false;
+  }), { timeout: 45_000 }).toBe(true);
+  await page.reload();
+  await expect(page.getByText('Energia estimada automática', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Gerada por recorrência · valor estimado a confirmar/)).toBeVisible();
+
+  await page.goto('/entrar');
+  await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
+  await page.getByLabel('Senha').fill(newPassword);
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await page.getByRole('button', { name: 'Encerrar todas as sessões' }).click();
   await expect(page.getByRole('region', { name: 'Entrar' })).toBeVisible();
 });

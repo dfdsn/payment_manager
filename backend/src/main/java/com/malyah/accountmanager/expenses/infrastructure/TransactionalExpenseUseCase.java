@@ -29,4 +29,52 @@ final class TransactionalExpenseUseCase implements ExpenseUseCase {
     public ExpensePage list(String actorEmail, ExpenseListQuery query) {
         return delegate.list(actorEmail, query);
     }
+
+    @Override
+    public com.malyah.accountmanager.expenses.application.ExpenseFilterOptions filterOptions(String actorEmail) {
+        return delegate.filterOptions(actorEmail);
+    }
+
+    @Override
+    public com.malyah.accountmanager.expenses.application.ExpenseView get(
+            String actorEmail, java.util.UUID expenseId) {
+        return delegate.get(actorEmail, expenseId);
+    }
+
+    @Override
+    public com.malyah.accountmanager.expenses.application.ExpenseHistoryPage history(
+            String actorEmail, java.util.UUID expenseId, int page, int size) {
+        return delegate.history(actorEmail, expenseId, page, size);
+    }
+
+    @Override
+    public ExpenseCreationResult correct(String actorEmail,
+            com.malyah.accountmanager.expenses.application.CorrectExpenseCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.correct(actorEmail, command)));
+    }
+
+    @Override
+    public ExpenseCreationResult settle(String actorEmail,
+            com.malyah.accountmanager.expenses.application.SettleExpenseCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.settle(actorEmail, command)));
+    }
+
+    @Override
+    public com.malyah.accountmanager.expenses.application.BatchSettlementResult settleBatch(
+            String actorEmail,
+            com.malyah.accountmanager.expenses.application.BatchSettlementCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.settleBatch(actorEmail, command)));
+    }
+
+    @Override
+    public ExpenseCreationResult reversePayment(String actorEmail,
+            com.malyah.accountmanager.expenses.application.ReversePaymentCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.reversePayment(actorEmail, command)));
+    }
+
+    @Override
+    public ExpenseCreationResult cancel(String actorEmail,
+            com.malyah.accountmanager.expenses.application.CancelExpenseCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.cancel(actorEmail, command)));
+    }
 }

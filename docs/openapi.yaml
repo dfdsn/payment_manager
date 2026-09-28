@@ -2,10 +2,37 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H02.1.
+  description: Contrato versionado dos endpoints implementados até H04.1.
 servers:
   - url: /api/v1
 paths:
+  /expenses/{expenseId}/attachments:
+    get:
+      summary: Lista anexos disponíveis da despesa
+      responses: { '200': { description: Lista autorizada } }
+    post:
+      summary: Anexa PDF, JPG ou PNG (máximo 10 MB e cinco por despesa)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties: { file: { type: string, format: binary } }
+      responses: { '201': { description: Anexo promovido e disponível }, '409': { description: Limite ou chave conflitante } }
+  /expenses/{expenseId}/attachments/{attachmentId}:
+    get:
+      summary: Baixa conteúdo privado após autorização
+      responses: { '200': { description: Conteúdo }, '404': { description: Ausente ou inacessível } }
+    delete:
+      summary: Remove conteúdo preservando metadado e auditoria
+      responses: { '204': { description: Removido } }
   /auth/csrf:
     get:
       operationId: issueCsrfToken
@@ -413,6 +440,93 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           description: Usuário ainda é administrador ou associação mudou concorrentemente.
+  /categories:
+    get:
+      operationId: listCategories
+      summary: Lista categorias do espaço ativo
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: includeArchived
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Categorias do espaço, ordenadas por nome.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Category" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createCategory
+      summary: Cria uma categoria no espaço ativo
+      security: [{ sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryNameRequest" }
+      responses:
+        "201":
+          description: Categoria criada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: Nome já utilizado no espaço. }
+  /categories/{id}:
+    put:
+      operationId: renameCategory
+      summary: Renomeia uma categoria com controle otimista
+      security: [{ sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenameCategoryRequest" }
+      responses:
+        "200":
+          description: Categoria renomeada; despesas vinculadas passam a exibir o novo nome.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Categoria não encontrada no espaço ativo. }
+        "409": { description: Versão desatualizada, categoria arquivada ou nome duplicado. }
+  /categories/{id}/archive:
+    post:
+      operationId: archiveCategory
+      summary: Impede novas associações sem apagar referências existentes
+      security: [{ sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CategoryVersionRequest" }
+      responses:
+        "200":
+          description: Categoria arquivada; histórico e despesas existentes preservados.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Category" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Categoria não encontrada no espaço ativo. }
+        "409": { description: Versão desatualizada ou categoria já arquivada. }
   /expenses:
     post:
       operationId: createOneOffExpense
@@ -484,6 +598,22 @@ paths:
             type: string
             enum: [ASC, DESC]
             default: ASC
+        - { name: search, in: query, description: Busca case-insensitive somente na descrição., schema: { type: string, maxLength: 200 } }
+        - { name: dateFrom, in: query, description: Limite inicial inclusivo; sem período informado usa o primeiro dia do mês atual do espaço., schema: { type: string, format: date } }
+        - { name: dateTo, in: query, description: Limite final inclusivo; sem período informado usa o último dia do mês atual do espaço., schema: { type: string, format: date } }
+        - name: dateBasis
+          in: query
+          description: DUE_DATE usa a data de referência/vencimento; PAYMENT_DATE usa a data efetiva do pagamento.
+          schema: { type: string, enum: [DUE_DATE, PAYMENT_DATE], default: DUE_DATE }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutCategory, in: query, schema: { type: boolean, default: false } }
+        - { name: responsibleUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutResponsible, in: query, schema: { type: boolean, default: false } }
+        - { name: payerUserId, in: query, schema: { type: string, format: uuid } }
+        - name: status
+          in: query
+          description: ACTIVE oculta canceladas; OVERDUE é subconjunto de PENDING e considera o dia atual no fuso do espaço.
+          schema: { type: string, enum: [ACTIVE, PENDING, OVERDUE, PAID, CANCELLED, ALL], default: ACTIVE }
       responses:
         "200":
           description: Página com ordenação estável e atraso calculado no fuso do espaço.
@@ -497,6 +627,324 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /expenses/filter-options:
+    get:
+      operationId: getExpenseFilterOptions
+      summary: Lista responsáveis e pagadores presentes nas despesas do espaço ativo
+      description: Inclui membros anteriores ainda referenciados, identificados por activeMember=false.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Opções autorizadas, sem dados de outros espaços.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [responsiblePeople, payerPeople]
+                properties:
+                  responsiblePeople: { type: array, items: { $ref: "#/components/schemas/ExpenseFilterPerson" } }
+                  payerPeople: { type: array, items: { $ref: "#/components/schemas/ExpenseFilterPerson" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /expenses/{id}:
+    get:
+      operationId: getExpense
+      summary: Consulta uma despesa do espaço ativo para edição
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Despesa atual, incluindo sua versão otimista.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Despesa não encontrada no espaço ativo.
+    put:
+      operationId: correctExpense
+      summary: Corrige os campos editáveis sem alterar a situação da despesa
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID preservado ao repetir a mesma correção após falha de resposta.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CorrectExpenseRequest" }
+      responses:
+        "200":
+          description: Correção aplicada ou repetição idempotente do mesmo resultado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Despesa não encontrada no espaço ativo.
+        "409":
+          description: Versão ou situação desatualizada, ou chave reutilizada com outro payload. Consulte novamente antes de reaplicar; não há sobrescrita forçada.
+  /expenses/{id}/payment:
+    post:
+      operationId: settleExpense
+      summary: Quita integralmente uma despesa pendente
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentRequest"
+      responses:
+        "200":
+          description: Quitação criada ou repetição idempotente do mesmo resultado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Despesa não encontrada no espaço ativo.
+        "409":
+          description: Despesa já paga, versão desatualizada ou chave reutilizada com outro payload.
+  /expenses/{id}/history:
+    get:
+      operationId: listExpenseHistory
+      summary: Consulta o histórico paginado de uma despesa do espaço ativo
+      description: Eventos persistidos são ordenados de forma determinística por instante, versão e tipo. Horários são instantes UTC; a interface os apresenta no fuso do espaço.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+      responses:
+        "200":
+          description: Página de criação, correções, quitações, reversões e cancelamento.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpenseHistoryPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Despesa não encontrada no espaço ativo. }
+  /expenses/batch-payment:
+    post:
+      operationId: settleExpensesBatch
+      summary: Quita integralmente vários lançamentos em uma única transação
+      description: >-
+        Data e pagador são comuns ao lote; cada item usa o valor confirmado da própria cobrança.
+        Todos os itens são validados e bloqueados antes da gravação. Qualquer item indisponível,
+        inelegível ou desatualizado rejeita o lote inteiro, sem efeitos parciais.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID da intenção completa; deve ser preservado somente ao repetir o mesmo conteúdo.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchPaymentRequest" }
+      responses:
+        "200":
+          description: Lote aplicado integralmente ou replay idempotente do resultado original.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchPaymentResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: >-
+            Lote integralmente rejeitado por item indisponível, não pendente, com valor não confirmado
+            ou versão desatualizada; também cobre chave idempotente reutilizada com conteúdo diferente.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+  /expenses/{id}/payment-reversal:
+    post:
+      operationId: reverseExpensePayment
+      summary: Desfaz a quitação ativa preservando pagamento e reversão no histórico
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpenseActionRequest" }
+      responses:
+        "200":
+          description: Quitação desfeita ou repetição idempotente; a despesa volta a PENDING.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400":
+          description: Motivo inválido ou despesa paga sem vencimento; nesse caso, informe o vencimento pelo fluxo de correção antes da reversão.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Despesa não encontrada no espaço ativo. }
+        "409": { description: Situação ou versão desatualizada, ou chave reutilizada com outro payload. }
+  /expenses/{id}/cancellation:
+    post:
+      operationId: cancelExpense
+      summary: Cancela uma despesa pendente sem exclusão física
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExpenseActionRequest" }
+      responses:
+        "200":
+          description: Despesa cancelada ou repetição idempotente; permanece consultável por id e some da lista ativa.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Despesa não encontrada no espaço ativo. }
+        "409": { description: Despesa paga/cancelada, versão desatualizada ou chave reutilizada com outro payload. }
+  /recurrences:
+    get:
+      summary: Lista as definições de recorrência do espaço autenticado
+      responses:
+        '200':
+          description: Definições autorizadas; não representa despesas materializadas
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Recurrence' } } } }
+    post:
+      summary: Cadastra uma definição de recorrência sem gerar lançamentos
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateRecurrence' } } }
+      responses:
+        '201': { description: Definição criada }
+        '200': { description: Repetição idempotente da definição criada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: Chave reutilizada com conteúdo diferente }
+  /recurrences/calendar-preview:
+    post:
+      summary: Calcula até 12 vencimentos sem persistir ou gerar despesas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstDueDate, frequency]
+              properties:
+                firstDueDate: { type: string, format: date }
+                lastDueDate: { type: [string, 'null'], format: date }
+                frequency: { $ref: '#/components/schemas/RecurrenceFrequency' }
+      responses:
+        '200':
+          description: Datas calculadas a partir do dia-base original
+          content: { application/json: { schema: { type: array, maxItems: 12, items: { type: string, format: date } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /recurrences/forecasts:
+    get:
+      summary: Consulta ocorrências do mês atual e dos 12 meses seguintes
+      responses:
+        '200':
+          description: Previsões reconciliadas com lançamentos já materializados, sem persistir durante a consulta
+          content: { application/json: { schema: { $ref: '#/components/schemas/ForecastPeriod' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /recurrences/{recurrenceId}/occurrences/{scheduledDueDate}/anticipation:
+    post:
+      summary: Materializa antecipadamente uma ocorrência prevista
+      parameters:
+        - { in: path, name: recurrenceId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: scheduledDueDate, required: true, schema: { type: string, format: date } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmed]
+              properties: { confirmed: { type: boolean, const: true } }
+      responses:
+        '200':
+          description: Ocorrência materializada ou repetição idempotente
+          content: { application/json: { schema: { $ref: '#/components/schemas/AnticipationResult' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Calendário mudou, ocorrência fora do horizonte ou chave reutilizada com outro conteúdo. }
 components:
   securitySchemes:
     sessionCookie:
@@ -549,6 +997,97 @@ components:
         type: string
         format: uuid
   schemas:
+    RecurrenceFrequency:
+      type: string
+      enum: [MONTHLY, BIMONTHLY, QUARTERLY, SEMIANNUAL, ANNUAL]
+    CreateRecurrence:
+      type: object
+      required: [description, amount, valueType, frequency, firstDueDate]
+      properties:
+        description: { type: string, maxLength: 200 }
+        amount: { type: string, pattern: '^\\d{1,8}(\\.\\d{1,2})?$' }
+        valueType: { type: string, enum: [FIXED, VARIABLE_ESTIMATE] }
+        frequency: { $ref: '#/components/schemas/RecurrenceFrequency' }
+        firstDueDate: { type: string, format: date }
+        lastDueDate: { type: [string, 'null'], format: date }
+        categoryId: { type: [string, 'null'], format: uuid }
+        responsibleUserId: { type: [string, 'null'], format: uuid }
+    Recurrence:
+      allOf:
+        - $ref: '#/components/schemas/CreateRecurrence'
+        - type: object
+          required: [id, baseDay, createdByDisplayName, createdAt, version, previewDates]
+          properties:
+            id: { type: string, format: uuid }
+            baseDay: { type: integer, minimum: 1, maximum: 31 }
+            categoryName: { type: [string, 'null'] }
+            responsibleDisplayName: { type: [string, 'null'] }
+            createdByDisplayName: { type: string }
+            createdAt: { type: string, format: date-time }
+            version: { type: integer, format: int64 }
+            previewDates: { type: array, maxItems: 12, items: { type: string, format: date } }
+    RecurrenceForecast:
+      type: object
+      required: [recurrenceId, description, amount, estimated, scheduledDueDate, state, chargeConfirmed]
+      properties:
+        recurrenceId: { type: string, format: uuid }
+        description: { type: string }
+        amount: { type: string }
+        estimated: { type: boolean }
+        scheduledDueDate: { type: string, format: date }
+        state: { type: string, enum: [FORECAST, MATERIALIZED] }
+        expenseId: { type: [string, 'null'], format: uuid }
+        actualDueDate: { type: [string, 'null'], format: date }
+        expenseStatus: { type: [string, 'null'], enum: [PENDING, PAID, CANCELLED, null] }
+        chargeConfirmed: { type: boolean }
+    ForecastPeriod:
+      type: object
+      required: [from, to, occurrences]
+      properties:
+        from: { type: string, pattern: '^\d{4}-\d{2}$' }
+        to: { type: string, pattern: '^\d{4}-\d{2}$' }
+        occurrences: { type: array, items: { $ref: '#/components/schemas/RecurrenceForecast' } }
+    AnticipationResult:
+      type: object
+      required: [occurrence, replayed]
+      properties:
+        occurrence: { $ref: '#/components/schemas/RecurrenceForecast' }
+        replayed: { type: boolean }
+    ExpenseFilterPerson:
+      type: object
+      required: [userId, displayName, activeMember]
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string }
+        activeMember: { type: boolean }
+    Category:
+      type: object
+      required: [id, name, archived, version, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 60 }
+        archived: { type: boolean }
+        version: { type: integer, format: int64, minimum: 0 }
+        updatedAt: { type: string, format: date-time }
+    CategoryNameRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+    RenameCategoryRequest:
+      allOf:
+        - $ref: "#/components/schemas/CategoryNameRequest"
+        - type: object
+          required: [version]
+          properties:
+            version: { type: integer, format: int64, minimum: 0 }
+    CategoryVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
     CreateExpenseRequest:
       type: object
       additionalProperties: false
@@ -576,19 +1115,144 @@ components:
         notes:
           type: [string, "null"]
           maxLength: 2000
+        paidAmount:
+          type: [string, "null"]
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          description: Para PAID, valor efetivo; omissão sugere o valor da cobrança.
+        paidByUserId:
+          type: [string, "null"]
+          format: uuid
+          description: Para PAID, membro ativo pagador; omissão sugere o autor.
+        paymentNotes:
+          type: [string, "null"]
+          maxLength: 2000
+        categoryId:
+          type: [string, "null"]
+          format: uuid
+          description: Categoria ativa do espaço; ausência representa Sem categoria.
+        responsibleUserId:
+          type: [string, "null"]
+          format: uuid
+          description: Membro ativo do espaço responsável; ausência deixa a responsabilidade não definida.
+    PaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [version, paidAmount, paymentDate, paidByUserId]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
+        paidAmount:
+          type: string
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+        paymentDate: { type: string, format: date }
+        paidByUserId: { type: string, format: uuid }
+        paymentNotes: { type: [string, "null"], maxLength: 2000 }
+    BatchPaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [items, paymentDate, paidByUserId, confirmed]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          description: Seleção sem IDs repetidos; a ordem não altera a identidade da intenção.
+          items:
+            type: object
+            additionalProperties: false
+            required: [expenseId, version]
+            properties:
+              expenseId: { type: string, format: uuid }
+              version: { type: integer, format: int64, minimum: 0 }
+        paymentDate: { type: string, format: date }
+        paidByUserId:
+          type: string
+          format: uuid
+          description: Membro ativo do mesmo espaço, comum a todos os itens.
+        confirmed:
+          const: true
+          description: Confirmação explícita da quitação integral de todos ou nenhum.
+    BatchPaymentResult:
+      type: object
+      required: [operationId, items, replayed]
+      properties:
+        operationId: { type: string, format: uuid }
+        replayed: { type: boolean }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [expenseId, fromVersion, toVersion, paidAmount]
+            properties:
+              expenseId: { type: string, format: uuid }
+              fromVersion: { type: integer, format: int64, minimum: 0 }
+              toVersion: { type: integer, format: int64, minimum: 1 }
+              paidAmount: { type: string, pattern: '^\d+\.\d{2}$' }
+    CorrectExpenseRequest:
+      type: object
+      additionalProperties: false
+      required: [version, status, description, amount]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
+        status:
+          type: string
+          enum: [PENDING, PAID]
+          description: Deve coincidir com a situação carregada; correção não muda o estado.
+        description: { type: string, minLength: 1, maxLength: 200 }
+        amount:
+          type: string
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+        dueDate:
+          type: [string, "null"]
+          format: date
+          description: Obrigatório para PENDING e opcional para PAID.
+        notes: { type: [string, "null"], maxLength: 2000 }
+        paidAmount:
+          type: [string, "null"]
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          description: Obrigatório somente para PAID.
+        paymentDate:
+          type: [string, "null"]
+          format: date
+          description: Obrigatório somente para PAID.
+        paidByUserId:
+          type: [string, "null"]
+          format: uuid
+          description: Membro ativo pagador; obrigatório somente para PAID.
+        paymentNotes: { type: [string, "null"], maxLength: 2000 }
+        categoryId:
+          type: [string, "null"]
+          format: uuid
+          description: Categoria ativa do espaço, ou a categoria arquivada já vinculada quando não houver troca.
+        responsibleUserId:
+          type: [string, "null"]
+          format: uuid
+          description: Membro ativo do espaço, ou nulo para remover a atribuição.
+    ExpenseActionRequest:
+      type: object
+      additionalProperties: false
+      required: [version, reason]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
     Expense:
       type: object
-      required: [id, origin, description, amount, currency, status, referenceDate, overdue,
-        createdByUserId, createdByDisplayName, createdAt, version]
+      required: [id, origin, chargeConfirmed, description, amount, currency, status, referenceDate, overdue,
+        createdByUserId, createdByDisplayName, createdAt, version, history]
       properties:
         id: { type: string, format: uuid }
-        origin: { const: ONE_OFF }
+        origin:
+          type: string
+          enum: [ONE_OFF, RECURRENCE]
+          description: Origem avulsa ou ocorrência materializada de uma recorrência.
+        chargeConfirmed:
+          type: boolean
+          description: Falso somente enquanto uma estimativa variável recorrente aguarda confirmação em H04.4.
         description: { type: string }
         amount:
           type: string
           pattern: '^\d+\.\d{2}$'
         currency: { const: BRL }
-        status: { type: string, enum: [PENDING, PAID] }
+        status: { type: string, enum: [PENDING, PAID, CANCELLED] }
         dueDate: { type: [string, "null"], format: date }
         paymentDate: { type: [string, "null"], format: date }
         paidAmount:
@@ -598,10 +1262,14 @@ components:
         overdue:
           type: boolean
           description: Somente PENDING com vencimento anterior à data local do espaço.
+        categoryId: { type: [string, "null"], format: uuid }
         categoryName:
           type: [string, "null"]
-          description: Nulo até categorias serem implementadas; interface mostra Sem categoria.
+          description: Nome atual preservado para leitura; nulo é apresentado como Sem categoria.
         responsibleUserId: { type: [string, "null"], format: uuid }
+        responsibleDisplayName:
+          type: [string, "null"]
+          description: Nome atual do responsável; nulo representa responsabilidade não definida.
         notes: { type: [string, "null"] }
         createdByUserId: { type: string, format: uuid }
         createdByDisplayName: { type: string }
@@ -609,6 +1277,67 @@ components:
         paidByDisplayName: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
         version: { type: integer, format: int64, minimum: 0 }
+        paymentAudit:
+          oneOf:
+            - $ref: "#/components/schemas/PaymentAudit"
+            - type: "null"
+        history:
+          type: array
+          description: Eventos históricos no detalhe; a listagem retorna lista vazia.
+          items: { $ref: "#/components/schemas/ExpenseHistoryEvent" }
+    PaymentAudit:
+      type: object
+      required: [recordedByUserId, recordedByDisplayName, recordedAt]
+      properties:
+        recordedByUserId: { type: string, format: uuid }
+        recordedByDisplayName: { type: string }
+        recordedAt: { type: string, format: date-time }
+        notes: { type: [string, "null"], maxLength: 2000 }
+    ExpenseHistoryEvent:
+      type: object
+      required: [type, actorUserId, actorDisplayName, occurredAt, version]
+      properties:
+        type:
+          type: string
+          enum: [EXPENSE_CREATED, EXPENSE_PAID, PAYMENT_REVERSED, EXPENSE_CORRECTED, EXPENSE_CANCELLED]
+        actorUserId: { type: string, format: uuid }
+        actorDisplayName: { type: string }
+        occurredAt: { type: string, format: date-time }
+        reason: { type: [string, "null"], maxLength: 2000 }
+        notes: { type: [string, "null"], maxLength: 2000 }
+        version: { type: integer, format: int64, minimum: 0 }
+        paidAmount: { type: [string, "null"], pattern: '^\d+\.\d{2}$' }
+        paymentDate: { type: [string, "null"], format: date }
+        payerUserId: { type: [string, "null"], format: uuid }
+        payerDisplayName: { type: [string, "null"] }
+        changedFields: { type: [string, "null"] }
+        batchOperationId:
+          type: [string, "null"]
+          format: uuid
+          description: Correlação comum às auditorias individuais produzidas por uma quitação em lote.
+        changes:
+          type: array
+          description: Valores anterior e posterior disponíveis para cada campo alterado; vazio quando o evento não é uma correção.
+          items:
+            $ref: "#/components/schemas/ExpenseFieldChange"
+    ExpenseFieldChange:
+      type: object
+      required: [field]
+      properties:
+        field: { type: string }
+        previousValue: { type: [string, "null"] }
+        currentValue: { type: [string, "null"] }
+    ExpenseHistoryPage:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items: { $ref: "#/components/schemas/ExpenseHistoryEvent" }
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1, maximum: 100 }
+        totalElements: { type: integer, format: int64, minimum: 0 }
+        totalPages: { type: integer, minimum: 0 }
     ExpensePage:
       type: object
       required: [content, page, size, totalElements, totalPages, sort, direction]

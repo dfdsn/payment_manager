@@ -19,9 +19,15 @@ spring:
       mail.smtp.auth: ${SMTP_AUTH:false}
       mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
       mail.smtp.starttls.required: ${SMTP_STARTTLS_REQUIRED:false}
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
 
 app:
   public-base-url: ${APP_BASE_URL:http://localhost:4200}
+  files:
+    root: ${APP_FILES_ROOT:/var/lib/account-manager/files}
   mail:
     from: ${SMTP_FROM:account-manager@localhost}
 
@@ -35,6 +41,7 @@ management:
       show-details: never
 
 server:
+  max-http-request-header-size: 16KB
   servlet:
     context-path: /api/v1
     session:
@@ -42,4 +49,6 @@ server:
       cookie:
         http-only: true
         same-site: lax
+  tomcat:
+    max-swallow-size: 11MB
   shutdown: graceful

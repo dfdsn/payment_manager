@@ -16,8 +16,45 @@ import com.malyah.accountmanager.expenses.application.ExpenseQueryValidationExce
 import com.malyah.accountmanager.expenses.domain.ExpenseValidationException;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException;
 
-@RestControllerAdvice(assignableTypes = ExpenseController.class)
+@RestControllerAdvice(assignableTypes = {ExpenseController.class, CategoryController.class, AttachmentController.class})
 class ExpenseApiExceptionHandler {
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.AttachmentException.class)
+    ResponseEntity<ApiError> attachment(com.malyah.accountmanager.expenses.application.AttachmentException exception) {
+        var status = switch (exception.code()) {
+            case "ATTACHMENT_NOT_FOUND", "EXPENSE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "ATTACHMENT_LIMIT", "ATTACHMENT_IDEMPOTENCY_CONFLICT" -> HttpStatus.CONFLICT;
+            case "ATTACHMENT_STORAGE_FAILED", "ATTACHMENT_CONTENT_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
+            default -> HttpStatus.BAD_REQUEST;
+        };
+        return response(status, exception.code(), exception.getMessage(), List.of());
+    }
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.CategoryConflictException.class)
+    ResponseEntity<ApiError> categoryConflict(com.malyah.accountmanager.expenses.application.CategoryConflictException exception) {
+        return response(HttpStatus.CONFLICT, "CATEGORY_CONFLICT", exception.getMessage(), List.of());
+    }
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.CategoryNotFoundException.class)
+    ResponseEntity<ApiError> categoryNotFound() {
+        return response(HttpStatus.NOT_FOUND, "CATEGORY_NOT_FOUND", "Categoria não encontrada.", List.of());
+    }
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.BatchSettlementConflictException.class)
+    ResponseEntity<ApiError> batchConflict(
+            com.malyah.accountmanager.expenses.application.BatchSettlementConflictException exception) {
+        var fields = exception.problems().stream()
+                .map(problem -> new FieldError("items[" + problem.expenseId() + "]",
+                        problem.code() + ": " + problem.message()))
+                .toList();
+        return response(HttpStatus.CONFLICT, "BATCH_SETTLEMENT_CONFLICT", exception.getMessage(), fields);
+    }
+
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class)
+    ResponseEntity<ApiError> stateConflict(RuntimeException exception) {
+        return response(HttpStatus.CONFLICT, "EXPENSE_STATE_CONFLICT", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseNotFoundException.class)
+    ResponseEntity<ApiError> notFound(RuntimeException exception) {
+        return response(HttpStatus.NOT_FOUND, "EXPENSE_NOT_FOUND", exception.getMessage(), List.of());
+    }
     @ExceptionHandler(ExpenseValidationException.class)
     ResponseEntity<ApiError> domainValidation(ExpenseValidationException exception) {
         return response(HttpStatus.BAD_REQUEST, "EXPENSE_VALIDATION_FAILED", exception.getMessage(),
@@ -37,7 +74,8 @@ class ExpenseApiExceptionHandler {
         return response(HttpStatus.BAD_REQUEST, "REQUEST_VALIDATION_FAILED", "Revise os campos informados.", fields);
     }
 
-    @ExceptionHandler({ HttpMessageNotReadableException.class, MissingRequestHeaderException.class })
+    @ExceptionHandler({ HttpMessageNotReadableException.class, MissingRequestHeaderException.class,
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class })
     ResponseEntity<ApiError> malformedRequest(Exception exception) {
         return response(HttpStatus.BAD_REQUEST, "REQUEST_VALIDATION_FAILED",
                 "Revise o formato dos dados e informe a chave de repetição.", List.of());

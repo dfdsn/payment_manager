@@ -2,7 +2,6 @@ import { Routes } from '@angular/router';
 import { InitialSetupComponent } from './identity/initial-setup.component';
 import { AccountAccessComponent } from './identity/account-access.component';
 import { InvitationComponent } from './identity/invitation.component';
-import { ExpenseComponent } from './expenses/expense.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: 'entrar', pathMatch: 'full' },
@@ -11,7 +10,9 @@ export const routes: Routes = [
   { path: 'recuperar-acesso', component: AccountAccessComponent, data: { mode: 'forgot' } },
   { path: 'redefinir-senha', component: AccountAccessComponent, data: { mode: 'reset' } },
   { path: 'membros', component: InvitationComponent, data: { mode: 'manage' } },
-  { path: 'despesas', component: ExpenseComponent },
+  { path: 'despesas', loadComponent: () => import('./expenses/expense.component').then(module => module.ExpenseComponent) },
+  { path: 'categorias', loadComponent: () => import('./expenses/category.component').then(module => module.CategoryComponent) },
+  { path: 'recorrencias', loadComponent: () => import('./recurrences/recurrence.component').then(module => module.RecurrenceComponent) },
   { path: 'aceitar-convite', component: InvitationComponent, data: { mode: 'accept' } },
   { path: 'configuracao-inicial', component: InitialSetupComponent },
   { path: '**', redirectTo: 'entrar' },

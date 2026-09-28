@@ -38,7 +38,7 @@ class ExpenseServiceTest {
         repository = mock(ExpenseRepository.class);
         AuthenticatedUserContextQuery context = email -> new AuthenticatedUserContext(
                 USER, "Pessoa", email, SPACE, "Casa", SpaceRole.GUEST, "BRL", "pt-BR", "America/Sao_Paulo");
-        service = new ExpenseService(repository, context, () -> EXPENSE, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new ExpenseService(repository, context, () -> EXPENSE, Clock.fixed(NOW, ZoneOffset.UTC), (space, actor, payer) -> { });
     }
 
     @Test
@@ -76,7 +76,7 @@ class ExpenseServiceTest {
 
     @Test
     void listsStablePageAndCalculatesTotalPages() {
-        given(repository.findBySpace(SPACE, new ExpenseListQuery(1, 2, ExpenseSort.AMOUNT, SortDirection.DESC)))
+        given(repository.findBySpace(org.mockito.ArgumentMatchers.eq(SPACE), any()))
                 .willReturn(new StoredExpensePage(List.of(
                         stored(ExpenseStatus.PENDING, LocalDate.of(2026, 9, 25), null)), 5));
 
@@ -102,9 +102,157 @@ class ExpenseServiceTest {
                 .isInstanceOf(ExpenseQueryValidationException.class);
     }
 
+    @Test void defaultsToCurrentMonthAndRejectsContradictoryFilters() {
+        given(repository.findBySpace(org.mockito.ArgumentMatchers.eq(SPACE), any())).willReturn(new StoredExpensePage(List.of(),0));
+        service.list("guest@example.com", new ExpenseListQuery(0,20,ExpenseSort.REFERENCE_DATE,SortDirection.ASC));
+        org.mockito.Mockito.verify(repository).findBySpace(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.argThat(query -> query.dateFrom().equals(LocalDate.of(2026,9,1))
+                        && query.dateTo().equals(LocalDate.of(2026,9,30)) && query.today().equals(LocalDate.of(2026,9,25))));
+        assertThatThrownBy(() -> service.list("guest@example.com", new ExpenseListQuery(0,20,ExpenseSort.REFERENCE_DATE,
+                SortDirection.ASC,null,LocalDate.of(2026,10,2),LocalDate.of(2026,10,1),ExpenseDateBasis.DUE_DATE,
+                null,false,null,false,null,ExpenseStatusFilter.ACTIVE,null))).isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
     private void assertInvalidQuery(ExpenseListQuery query) {
         assertThatThrownBy(() -> service.list("guest@example.com", query))
                 .isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
+    @Test void settlesWithTheAuthenticatedActorAndPreservesMoneyAndPayer() {
+        given(repository.settle(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(stored(ExpenseStatus.PAID, LocalDate.of(2026, 9, 24), LocalDate.of(2026, 10, 1)), false));
+        var command = new SettleExpenseCommand(EXPENSE, 0, "155", LocalDate.of(2026, 10, 1), USER, "Taxa", KEY);
+        assertThat(service.settle("guest@example.com", command).expense().status()).isEqualTo(ExpenseStatus.PAID);
+        org.mockito.Mockito.verify(repository).settle(org.mockito.ArgumentMatchers.eq(SPACE), org.mockito.ArgumentMatchers.eq(USER),
+                org.mockito.ArgumentMatchers.eq(command), org.mockito.ArgumentMatchers.argThat(payment ->
+                        payment.amount().canonical().equals("155.00") && payment.payerId().equals(USER)), org.mockito.ArgumentMatchers.eq(NOW));
+        for (var invalid : List.of(
+                new SettleExpenseCommand(null, 0, "1", LocalDate.now(), USER, null, KEY),
+                new SettleExpenseCommand(EXPENSE, -1, "1", LocalDate.now(), USER, null, KEY),
+                new SettleExpenseCommand(EXPENSE, 0, "1", LocalDate.now(), USER, null, null)))
+            assertThatThrownBy(() -> service.settle("guest@example.com", invalid)).isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
+    @Test void correctsPendingAndPaidFieldsWithoutChangingState() {
+        var pending = stored(ExpenseStatus.PENDING, LocalDate.of(2026, 9, 24), null);
+        given(repository.findById(SPACE, EXPENSE)).willReturn(pending);
+        given(repository.correct(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(pending, false));
+        var pendingCommand = new CorrectExpenseCommand(EXPENSE, 0, ExpenseStatus.PENDING,
+                "Energia corrigida", "151", LocalDate.of(2026, 9, 26), "Ajuste", null, null, null, null, KEY);
+        assertThat(service.correct("guest@example.com", pendingCommand).expense().status()).isEqualTo(ExpenseStatus.PENDING);
+        org.mockito.Mockito.verify(repository).correct(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(pendingCommand),
+                org.mockito.ArgumentMatchers.argThat(expense -> expense.description().equals("Energia corrigida")
+                        && expense.amount().canonical().equals("151.00") && expense.payment() == null),
+                org.mockito.ArgumentMatchers.eq(NOW));
+
+        var paid = stored(ExpenseStatus.PAID, null, LocalDate.of(2026, 9, 25));
+        given(repository.findById(SPACE, EXPENSE)).willReturn(paid);
+        given(repository.correct(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(paid, true));
+        var paidCommand = new CorrectExpenseCommand(EXPENSE, 0, ExpenseStatus.PAID,
+                "Mercado", "150", null, null, "145", LocalDate.of(2026, 9, 26), USER, "Desconto", KEY);
+        assertThat(service.correct("guest@example.com", paidCommand).replayed()).isTrue();
+    }
+
+    @Test void validatesCorrectionMetadataAndStateSpecificPaymentFields() {
+        assertThatThrownBy(() -> service.correct("guest@example.com", new CorrectExpenseCommand(
+                EXPENSE, -1, ExpenseStatus.PENDING, "Conta", "1", LocalDate.now(), null,
+                null, null, null, null, KEY))).isInstanceOf(ExpenseQueryValidationException.class);
+        given(repository.findById(SPACE, EXPENSE)).willReturn(stored(ExpenseStatus.PENDING, LocalDate.now(), null));
+        assertThatThrownBy(() -> service.correct("guest@example.com", new CorrectExpenseCommand(
+                EXPENSE, 0, ExpenseStatus.PENDING, "Conta", "1", LocalDate.now(), null,
+                "1", LocalDate.now(), USER, null, KEY)))
+                .isInstanceOf(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class);
+        assertThat(service.get("guest@example.com", EXPENSE).id()).isEqualTo(EXPENSE);
+        assertThatThrownBy(() -> service.get("guest@example.com", null))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+    }
+
+    @Test void reversesAndCancelsWithAuthenticatedSpaceActorAndNormalizedReason() {
+        var paid = stored(ExpenseStatus.PAID, LocalDate.of(2026, 9, 24), LocalDate.of(2026, 9, 25));
+        var pending = stored(ExpenseStatus.PENDING, LocalDate.of(2026, 9, 24), null);
+        given(repository.findById(SPACE, EXPENSE)).willReturn(paid, pending);
+        given(repository.reversePayment(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(pending, false));
+        given(repository.cancel(any(), any(), any(), any(), any()))
+                .willReturn(new StoredExpenseCreation(pending, true));
+
+        var reversal = new ReversePaymentCommand(EXPENSE, 0, "  pagamento incorreto  ", KEY);
+        assertThat(service.reversePayment("guest@example.com", reversal).expense().status())
+                .isEqualTo(ExpenseStatus.PENDING);
+        org.mockito.Mockito.verify(repository).reversePayment(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(reversal),
+                org.mockito.ArgumentMatchers.argThat(reason -> reason.value().equals("pagamento incorreto")),
+                org.mockito.ArgumentMatchers.eq(NOW));
+
+        var cancellation = new CancelExpenseCommand(EXPENSE, 0, "duplicada", KEY);
+        assertThat(service.cancel("guest@example.com", cancellation).replayed()).isTrue();
+        org.mockito.Mockito.verify(repository).cancel(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(cancellation),
+                org.mockito.ArgumentMatchers.argThat(reason -> reason.value().equals("duplicada")),
+                org.mockito.ArgumentMatchers.eq(NOW));
+    }
+
+    @Test void rejectsInvalidActionsAndPaidWithoutDueDateCannotBecomeInvalidPendingExpense() {
+        for (var invalid : List.of(
+                new ReversePaymentCommand(null, 0, "motivo", KEY),
+                new ReversePaymentCommand(EXPENSE, -1, "motivo", KEY),
+                new ReversePaymentCommand(EXPENSE, 0, "motivo", null)))
+            assertThatThrownBy(() -> service.reversePayment("guest@example.com", invalid))
+                    .isInstanceOf(ExpenseQueryValidationException.class);
+        assertThatThrownBy(() -> service.cancel("guest@example.com", null))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+        assertThatThrownBy(() -> service.cancel("guest@example.com",
+                new CancelExpenseCommand(EXPENSE, 0, "  ", KEY)))
+                .isInstanceOf(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class);
+
+        given(repository.findById(SPACE, EXPENSE)).willReturn(stored(ExpenseStatus.PAID, null, LocalDate.now()));
+        assertThatThrownBy(() -> service.reversePayment("guest@example.com",
+                new ReversePaymentCommand(EXPENSE, 0, "erro", KEY)))
+                .isInstanceOf(ExpenseQueryValidationException.class)
+                .hasMessageContaining("vencimento");
+    }
+
+    @Test void settlesValidatedAtomicBatchForAuthenticatedSpaceAndActivePayer() {
+        var second = UUID.fromString("00000000-0000-0000-0000-000000000005");
+        var operation = UUID.fromString("00000000-0000-0000-0000-000000000006");
+        var command = new BatchSettlementCommand(List.of(
+                new BatchSettlementItem(EXPENSE, 2), new BatchSettlementItem(second, 4)),
+                LocalDate.of(2026, 10, 1), USER, true, KEY);
+        given(repository.settleBatch(any(), any(), any(), any(), any())).willReturn(
+                new BatchSettlementResult(operation, List.of(
+                        new BatchSettlementItemResult(EXPENSE, 2, 3, "150.00"),
+                        new BatchSettlementItemResult(second, 4, 5, "25.50")), false));
+
+        var result = service.settleBatch("guest@example.com", command);
+
+        assertThat(result.operationId()).isEqualTo(operation);
+        assertThat(result.items()).hasSize(2);
+        org.mockito.Mockito.verify(repository).settleBatch(org.mockito.ArgumentMatchers.eq(SPACE),
+                org.mockito.ArgumentMatchers.eq(USER), org.mockito.ArgumentMatchers.eq(command),
+                org.mockito.ArgumentMatchers.argThat(payment -> payment.payerId().equals(USER)
+                        && payment.date().equals(LocalDate.of(2026, 10, 1))),
+                org.mockito.ArgumentMatchers.eq(NOW));
+    }
+
+    @Test void rejectsEmptyDuplicateUnconfirmedOrMalformedBatchBeforePersistence() {
+        var date = LocalDate.of(2026, 10, 1);
+        var invalid = List.of(
+                new BatchSettlementCommand(List.of(), date, USER, true, KEY),
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(EXPENSE, 0),
+                        new BatchSettlementItem(EXPENSE, 0)), date, USER, true, KEY),
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(EXPENSE, 0)), date, USER, false, KEY),
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(null, 0)), date, USER, true, KEY),
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(EXPENSE, -1)), date, USER, true, KEY));
+        invalid.forEach(command -> assertThatThrownBy(() -> service.settleBatch("guest@example.com", command))
+                .isInstanceOf(ExpenseQueryValidationException.class));
+        assertThatThrownBy(() -> service.settleBatch("guest@example.com",
+                new BatchSettlementCommand(List.of(new BatchSettlementItem(EXPENSE, 0)), null, USER, true, KEY)))
+                .isInstanceOf(com.malyah.accountmanager.expenses.domain.ExpenseValidationException.class);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .settleBatch(any(), any(), any(), any(), any());
     }
 
     private StoredExpense stored(ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate) {

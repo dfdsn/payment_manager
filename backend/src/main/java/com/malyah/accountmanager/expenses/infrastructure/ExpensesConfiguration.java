@@ -2,6 +2,7 @@ package com.malyah.accountmanager.expenses.infrastructure;
 
 import java.time.Clock;
 import java.util.UUID;
+import java.nio.file.Path;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -20,6 +21,36 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQu
 @ConditionalOnProperty(name = "spring.datasource.url")
 class ExpensesConfiguration {
     @Bean
+    com.malyah.accountmanager.expenses.application.RecurringExpenseMaterializer recurringExpenseMaterializer(
+            JdbcTemplate jdbcTemplate, PlatformTransactionManager transactionManager) {
+        return new JdbcRecurringExpenseMaterializer(jdbcTemplate, new TransactionTemplate(transactionManager));
+    }
+    @Bean
+    com.malyah.accountmanager.expenses.application.AttachmentUseCase attachmentUseCase(
+            JdbcTemplate jdbcTemplate, AuthenticatedUserContextQuery contextQuery,
+            PlatformTransactionManager transactionManager, Clock applicationClock,
+            @org.springframework.beans.factory.annotation.Value("${app.files.root:/var/lib/account-manager/files}") String root) {
+        return new FileSystemAttachmentUseCase(jdbcTemplate, contextQuery,
+                new TransactionTemplate(transactionManager), Path.of(root), applicationClock);
+    }
+    @Bean
+    com.malyah.accountmanager.identity.application.MembershipDepartureHandler membershipDepartureHandler(
+            JdbcTemplate jdbcTemplate) {
+        return new JdbcMembershipDepartureHandler(jdbcTemplate);
+    }
+
+    @Bean
+    com.malyah.accountmanager.expenses.application.port.CategoryRepository categoryRepository(JdbcTemplate jdbcTemplate) {
+        return new JdbcCategoryRepository(jdbcTemplate);
+    }
+
+    @Bean
+    com.malyah.accountmanager.expenses.application.CategoryService categoryService(
+            com.malyah.accountmanager.expenses.application.port.CategoryRepository repository,
+            AuthenticatedUserContextQuery contextQuery, ExpenseIdentifierGenerator identifiers, Clock applicationClock) {
+        return new com.malyah.accountmanager.expenses.application.CategoryService(repository, contextQuery, identifiers, applicationClock);
+    }
+    @Bean
     ExpenseRepository expenseRepository(JdbcTemplate jdbcTemplate) {
         return new JdbcExpenseRepository(jdbcTemplate);
     }
@@ -35,8 +66,10 @@ class ExpensesConfiguration {
             AuthenticatedUserContextQuery contextQuery,
             ExpenseIdentifierGenerator identifiers,
             Clock applicationClock,
-            PlatformTransactionManager transactionManager) {
-        var service = new ExpenseService(repository, contextQuery, identifiers, applicationClock);
+            PlatformTransactionManager transactionManager,
+            com.malyah.accountmanager.identity.application.FinancialMemberAccess memberAccess,
+            com.malyah.accountmanager.expenses.application.port.CategoryRepository categories) {
+        var service = new ExpenseService(repository, contextQuery, identifiers, applicationClock, memberAccess, categories);
         return new TransactionalExpenseUseCase(service, new TransactionTemplate(transactionManager));
     }
 }

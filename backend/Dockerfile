@@ -9,7 +9,9 @@ FROM eclipse-temurin:21-jre
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --uid 10001 app
+    && useradd --system --uid 10001 app \
+    && mkdir -p /var/lib/account-manager/files \
+    && chown -R 10001:10001 /var/lib/account-manager
 WORKDIR /app
 COPY --from=build /workspace/target/account-manager-backend-*.jar app.jar
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh

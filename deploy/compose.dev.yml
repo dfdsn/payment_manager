@@ -28,4 +28,4 @@ services:
 
 volumes:
   db-dev-data:
-
+  files-dev-data:

@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e a H02.1 estão validados. Ambos os papéis podem cadastrar e listar despesas avulsas pendentes ou já pagas; quitação posterior de uma pendência começa somente na H02.2.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V3 formam a baseline de identidade/sessão/tokens, V4 adiciona convites, V5 registra o ciclo da associação e V6 adiciona despesas avulsas e idempotência.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V14 cobrem identidade, despesas e organização; V15 adiciona definições de recorrência, idempotência e auditoria, sem materializar lançamentos.
 
 ## Pré-requisitos
 
@@ -98,7 +98,7 @@ APP_SETUP_SECRET=substitua-por-um-segredo-temporario-aleatorio \
 cd ..
 ```
 
-Resultado esperado: Flyway aplica V1–V6 (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
+Resultado esperado: Flyway aplica V1–V8 (ou informa que estão atuais) e o processo termina. Produção nunca executa migration automaticamente no runtime.
 
 ### 3. Backend
 
@@ -137,7 +137,7 @@ Acesse `http://localhost:8080`. Essa composição é apenas local, usa build e c
 ### Administração inicial
 
 1. Gere um segredo temporário aleatório e informe-o ao backend em `APP_SETUP_SECRET`. Não o reutilize como senha do administrador.
-2. Execute as migrações V1–V6 antes do runtime, conforme os passos anteriores.
+2. Execute as migrações V1–V8 antes do runtime, conforme os passos anteriores.
 3. Abra o frontend, preencha nome, email, senha, nome do espaço e o segredo temporário. A senha deve ter de 12 caracteres a 72 bytes UTF-8 e conter ao menos uma letra e um número.
 4. A criação de usuário, espaço, papel `ADMINISTRATOR` e fechamento do setup ocorre em uma única transação. O espaço começa com moeda `BRL`, idioma `pt-BR` e fuso `America/Sao_Paulo`.
 5. Ao receber sucesso, remova `APP_SETUP_SECRET` e reinicie o backend. A linha de controle no PostgreSQL mantém o setup fechado mesmo após reinício ou troca do segredo. Uma nova tentativa retorna conflito e não cria registros extras.
@@ -173,12 +173,70 @@ A V5 mantém eventos duráveis `MEMBER_LEFT`, `MEMBER_REMOVED` e `ADMINISTRATION
 ### Cadastrar e listar despesa avulsa
 
 1. Entre como administrador ou convidado e abra `/despesas` pelo link “Cadastrar e consultar despesas”. A API sempre deriva o espaço da associação ativa; o cliente não escolhe `spaceId`.
-2. Para uma conta pendente, informe descrição, valor, situação `Pendente` e vencimento. Para uma despesa já paga, selecione `Já paga`, informe a data do pagamento e, opcionalmente, o vencimento. O cadastro pago usa inicialmente o mesmo valor da cobrança e o usuário atual como pagador; alterar/quitar depois pertence à H02.2.
+2. Para uma conta pendente, informe descrição, valor, situação `Pendente` e vencimento. Para uma despesa já paga, selecione `Já paga`, informe valor efetivamente pago, data e pessoa pagadora e, opcionalmente, vencimento/observação. O valor pago pode diferir da cobrança, mas a quitação continua integral.
 3. Valores aceitam vírgula na interface, mas a API usa string decimal canônica, por exemplo `"150.25"`. A faixa é R$ 0,01 a R$ 99.999.999,99, com até duas casas. Zero e negativos são recusados.
 4. A lista mostra `Pendente`, `Atrasada` ou `Paga`, “Sem categoria” e responsável não definido. Atraso usa a data local do espaço: no próprio vencimento ainda não há atraso.
 5. Ordene por data de referência, valor ou descrição. A paginação usa 20 itens por padrão e aceita no máximo 100 por requisição.
 
 O frontend cria um `Idempotency-Key` UUID para cada nova intenção e preserva a chave e os campos enquanto a tela continua aberta após falha. Repetir a mesma chave com o mesmo payload retorna o lançamento original; usar a mesma chave com conteúdo diferente retorna 409. Uma chave nova permite cadastrar duas despesas legítimas com dados iguais. Os registros de idempotência permanecem duráveis; a retenção/limpeza operacional continua dentro de P08 e não enfraquece a unicidade.
+
+### Quitar e consultar quem pagou
+
+1. Em `/despesas`, localize uma despesa `Pendente` ou `Atrasada` e use **Quitar despesa**. A tela sugere o valor cobrado, a data local atual e o usuário da sessão como pagador.
+2. Corrija o valor efetivamente pago, a data, o membro ativo que pagou e a observação quando necessário. O autor do registro sempre vem da sessão e pode ser diferente do pagador selecionado.
+3. Confirme. A lista passa a exibir `Paga`, preserva o valor original da cobrança e mostra valor/data do pagamento, pagador e autor da operação.
+4. Repetir a mesma intenção é idempotente. Uma segunda tentativa com chave distinta, versão antiga ou estado já pago retorna conflito e não sobrescreve a quitação existente.
+
+Administrador e convidado ativos podem quitar despesas do próprio espaço. A API não aceita `spaceId`, valida o pagador contra as associações ativas e usa a versão retornada na listagem. Pagamento, mudança de situação, auditoria e resultado idempotente são gravados na mesma transação. Não há pagamento parcial, múltiplos pagadores, estorno, cancelamento ou lote nesta história.
+
+### Corrigir com proteção contra conflito
+
+1. Em `/despesas`, use **Corrigir despesa** no lançamento desejado. A tela mostra a versão e a situação carregadas e preenche os valores atuais.
+2. Em uma pendente, podem ser corrigidos descrição, valor cobrado, vencimento e observação. Em uma paga, esses campos continuam editáveis e também podem ser corrigidos valor pago, data do pagamento, pagador ativo e observação do pagamento. A situação não pode ser alterada por este fluxo.
+3. Salve a correção. O backend deriva o espaço e o autor da sessão, valida a versão e grava despesa, idempotência e auditoria antes/depois na mesma transação. Não é exigido motivo em H02.3; motivo pertence às futuras reversão e cancelamento.
+4. Para testar conflito, abra a mesma despesa em duas abas, edite e salve na primeira e tente salvar na segunda. A segunda recebe conflito, mantém seus campos e mostra os dados atuais. Use **Revisei: usar versão atual mantendo meus campos**, revise novamente e só então salve manualmente; a aplicação nunca força nem reenvia a sobrescrita.
+
+Criador, origem, situação, instante de criação e autoria/data do pagamento original são históricos protegidos. Cada correção grava autor, instante, versões anterior/nova, lista de campos e valores antes/depois em `expense_correction_events`. Reflexos futuros em relatórios, fechamentos e notificações serão validados nos respectivos épicos.
+
+### Desfazer quitação e cancelar
+
+1. Em uma despesa paga com vencimento, use **Desfazer quitação**, leia a consequência, informe o motivo e confirme. A despesa volta a pendente (ou atrasada pela data local); o pagamento anterior e a reversão continuam no histórico.
+2. A despesa pode ser quitada novamente: somente a quitação mais recente fica ativa, sem apagar os eventos anteriores.
+3. Em uma pendente, use **Cancelar despesa**, informe o motivo e confirme. Ela sai da listagem ativa, mas permanece consultável no detalhe com autor, instante e motivo. Uma paga precisa ser revertida antes.
+4. **Ver histórico** mostra quitações, reversões, correções e cancelamento. Não existe exclusão física, reembolso nem restauração de cancelado nesta história.
+
+Administrador e convidado com associação ativa podem executar ambas as operações apenas no próprio espaço. A API exige sessão, CSRF, `Idempotency-Key`, versão carregada e motivo de até 2.000 caracteres. Estado/versão divergente retorna conflito sem sobrescrita; a tela preserva o motivo e consulta os dados atuais. Despesa, evento e idempotência são gravados atomicamente.
+
+Para despesa criada como paga **sem vencimento**, a reversão exige primeiro uma correção que informe o vencimento. Backend e interface recusam a reversão até essa correção; a data do pagamento não é convertida silenciosamente em vencimento. Essa decisão preserva a referência financeira original e garante que toda despesa pendente tenha vencimento.
+
+### Quitar vários lançamentos
+
+1. Em `/despesas`, marque duas ou mais despesas pendentes pelos seletores ao lado da descrição e use **Quitar selecionadas**. Itens pagos e cancelados não são selecionáveis.
+2. Revise a quantidade, cada valor e o total; informe a data e o pagador comuns ao lote. O valor pago de cada item será exatamente o valor confirmado de sua cobrança.
+3. Marque a confirmação explícita e use **Quitar todos ou nenhum**. A interface envia uma única requisição; não encadeia quitações individuais.
+4. Em sucesso, a lista é recarregada e cada lançamento mostra sua quitação. O histórico apresenta o mesmo identificador de operação em lote nos eventos individuais.
+
+Para testar a rejeição integral, abra a confirmação do lote e, em outra aba, corrija, quite ou cancele um dos itens. Ao confirmar na primeira aba, a API responde `409`, mantém seleção, data e pagador para revisão e não altera nenhum item do lote. Recarregue, selecione as versões atuais e confirme uma nova intenção. IDs repetidos, lote vazio, item de outro espaço, estado incompatível, versão antiga ou valor ainda não confirmado também rejeitam tudo. Repetir a mesma chave com conteúdo idêntico retorna o resultado original sem duplicar pagamento/auditoria; conteúdo diferente com a mesma chave conflita.
+
+Administrador e convidado ativos podem executar o lote no próprio espaço. O backend deriva espaço e autor da sessão, valida o pagador ativo, bloqueia os lançamentos em ordem estável e grava operação, pagamentos, versões, auditorias e correlação em uma transação PostgreSQL. Não há limite numérico arbitrário além do lote não vazio, pois os requisitos aprovados não definem outro limite. Pagamento parcial, rateio e múltiplos pagadores não fazem parte deste fluxo.
+
+### Gerenciar categorias
+
+1. Entre como administrador ou convidado e abra `/categorias`. Todo espaço recebe Moradia, Alimentação, Transporte, Saúde, Educação, Lazer e Outros; ambos os papéis podem criar, renomear e arquivar categorias do próprio espaço.
+2. O nome é obrigatório, tem até 60 caracteres e é comparado após remover espaços externos e converter para minúsculas. Assim, `Moradia` e ` moradia ` conflitam; acentos continuam significativos.
+3. No cadastro ou na correção de `/despesas`, selecione uma categoria ativa ou mantenha **Sem categoria**. O backend deriva o espaço da sessão e rejeita categoria arquivada ou pertencente a outro espaço.
+4. Renomear atualiza o nome apresentado pelas despesas vinculadas sem apagar a auditoria da alteração. Arquivar remove a categoria das novas seleções, mas as despesas antigas continuam mostrando a categoria. Não existe exclusão física nem reativação nesta história.
+
+Versões otimistas e constraints PostgreSQL tratam renomeações, arquivamentos e criações concorrentes sem sobrescrita ou duplicidade. Despesas existentes antes da V11 permanecem com categoria nula; nenhuma classificação arbitrária é aplicada. A substituição de uma categoria arquivada em recorrências será validada em E04; relatórios, fechamentos e sugestões de IA serão integrados em seus próprios épicos.
+
+### Atribuir responsável e consultar histórico
+
+1. Em `/despesas`, escolha opcionalmente um **Responsável** ao cadastrar ou use **Corrigir despesa** para atribuir, trocar ou voltar a **Não definido**. Administrador e convidado ativos podem fazer isso; o servidor aceita somente membro ativo do mesmo espaço e exige a versão carregada.
+2. Responsável indica quem acompanha a conta. Ele não altera quem pode editar, não é o pagador e não substitui o autor da operação. A quitação continua exibindo separadamente pagador e usuário que a registrou.
+3. Use **Ver histórico** para consultar, em páginas de dez eventos, criação, correções, quitações, reversões e cancelamento. Correções mostram valores anterior e posterior disponíveis; autor e instante permanecem associados ao evento original. A interface converte o instante UTC para o fuso configurado no espaço.
+4. Se o responsável sair ou for removido, a associação atual é limpa na mesma transação da saída, a versão da despesa avança e o histórico registra quem executou a liberação. Autores e pagadores antigos não são reatribuídos. O aviso ao administrador será entregue pelo módulo de notificações de E08; o evento durável necessário já fica preservado.
+
+Despesas canceladas continuam imutáveis pelo fluxo de correção. A API paginada é `GET /api/v1/expenses/{id}/history?page=0&size=10` (máximo 100) e aplica a mesma autorização por associação/espaço do detalhe. Não são criados autores ou eventos retroativos sem evidência: a criação deriva do próprio registro persistido e as alterações vêm da auditoria existente.
 
 Na VPS, crie `deploy/secrets/setup_secret.txt` com permissão restrita antes do primeiro runtime. O Compose monta o arquivo como Docker secret e o entrypoint exporta seu conteúdo apenas para o processo. Após o primeiro setup, esvazie o conteúdo (mantenha o arquivo-fonte exigido pelo Compose) e recrie o backend; não o coloque em `.env`, logs, comandos compartilhados ou Git.
 
@@ -213,7 +271,7 @@ Somente para papéis, saída, revogação e concorrência da H01.4:
 & .\backend\scripts\run-integration-tests.ps1 -Tests MembershipPostgresIT,FlywayPostgresIT
 ```
 
-Somente para persistência, isolamento, paginação e idempotência da H02.1:
+Somente para persistência, isolamento, paginação, idempotência, quitação individual/em lote, correção, reversão e cancelamento do E02:
 
 ```powershell
 & .\backend\scripts\run-integration-tests.ps1 -Tests ExpensePostgresIT,FlywayPostgresIT
@@ -247,7 +305,7 @@ cd backend
 ```
 
 - `test`: JUnit/Spring e ArchUnit; não executa classes `*IT`.
-- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V6, identidade e despesas, incluindo idempotência concorrente, isolamento por espaço e constraints monetárias.
+- `verify`: inclui os `*IT` com PostgreSQL 17 real via Testcontainers e aplica JaCoCo. Eles verificam V1–V12, identidade, despesas, categorias, responsabilidade e histórico, incluindo lote atômico, quitação/correção/auditoria, conflitos otimistas, idempotência concorrente, isolamento por espaço e constraints duráveis.
 - `-Pmutation`: PIT sobre domínio/aplicação. `-DskipITs` evita criar PostgreSQL novamente; não elimina unitários nem gates.
 - JaCoCo: linhas ≥80% e branches ≥70% em domínio/aplicação.
 - PIT: mutação ≥70% e cobertura de linhas ≥80% no código mutado.
@@ -275,7 +333,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de cadastrar uma pendente pelo administrador, compartilhá-la com o convidado e cadastrar uma já paga pelo convidado. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de criar/usar/renomear/arquivar categoria, atribuir responsável, consultar histórico, cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -359,4 +417,60 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. E01 e H02.1 estão concluídos pelas evidências atuais. A próxima história recomendada é **H02.2 — Quitar e identificar quem pagou**.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.2 está concluída; H03.3 permanece em validação independente. A próxima história funcional é H04.3.
+
+## Anexos privados (H03.3)
+
+Na visualização de uma despesa, ambos os membros ativos podem anexar, listar, baixar e remover até cinco arquivos PDF, JPG ou PNG de no máximo 10 MB cada. O backend valida a assinatura real do conteúdo; o nome original é apenas metadado e nunca compõe o caminho físico. Downloads autenticados usam `Content-Disposition: attachment`, `nosniff` e `no-store`.
+
+O backend usa `APP_FILES_ROOT` (padrão `/var/lib/account-manager/files`) e separa `staging/` de `permanent/`. Em Docker, o volume privado `files-full-local`/`private-files` é montado somente no backend e não no Nginx. Para comprovar persistência local, envie um arquivo, recrie somente o container backend sem remover volumes e baixe-o novamente. `docker compose down -v` apaga deliberadamente o ambiente local e não deve ser usado numa atualização.
+
+Backup operacional deve capturar PostgreSQL e a área `permanent/` na mesma janela de manutenção. `staging/` não é backup permanente. A restauração completa continua pendente de P06/H11.2–H11.3 e não foi declarada validada nesta história.
+
+## Busca e filtros de despesas (H03.4)
+
+A tela de despesas abre no mês atual do fuso do espaço, pela data de vencimento/referência, e oculta canceladas. A busca textual consulta somente a descrição. É possível combinar período inclusivo, base de data (vencimento ou pagamento), categoria, responsável, pagador e situação (`ACTIVE`, `PENDING`, `OVERDUE`, `PAID`, `CANCELLED` ou `ALL`). Atrasadas continuam sendo pendentes e não formam uma segunda contagem.
+
+As opções incluem categorias arquivadas e pessoas ainda referenciadas em despesas; quem já saiu aparece como “membro anterior”. “Sem categoria” e “Sem responsável” são filtros explícitos. As ordenações aceitas são `REFERENCE_DATE`, `AMOUNT` e `DESCRIPTION`, com `ASC`/`DESC` e desempate estável. Ao trocar um filtro, a interface volta à primeira página, cancela respostas antigas e preserva explicitamente a seleção do lote entre páginas/filtros.
+
+Exemplos autenticados:
+
+```text
+GET /api/v1/expenses?search=energia&dateFrom=2026-09-01&dateTo=2026-09-30&status=OVERDUE&sort=AMOUNT&direction=DESC
+GET /api/v1/expenses?dateBasis=PAYMENT_DATE&status=PAID&payerUserId=<UUID>&page=0&size=20
+GET /api/v1/expenses/filter-options
+```
+
+Parâmetros inválidos, página negativa, tamanho fora de 1–100, período invertido, enum ou campo de ordenação desconhecido retornam `400`; a API não aceita SQL ou nome livre como ordenação.
+
+## Recorrências, calendário, geração e previsões (H04.1–H04.3)
+
+Após entrar, abra `/recorrencias` (também há um link na tela de despesas). Administrador e convidado ativos podem cadastrar descrição, valor, modalidade fixa ou estimativa variável, frequência, primeiro vencimento e, opcionalmente, término, categoria e responsável. Categoria e responsável precisam estar ativos e pertencer ao mesmo espaço.
+
+As frequências são mensal, bimestral, trimestral, semestral e anual. O primeiro vencimento fixa o dia-base: `31/01/2027` produz `28/02/2027` e depois `31/03/2027`, sem deslocamento acumulado. Em ano bissexto, fevereiro usa dia 29. Não há ajuste de fim de semana/feriado. O término é inclusivo e datas passadas são aceitas como referência, mas não geram ocorrências retroativas.
+
+“Calcular próximas datas” chama o backend e mostra até 12 datas; o frontend não replica o algoritmo. O cadastro persiste a definição e o job verifica, por padrão a cada 30 segundos, se existe uma ocorrência no mês vigente no fuso do espaço. Meses anteriores não são gerados retroativamente. Uma cobrança fixa nasce confirmada; uma estimativa variável aparece como **valor estimado a confirmar**, sem ser quitável até H04.4.
+
+A identidade durável da ocorrência é `(recurrence_id, scheduled_due_date)`. A fila usa reserva PostgreSQL com `FOR UPDATE SKIP LOCKED`, lease de 120 segundos, fencing token e lote de 25. Processo interrompido pode ser retomado após expirar o lease; constraints impedem segunda despesa/auditoria. Categoria arquivada e responsável inativo são omitidos no novo lançamento, preservando a definição para tratamento definitivo em H04.5. Não existe endpoint público para disparar o job.
+
+A seção **Previsões e lançamentos** consulta o mês atual mais os 12 meses seguintes no fuso do espaço. Consultar não grava dados. Cada item é rotulado como previsão fixa/estimada ou lançamento real; quando a ocorrência já existe, valor, vencimento atual, confirmação e situação da despesa prevalecem, inclusive para paga ou cancelada, sem recriar a previsão. **Antecipar lançamento** exige confirmação, aceita apenas uma data ainda válida nesse horizonte e materializa a ocorrência numa transação. A mesma chave/conteúdo reproduz o resultado; chave reutilizada com outra ocorrência retorna `409`. A estimativa variável continua não confirmada até H04.4.
+
+Configuração operacional opcional: `APP_JOBS_RECURRENCE_ENABLED`, `APP_JOBS_RECURRENCE_FIXED_DELAY_MS`, `APP_JOBS_RECURRENCE_LEASE_SECONDS` e `APP_JOBS_RECURRENCE_BATCH_SIZE`. Os padrões são `true`, `30000`, `120` e `25`; não desabilite o job em produção. O modo explícito de migração o desativa automaticamente.
+
+Exemplos autenticados (operações `POST` também exigem CSRF):
+
+```text
+POST /api/v1/recurrences/calendar-preview
+POST /api/v1/recurrences  Idempotency-Key: <UUID>
+GET  /api/v1/recurrences
+GET  /api/v1/recurrences/forecasts
+POST /api/v1/recurrences/<recurrenceId>/occurrences/<AAAA-MM-DD>/anticipation  Idempotency-Key: <UUID>
+```
+
+Teste de geração, previsão/antecipação, persistência e migrações V1–V17:
+
+```powershell
+backend\scripts\run-integration-tests.ps1 -Tests RecurrenceGenerationPostgresIT,RecurrencePostgresIT,ExpensePostgresIT,FlywayPostgresIT
+```
+
+Diagnóstico seguro: consulte contagens/estados em `recurrence_generation_jobs` e `recurrence_occurrences`; `FAILED` inclui somente `last_error_code`, nunca dados financeiros. Não altere manualmente jobs concluídos. Falhas transitórias ficam elegíveis após 30 segundos; `PROCESSING` com lease vencido é retomado por outro worker.

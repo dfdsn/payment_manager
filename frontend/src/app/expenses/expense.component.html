@@ -4,13 +4,13 @@
       <h1 id="expenses-title">Despesas</h1>
       <p>Cadastre contas pendentes ou despesas que já foram pagas.</p>
     </div>
-    <a routerLink="/entrar">Voltar ao início</a>
+    <div><a routerLink="/categorias">Gerenciar categorias</a> · <a routerLink="/recorrencias">Gerenciar recorrências</a> · <a routerLink="/entrar">Voltar ao início</a></div>
   </header>
 
   <mat-card appearance="outlined" class="expense-form-card">
     <mat-card-header>
       <mat-card-title>Adicionar despesa</mat-card-title>
-      <mat-card-subtitle>Categoria e responsável serão opcionais quando esses módulos estiverem disponíveis.</mat-card-subtitle>
+      <mat-card-subtitle>A categoria é opcional; sem escolha, será exibida como “Sem categoria”.</mat-card-subtitle>
     </mat-card-header>
     <mat-card-content>
       @if (errorMessage()) { <div class="error-summary" role="alert">{{ errorMessage() }}</div> }
@@ -38,6 +38,16 @@
           <select formControlName="status">
             <option value="PENDING">Pendente</option>
             <option value="PAID">Já paga</option>
+          </select>
+        </label>
+        <label class="select-field">Categoria (opcional)
+          <select formControlName="categoryId"><option value="">Sem categoria</option>
+            @for (category of categories(); track category.id) { @if (!category.archived) { <option [value]="category.id">{{category.name}}</option> } }
+          </select>
+        </label>
+        <label class="select-field">Responsável (opcional)
+          <select formControlName="responsibleUserId"><option value="">Sem responsável</option>
+            @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
           </select>
         </label>
 
@@ -68,6 +78,24 @@
           <textarea matInput formControlName="notes" maxlength="2000" rows="3"></textarea>
         </mat-form-field>
 
+        @if (form.controls.status.value === 'PAID') {
+          <div [formGroup]="paymentForm" class="wide-field">
+            <mat-form-field appearance="outline"><mat-label>Valor pago</mat-label>
+              <input matInput formControlName="paidAmount" inputmode="decimal" />
+              <mat-error>Informe o valor pago positivo com até duas casas.</mat-error>
+            </mat-form-field>
+            <label class="select-field">Quem pagou
+              <select formControlName="paidByUserId">
+                @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+              </select>
+            </label>
+            <mat-form-field appearance="outline"><mat-label>Observação do pagamento</mat-label>
+              <textarea matInput formControlName="paymentNotes" maxlength="2000"></textarea>
+            </mat-form-field>
+            <p>O valor informado quita integralmente a cobrança, mesmo se for diferente.</p>
+          </div>
+        }
+
         <button matButton="filled" type="submit" [disabled]="submitting()">
           {{ submitting() ? 'Salvando…' : 'Salvar despesa' }}
         </button>
@@ -75,13 +103,267 @@
     </mat-card-content>
   </mat-card>
 
+  @if (settling(); as expense) {
+    <mat-card appearance="outlined" class="expense-form-card">
+      <mat-card-header><mat-card-title>Quitar {{ expense.description }}</mat-card-title></mat-card-header>
+      <mat-card-content>
+        <p>Cobrança: {{ formatCurrency(expense.amount) }} · Vencimento: {{ formatDate(expense.dueDate) }}</p>
+        <p>A confirmação quita integralmente a cobrança. O autor será registrado automaticamente.</p>
+        <form [formGroup]="paymentForm" (ngSubmit)="confirmPayment()">
+          <mat-form-field appearance="outline"><mat-label>Valor efetivamente pago</mat-label>
+            <input matInput formControlName="paidAmount" inputmode="decimal" />
+            <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error>
+          </mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Data da quitação</mat-label>
+            <input matInput type="date" formControlName="paymentDate" />
+            <mat-error>Informe a data do pagamento.</mat-error>
+          </mat-form-field>
+          <label class="select-field">Pagador da quitação
+            <select formControlName="paidByUserId">
+              @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+            </select>
+          </label>
+          <mat-form-field appearance="outline"><mat-label>Observação da quitação</mat-label>
+            <textarea matInput formControlName="paymentNotes" maxlength="2000"></textarea>
+          </mat-form-field>
+          <button matButton="filled" type="submit" [disabled]="submitting()">{{ submitting() ? 'Quitando…' : 'Confirmar quitação' }}</button>
+          <button matButton="outlined" type="button" [disabled]="submitting()" (click)="settling.set(null)">Fechar quitação</button>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  }
+
+  @if (batchOpen()) {
+    <mat-card appearance="outlined" class="expense-form-card batch-card">
+      <mat-card-header>
+        <mat-card-title>Confirmar quitação em lote</mat-card-title>
+        <mat-card-subtitle>{{ selectedForBatch().size }} lançamentos · total {{ batchTotal() }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        <p>Todos os lançamentos serão quitados pela data e pelo pagador abaixo, usando o valor integral de cada cobrança.</p>
+        <p>O lote é atômico: se um item estiver alterado ou inelegível, nenhum pagamento será registrado.</p>
+        <ul class="batch-summary">
+          @for (expense of selectedBatchItems(); track expense.id) {
+            <li>{{ expense.description }} — {{ formatCurrency(expense.amount) }} — versão {{ expense.version }}</li>
+          }
+        </ul>
+        <form [formGroup]="batchForm" (ngSubmit)="confirmBatch()" novalidate>
+          <mat-form-field appearance="outline"><mat-label>Data da quitação do lote</mat-label>
+            <input matInput type="date" formControlName="paymentDate" />
+            <mat-error>Informe a data do pagamento.</mat-error>
+          </mat-form-field>
+          <label class="select-field">Pagador do lote
+            <select formControlName="paidByUserId">
+              @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+            </select>
+          </label>
+          <label class="confirmation-field">
+            <input type="checkbox" formControlName="confirmed" />
+            Confirmo a quitação integral dos {{ selectedForBatch().size }} lançamentos, no total de {{ batchTotal() }}.
+          </label>
+          @if (batchForm.controls.confirmed.invalid && batchForm.controls.confirmed.touched) {
+            <p class="field-error">Confirme conscientemente a operação antes de continuar.</p>
+          }
+          <div class="form-actions wide-field">
+            <button matButton="filled" type="submit" [disabled]="submitting()">
+              {{ submitting() ? 'Quitando lote…' : 'Quitar todos ou nenhum' }}
+            </button>
+            <button matButton="outlined" type="button" [disabled]="submitting()" (click)="batchOpen.set(false)">Voltar e revisar seleção</button>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  }
+
+  @if (editing(); as expense) {
+    <mat-card appearance="outlined" class="expense-form-card correction-card">
+      <mat-card-header>
+        <mat-card-title>Corrigir {{ expense.description }}</mat-card-title>
+        <mat-card-subtitle>Versão carregada: {{ expense.version }} · situação preservada: {{ expense.status === 'PAID' ? 'Paga' : 'Pendente' }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        @if (conflictCurrent(); as current) {
+          <div class="conflict-summary" role="alert">
+            <strong>Os dados mudaram enquanto você editava.</strong>
+            <p>Versão atual {{ current.version }}: {{ current.description }}, {{ formatCurrency(current.amount) }}, referência {{ formatDate(current.referenceDate) }}.</p>
+            <p>O que você digitou continua no formulário. Revise os dados atuais e confirme abaixo para reaplicar manualmente; nada será reenviado automaticamente.</p>
+            <button matButton="outlined" type="button" (click)="useCurrentVersion()">Revisei: usar versão atual mantendo meus campos</button>
+          </div>
+        }
+        <form [formGroup]="editForm" (ngSubmit)="confirmCorrection()" novalidate>
+          <mat-form-field appearance="outline" class="wide-field"><mat-label>Descrição da correção</mat-label>
+            <input matInput formControlName="description" maxlength="200" />
+            <mat-error>Informe uma descrição com até 200 caracteres.</mat-error>
+          </mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Valor da cobrança corrigido</mat-label>
+            <input matInput formControlName="amount" inputmode="decimal" />
+            <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error>
+          </mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Vencimento corrigido{{ expense.status === 'PAID' ? ' (opcional)' : '' }}</mat-label>
+            <input matInput type="date" formControlName="dueDate" />
+            <mat-error>Informe o vencimento.</mat-error>
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="wide-field"><mat-label>Observação corrigida</mat-label>
+            <textarea matInput formControlName="notes" maxlength="2000"></textarea>
+          </mat-form-field>
+          <label class="select-field">Categoria corrigida (opcional)
+            <select formControlName="categoryId"><option value="">Sem categoria</option>
+              @for (category of categories(); track category.id) {
+                @if (!category.archived || category.id === expense.categoryId) {
+                  <option [value]="category.id">{{category.name}}{{category.archived ? ' (arquivada)' : ''}}</option>
+                }
+              }
+            </select>
+          </label>
+          <label class="select-field">Responsável corrigido (opcional)
+            <select formControlName="responsibleUserId"><option value="">Sem responsável</option>
+              @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+            </select>
+          </label>
+          @if (expense.status === 'PAID') {
+            <mat-form-field appearance="outline"><mat-label>Valor pago corrigido</mat-label>
+              <input matInput formControlName="paidAmount" inputmode="decimal" />
+              <mat-error>Informe o valor pago positivo com até duas casas.</mat-error>
+            </mat-form-field>
+            <mat-form-field appearance="outline"><mat-label>Data do pagamento corrigida</mat-label>
+              <input matInput type="date" formControlName="paymentDate" />
+              <mat-error>Informe a data do pagamento.</mat-error>
+            </mat-form-field>
+            <label class="select-field">Pagador corrigido
+              <select formControlName="paidByUserId">
+                @for (member of members(); track member.userId) { <option [value]="member.userId">{{ member.displayName }}</option> }
+              </select>
+            </label>
+            <mat-form-field appearance="outline"><mat-label>Observação do pagamento corrigida</mat-label>
+              <textarea matInput formControlName="paymentNotes" maxlength="2000"></textarea>
+            </mat-form-field>
+          }
+          <div class="form-actions wide-field">
+            <button matButton="filled" type="submit" [disabled]="submitting() || !!conflictCurrent()">{{ submitting() ? 'Salvando…' : 'Salvar correção' }}</button>
+            <button matButton="outlined" type="button" [disabled]="submitting()" (click)="editing.set(null); conflictCurrent.set(null)">Fechar correção</button>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  }
+
+  @if (lifecycleAction(); as action) {
+    <mat-card appearance="outlined" class="expense-form-card lifecycle-card">
+      <mat-card-header>
+        <mat-card-title>{{ action.type === 'REVERSE' ? 'Desfazer quitação' : 'Cancelar despesa' }} — {{ action.expense.description }}</mat-card-title>
+        <mat-card-subtitle>Versão carregada: {{ action.expense.version }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        @if (action.type === 'REVERSE') {
+          <p>A quitação ativa será encerrada e a despesa voltará a ficar pendente. Os dados do pagamento e desta reversão permanecerão no histórico.</p>
+          @if (!action.expense.dueDate) {
+            <div class="error-summary" role="alert">Antes de desfazer, corrija a despesa e informe um vencimento para que ela possa voltar ao estado pendente.</div>
+          }
+        } @else {
+          <p>A despesa será retirada da lista ativa sem ser excluída. Seu lançamento e o motivo continuarão disponíveis no histórico. Não há restauração nesta etapa.</p>
+        }
+        <form [formGroup]="actionForm" (ngSubmit)="confirmLifecycleAction()" novalidate>
+          <mat-form-field appearance="outline" class="wide-field">
+            <mat-label>Motivo obrigatório</mat-label>
+            <textarea matInput formControlName="reason" maxlength="2000" rows="3"></textarea>
+            <mat-error>Informe o motivo com até 2.000 caracteres.</mat-error>
+          </mat-form-field>
+          <div class="form-actions wide-field">
+            <button matButton="filled" type="submit"
+              [disabled]="submitting() || (action.type === 'REVERSE' && !action.expense.dueDate)">
+              {{ submitting() ? 'Processando…' : (action.type === 'REVERSE' ? 'Confirmar reversão' : 'Confirmar cancelamento') }}
+            </button>
+            <button matButton="outlined" type="button" [disabled]="submitting()" (click)="lifecycleAction.set(null)">Voltar sem alterar</button>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  }
+
+  @if (detail(); as selected) {
+    <mat-card appearance="outlined" class="expense-form-card history-card">
+      <mat-card-header><mat-card-title>Anexos de {{ selected.description }}</mat-card-title><mat-card-subtitle>PDF, JPG ou PNG · até 10 MB · máximo de 5</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        <label>Selecionar documento <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" (change)="uploadAttachment($event, selected.id)" [disabled]="attachmentLoading() || attachments().length >= 5"></label>
+        @if (attachmentLoading()) { <p aria-live="polite">Enviando ou atualizando anexos…</p> }
+        @if (attachmentError()) { <div class="error-summary" role="alert">{{ attachmentError() }}</div> }
+        @if (!attachmentLoading() && attachments().length === 0) { <p>Nenhum anexo nesta despesa.</p> }
+        <ul>
+          @for (item of attachments(); track item.id) {
+            <li><strong>{{ item.name }}</strong> · {{ item.size }} bytes · enviado por {{ item.uploadedByDisplayName }}
+              <button matButton type="button" (click)="downloadAttachment(selected.id,item)">Baixar</button>
+              <button matButton type="button" (click)="removeAttachment(selected.id,item.id)">Remover</button>
+            </li>
+          }
+        </ul>
+      </mat-card-content>
+    </mat-card>
+    <mat-card appearance="outlined" class="expense-form-card history-card">
+      <mat-card-header>
+        <mat-card-title>Histórico de {{ selected.description }}</mat-card-title>
+        <mat-card-subtitle>Situação atual: {{ selected.status === 'CANCELLED' ? 'Cancelada' : (selected.status === 'PAID' ? 'Paga' : 'Pendente') }} · versão {{ selected.version }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        @if (historyLoading()) {
+          <p role="status">Carregando histórico…</p>
+        } @else if (historyError()) {
+          <div class="error-summary" role="alert">{{ historyError() }}</div>
+        } @else if (history().length === 0) {
+          <p>Nenhuma alteração histórica registrada.</p>
+        } @else {
+          <ol class="history-list">
+            @for (event of history(); track event.type + event.version + event.occurredAt) {
+              <li>
+                <strong>{{ historyLabel(event.type) }}</strong> por {{ event.actorDisplayName }}
+                <span>· versão {{ event.version }} · {{ formatInstant(event.occurredAt) }}</span>
+                @if (event.reason) { <p>Motivo: {{ event.reason }}</p> }
+                @if (event.paidAmount) { <p>Pagamento preservado: {{ formatCurrency(event.paidAmount) }} em {{ formatDate(event.paymentDate) }} por {{ event.payerDisplayName }}.</p> }
+                @for (change of event.changes; track change.field) {
+                  <p>{{ historyField(change.field) }}: {{ historyValue(change.previousValue) }} → {{ historyValue(change.currentValue) }}.</p>
+                }
+                @if (event.batchOperationId) { <p>Operação em lote: {{ event.batchOperationId }}.</p> }
+              </li>
+            }
+          </ol>
+          <nav class="pagination" aria-label="Paginação do histórico">
+            <button matButton="outlined" type="button" (click)="loadHistory(selected.id, historyPage() - 1)" [disabled]="historyPage() === 0">Histórico anterior</button>
+            <span>Página {{ historyPage() + 1 }} de {{ historyTotalPages() }}</span>
+            <button matButton="outlined" type="button" (click)="loadHistory(selected.id, historyPage() + 1)" [disabled]="historyPage() + 1 >= historyTotalPages()">Próximo histórico</button>
+          </nav>
+        }
+        <button matButton="outlined" type="button" (click)="detail.set(null)">Fechar histórico</button>
+      </mat-card-content>
+    </mat-card>
+  }
+
   <section aria-labelledby="expense-list-title" class="expense-list-section">
+    <mat-card appearance="outlined" class="filter-card">
+      <mat-card-header><mat-card-title>Buscar e filtrar</mat-card-title><mat-card-subtitle>Sem período informado, mostra o mês atual pela data de referência de vencimento.</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        <form [formGroup]="filterForm" (ngSubmit)="applyFilters()">
+          <mat-form-field appearance="outline" class="wide-field"><mat-label>Buscar na descrição</mat-label><input matInput formControlName="search" maxlength="200"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Data inicial</mat-label><input matInput type="date" formControlName="dateFrom"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Data final</mat-label><input matInput type="date" formControlName="dateTo"></mat-form-field>
+          <label class="select-field">Base do período<select formControlName="dateBasis"><option value="DUE_DATE">Vencimento/referência</option><option value="PAYMENT_DATE">Data de pagamento</option></select></label>
+          <label class="select-field">Situação<select formControlName="status"><option value="ACTIVE">Ativas</option><option value="PENDING">Pendentes (inclui atrasadas)</option><option value="OVERDUE">Somente atrasadas</option><option value="PAID">Pagas</option><option value="CANCELLED">Canceladas</option><option value="ALL">Todas</option></select></label>
+          <label class="select-field">Categoria<select formControlName="category"><option value="">Todas</option><option value="NONE">Sem categoria</option>@for(category of categories();track category.id){<option [value]="category.id">{{category.name}}{{category.archived?' (arquivada)':''}}</option>}</select></label>
+          <label class="select-field">Responsável<select formControlName="responsible"><option value="">Todos</option><option value="NONE">Sem responsável</option>@for(person of responsibleFilterPeople();track person.userId){<option [value]="person.userId">{{person.displayName}}{{person.activeMember?'':' (membro anterior)'}}</option>}</select></label>
+          <label class="select-field">Pagador<select formControlName="payerUserId"><option value="">Todos</option>@for(person of payerFilterPeople();track person.userId){<option [value]="person.userId">{{person.displayName}}{{person.activeMember?'':' (membro anterior)'}}</option>}</select></label>
+          <div class="form-actions wide-field"><button matButton="filled" type="submit">Aplicar filtros</button><button matButton="outlined" type="button" (click)="clearFilters()">Limpar</button></div>
+        </form>
+        @if(filtersActive()){<p role="status">Há filtros ativos. A seleção do lote é preservada entre páginas e filtros até ser quitada ou desmarcada.</p>}
+      </mat-card-content>
+    </mat-card>
     <div class="list-header">
       <div>
         <h2 id="expense-list-title">Lançamentos</h2>
         <p>{{ totalElements() }} {{ totalElements() === 1 ? 'despesa' : 'despesas' }}</p>
       </div>
       <div class="sort-controls">
+        <button matButton="filled" type="button" (click)="openBatch()"
+          [disabled]="selectedForBatch().size === 0 || submitting()">
+          Quitar selecionadas ({{ selectedForBatch().size }})
+        </button>
         <label class="select-field compact">Ordenar por
           <select [value]="sort()" (change)="changeSort($any($event.target).value)">
             <option value="REFERENCE_DATE">Data de referência</option>
@@ -98,24 +380,47 @@
     @if (loading()) {
       <p role="status">Carregando despesas…</p>
     } @else if (expenses().length === 0) {
-      <div class="empty-state" role="status">Nenhuma despesa cadastrada neste espaço.</div>
+      <div class="empty-state" role="status">{{ filtersActive() ? 'Nenhum lançamento corresponde aos filtros.' : 'Nenhuma despesa cadastrada neste espaço.' }}</div>
     } @else {
       <div class="expense-grid">
         @for (expense of expenses(); track expense.id) {
           <mat-card appearance="outlined" class="expense-row">
             <mat-card-content>
               <div class="expense-title-line">
-                <h3>{{ expense.description }}</h3>
+                <h3>
+                  @if (expense.status === 'PENDING') {
+                    <label class="batch-selector">
+                      <input type="checkbox" [checked]="isBatchSelected(expense.id)"
+                        (change)="toggleBatch(expense)" [disabled]="submitting()"
+                        [attr.aria-label]="'Selecionar para quitação em lote: ' + expense.description" />
+                    </label>
+                  }
+                  {{ expense.description }}
+                </h3>
                 <strong>{{ formatCurrency(expense.amount) }}</strong>
               </div>
               <p>
-                <span class="status-label">{{ expense.status === 'PAID' ? 'Paga' : (expense.overdue ? 'Atrasada' : 'Pendente') }}</span>
+                <span class="status-label">{{ expense.status === 'CANCELLED' ? 'Cancelada' : (expense.status === 'PAID' ? 'Paga' : (expense.overdue ? 'Atrasada' : 'Pendente')) }}</span>
                 — referência {{ formatDate(expense.referenceDate) }}
               </p>
-              <p>Categoria: {{ expense.categoryName ?? 'Sem categoria' }} · Responsável: Não definido</p>
+              @if (expense.origin === 'RECURRENCE') {
+                <p>Gerada por recorrência{{ expense.chargeConfirmed ? '' : ' · valor estimado a confirmar' }}.</p>
+              }
+              <p>Categoria: {{ expense.categoryName ?? 'Sem categoria' }} · Responsável: {{ expense.responsibleDisplayName ?? 'Não definido' }}</p>
               @if (expense.status === 'PAID') {
                 <p>Pagamento em {{ formatDate(expense.paymentDate) }} por {{ expense.paidByDisplayName }}.</p>
+                <p>Valor pago: {{ formatCurrency(expense.paidAmount!) }}</p>
+                @if (expense.paymentAudit; as audit) {
+                  <p>Registrado por {{ audit.recordedByDisplayName }}.</p>
+                  @if (audit.notes) { <p>{{ audit.notes }}</p> }
+                }
+                <button matButton="outlined" type="button" (click)="openLifecycleAction(expense, 'REVERSE')" [disabled]="submitting()">Desfazer quitação</button>
+              } @else if (expense.status === 'PENDING') {
+                <button matButton="outlined" type="button" (click)="openPayment(expense)" [disabled]="submitting()">Quitar despesa</button>
+                <button matButton="outlined" type="button" (click)="openLifecycleAction(expense, 'CANCEL')" [disabled]="submitting()">Cancelar despesa</button>
               }
+              @if (expense.status !== 'CANCELLED') { <button matButton="outlined" type="button" (click)="openCorrection(expense)" [disabled]="submitting()">Corrigir despesa</button> }
+              <button matButton="outlined" type="button" (click)="loadDetail(expense.id)" [disabled]="submitting()">Ver histórico</button>
             </mat-card-content>
           </mat-card>
         }

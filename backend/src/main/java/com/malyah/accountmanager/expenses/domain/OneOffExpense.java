@@ -16,7 +16,15 @@ public record OneOffExpense(
         LocalDate referenceDate,
         String notes,
         UUID createdByUserId,
-        Instant createdAt) {
+        Instant createdAt,
+        PaymentDetails payment) {
+
+    public OneOffExpense(UUID id, UUID spaceId, String description, ExpenseAmount amount,
+            ExpenseStatus status, LocalDate dueDate, LocalDate paymentDate, LocalDate referenceDate,
+            String notes, UUID createdByUserId, Instant createdAt) {
+        this(id, spaceId, description, amount, status, dueDate, paymentDate, referenceDate,
+                notes, createdByUserId, createdAt, null);
+    }
 
     public OneOffExpense {
         Objects.requireNonNull(id);
@@ -29,6 +37,7 @@ public record OneOffExpense(
         notes = normalizeNotes(notes);
 
         if (status == ExpenseStatus.PENDING) {
+            if (payment != null) throw new ExpenseValidationException("payment", "Despesa pendente não possui pagamento.");
             if (dueDate == null) {
                 throw new ExpenseValidationException("dueDate", "Informe o vencimento da despesa pendente.");
             }
@@ -36,11 +45,14 @@ public record OneOffExpense(
                 throw new ExpenseValidationException("paymentDate", "Despesa pendente não possui data de pagamento.");
             }
             referenceDate = dueDate;
-        } else {
+        } else if (status == ExpenseStatus.PAID) {
             if (paymentDate == null) {
                 throw new ExpenseValidationException("paymentDate", "Informe a data de pagamento.");
             }
             referenceDate = dueDate == null ? paymentDate : dueDate;
+            if (payment == null) payment = new PaymentDetails(amount, paymentDate, createdByUserId, null);
+        } else {
+            throw new ExpenseValidationException("status", "Cadastre a despesa como pendente ou paga.");
         }
     }
 
