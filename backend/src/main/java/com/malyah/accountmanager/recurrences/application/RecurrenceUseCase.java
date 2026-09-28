@@ -11,4 +11,6 @@ public interface RecurrenceUseCase {
     ForecastPeriodView forecasts(String actorEmail);
     AnticipationResult anticipate(String actorEmail, java.util.UUID recurrenceId, LocalDate scheduledDueDate,
             java.util.UUID idempotencyKey);
+    AnticipationResult confirmForecastCharge(String actorEmail, java.util.UUID recurrenceId, LocalDate scheduledDueDate,
+            String confirmedAmount, java.util.UUID idempotencyKey);
 }

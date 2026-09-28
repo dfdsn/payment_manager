@@ -14,5 +14,6 @@ export interface AnticipationResult { occurrence:RecurrenceForecast;replayed:boo
   preview(data:{firstDueDate:string;lastDueDate:string|null;frequency:RecurrenceFrequency}){return this.http.get('/api/v1/auth/csrf').pipe(switchMap(()=>this.http.post<string[]>(`${this.endpoint}/calendar-preview`,data)));}
   create(data:RecurrenceData,key:string){return this.http.get('/api/v1/auth/csrf').pipe(switchMap(()=>this.http.post<Recurrence>(this.endpoint,data,{headers:new HttpHeaders({'Idempotency-Key':key})})));}
   forecasts(){return this.http.get<ForecastPeriod>(`${this.endpoint}/forecasts`);}
+  confirmForecastCharge(item:RecurrenceForecast,confirmedAmount:string,key:string){return this.http.get('/api/v1/auth/csrf').pipe(switchMap(()=>this.http.post<AnticipationResult>(`${this.endpoint}/${item.recurrenceId}/occurrences/${item.scheduledDueDate}/charge-confirmation`,{confirmedAmount},{headers:new HttpHeaders({'Idempotency-Key':key})})));}
   anticipate(item:RecurrenceForecast,key:string){return this.http.get('/api/v1/auth/csrf').pipe(switchMap(()=>this.http.post<AnticipationResult>(`${this.endpoint}/${item.recurrenceId}/occurrences/${item.scheduledDueDate}/anticipation`,{confirmed:true},{headers:new HttpHeaders({'Idempotency-Key':key})})));}
 }

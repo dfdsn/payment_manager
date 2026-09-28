@@ -46,4 +46,16 @@ describe('RecurrenceService', () => {
     expect(request.request.body).toEqual({ confirmed: true });
     request.flush({ occurrence: item, replayed: false });
   });
+
+  it('confirms a forecast charge on the occurrence identity with its own key', () => {
+    const item = { recurrenceId: 'rec-1', description: 'Energia', amount: '180.00', estimated: true,
+      scheduledDueDate: '2026-11-10', state: 'FORECAST' as const, expenseId: null, actualDueDate: null,
+      expenseStatus: null, chargeConfirmed: false };
+    service.confirmForecastCharge(item, '205.40', 'confirm-key').subscribe();
+    http.expectOne('/api/v1/auth/csrf').flush({});
+    const request = http.expectOne('/api/v1/recurrences/rec-1/occurrences/2026-11-10/charge-confirmation');
+    expect(request.request.headers.get('Idempotency-Key')).toBe('confirm-key');
+    expect(request.request.body).toEqual({ confirmedAmount: '205.40' });
+    request.flush({ occurrence: item, replayed: false });
+  });
 });

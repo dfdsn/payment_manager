@@ -78,6 +78,25 @@ final class JdbcRecurrenceRepository implements RecurrenceRepository {
                 spaceId,from,to);
     }
 
+    @Override public List<StoredOccurrence> findConfirmedCharges(UUID spaceId) {
+        return jdbc.query("""
+                select o.recurrence_id,o.scheduled_due_date,o.expense_id,e.due_date,e.status,
+                       e.charge_amount,e.charge_confirmed
+                  from recurrence_occurrences o
+                  join expense_entries e on e.id=o.expense_id and e.space_id=o.space_id
+                 where o.space_id=? and e.charge_confirmed=true
+                 order by o.recurrence_id,o.scheduled_due_date
+                """, (rs,row) -> new StoredOccurrence(rs.getObject(1,UUID.class),
+                        rs.getObject(2,java.time.LocalDate.class),rs.getObject(3,UUID.class),
+                        rs.getObject(4,java.time.LocalDate.class),rs.getString(5),rs.getBigDecimal(6),rs.getBoolean(7)),
+                spaceId);
+    }
+
+    @Override public void lockForChargeConfirmation(UUID spaceId, UUID recurrenceId) {
+        jdbc.query("select id from recurrence_definitions where id=? and space_id=? for no key update",
+                (rs,row)->rs.getObject(1,UUID.class),recurrenceId,spaceId);
+    }
+
     @Override public AnticipationClaim claimAnticipation(UUID spaceId, UUID actorId, UUID recurrenceId,
             java.time.LocalDate dueDate, UUID key, String requestHash, Instant at) {
         var claimed=jdbc.update("""

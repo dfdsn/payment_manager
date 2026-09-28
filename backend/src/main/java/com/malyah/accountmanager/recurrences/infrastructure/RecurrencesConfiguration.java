@@ -33,9 +33,10 @@ class RecurrencesConfiguration {
     @Bean RecurrenceUseCase recurrenceUseCase(JdbcTemplate jdbc, AuthenticatedUserContextQuery context,
             CategoryRepository categories, FinancialMemberAccess members, Clock applicationClock,
             PlatformTransactionManager manager,
-            com.malyah.accountmanager.expenses.application.RecurringExpenseMaterializer materializer) {
+            com.malyah.accountmanager.expenses.application.RecurringExpenseMaterializer materializer,
+            com.malyah.accountmanager.expenses.application.ChargeConfirmationUseCase chargeConfirmation) {
         var service=new RecurrenceService(new JdbcRecurrenceRepository(jdbc),context,categories,members,
-                applicationClock,UUID::randomUUID,new RecurrenceCalendar(),materializer);
+                applicationClock,UUID::randomUUID,new RecurrenceCalendar(),materializer,chargeConfirmation);
         return new TransactionalRecurrenceUseCase(service,new TransactionTemplate(manager));
     }
 }

@@ -107,9 +107,21 @@
     <mat-card appearance="outlined" class="expense-form-card">
       <mat-card-header><mat-card-title>Quitar {{ expense.description }}</mat-card-title></mat-card-header>
       <mat-card-content>
-        <p>Cobrança: {{ formatCurrency(expense.amount) }} · Vencimento: {{ formatDate(expense.dueDate) }}</p>
+        @if (isEstimated(expense)) {
+          <p>Cobrança estimada: {{ formatCurrency(expense.amount) }} · Vencimento: {{ formatDate(expense.dueDate) }}</p>
+          <p>Este valor ainda é estimado. Informe o valor confirmado da cobrança: ele e a quitação serão gravados juntos, ou nada será gravado.</p>
+        } @else {
+          <p>Cobrança: {{ formatCurrency(expense.amount) }} · Vencimento: {{ formatDate(expense.dueDate) }}</p>
+        }
         <p>A confirmação quita integralmente a cobrança. O autor será registrado automaticamente.</p>
         <form [formGroup]="paymentForm" (ngSubmit)="confirmPayment()">
+          @if (isEstimated(expense)) {
+            <mat-form-field appearance="outline"><mat-label>Valor confirmado da cobrança</mat-label>
+              <input matInput formControlName="confirmedChargeAmount" inputmode="decimal" />
+              <mat-hint>Valor que a fatura realmente cobrou. Juros ou desconto vão no valor pago.</mat-hint>
+              <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error>
+            </mat-form-field>
+          }
           <mat-form-field appearance="outline"><mat-label>Valor efetivamente pago</mat-label>
             <input matInput formControlName="paidAmount" inputmode="decimal" />
             <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error>
@@ -128,6 +140,46 @@
           </mat-form-field>
           <button matButton="filled" type="submit" [disabled]="submitting()">{{ submitting() ? 'Quitando…' : 'Confirmar quitação' }}</button>
           <button matButton="outlined" type="button" [disabled]="submitting()" (click)="settling.set(null)">Fechar quitação</button>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  }
+
+  @if (confirmingCharge(); as expense) {
+    <mat-card appearance="outlined" class="expense-form-card charge-confirmation-card">
+      <mat-card-header>
+        <mat-card-title>Confirmar valor de {{ expense.description }}</mat-card-title>
+        <mat-card-subtitle>Vencimento {{ formatDate(expense.dueDate) }} · versão carregada {{ expense.version }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        <p>Valor estimado atual: <strong>{{ formatCurrency(expense.amount) }}</strong></p>
+        <p>Confirmar substitui a estimativa pelo valor real desta cobrança. A estimativa anterior fica preservada no histórico.
+          A despesa continua pendente: confirmar não registra pagamento.</p>
+        <p>As próximas ocorrências ainda não confirmadas desta recorrência passarão a usar este valor como estimativa.
+          Ocorrências anteriores, pagas ou já confirmadas não mudam.</p>
+        @if (chargeConflictCurrent(); as current) {
+          <div class="conflict-summary" role="alert">
+            <strong>A cobrança mudou antes da confirmação.</strong>
+            <p>Versão atual {{ current.version }}: {{ formatCurrency(current.amount) }},
+              {{ current.chargeConfirmed ? 'valor já confirmado' : 'ainda estimado' }},
+              situação {{ current.status === 'PENDING' ? 'pendente' : (current.status === 'PAID' ? 'paga' : 'cancelada') }}.</p>
+            @if (isEstimated(current)) {
+              <p>O valor digitado foi mantido. Revise a versão atual e confirme novamente.</p>
+              <button matButton="outlined" type="button" (click)="useCurrentChargeVersion()">Revisei: usar versão atual mantendo meu valor</button>
+            } @else {
+              <p>Esta cobrança não pode mais ser confirmada. Para ajustar um valor já confirmado, use a correção do lançamento.</p>
+            }
+          </div>
+        }
+        <form [formGroup]="chargeForm" (ngSubmit)="confirmChargeAmount()" novalidate>
+          <mat-form-field appearance="outline"><mat-label>Valor confirmado da cobrança</mat-label>
+            <input matInput formControlName="confirmedAmount" inputmode="decimal" />
+            <mat-error>Informe um valor positivo com até duas casas decimais (máximo 99.999.999,99).</mat-error>
+          </mat-form-field>
+          <div class="form-actions wide-field">
+            <button matButton="filled" type="submit" [disabled]="submitting()">{{ submitting() ? 'Confirmando…' : 'Confirmar valor da cobrança' }}</button>
+            <button matButton="outlined" type="button" [disabled]="submitting()" (click)="closeChargeConfirmation()">Fechar confirmação</button>
+          </div>
         </form>
       </mat-card-content>
     </mat-card>
@@ -196,7 +248,8 @@
             <mat-error>Informe uma descrição com até 200 caracteres.</mat-error>
           </mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Valor da cobrança corrigido</mat-label>
-            <input matInput formControlName="amount" inputmode="decimal" />
+            <input matInput formControlName="amount" inputmode="decimal" [readonly]="isEstimated(expense)" />
+            @if (isEstimated(expense)) { <mat-hint>Valor estimado: muda somente pela confirmação do valor da cobrança.</mat-hint> }
             <mat-error>Informe um valor positivo com até duas casas decimais.</mat-error>
           </mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Vencimento corrigido{{ expense.status === 'PAID' ? ' (opcional)' : '' }}</mat-label>
@@ -391,7 +444,8 @@
                   @if (expense.status === 'PENDING') {
                     <label class="batch-selector">
                       <input type="checkbox" [checked]="isBatchSelected(expense.id)"
-                        (change)="toggleBatch(expense)" [disabled]="submitting()"
+                        (change)="toggleBatch(expense)" [disabled]="submitting() || isEstimated(expense)"
+                        [title]="isEstimated(expense) ? 'Confirme o valor da cobrança antes de incluí-la em um lote.' : ''"
                         [attr.aria-label]="'Selecionar para quitação em lote: ' + expense.description" />
                     </label>
                   }
@@ -405,6 +459,13 @@
               </p>
               @if (expense.origin === 'RECURRENCE') {
                 <p>Gerada por recorrência{{ expense.chargeConfirmed ? '' : ' · valor estimado a confirmar' }}.</p>
+                @if (isEstimated(expense)) {
+                  <p class="estimate-label">Valor estimado atual: {{ formatCurrency(expense.amount) }}. Ainda não é o valor da cobrança nem um pagamento.</p>
+                }
+                @if (expense.chargeConfirmation; as confirmation) {
+                  <p>Valor da cobrança confirmado por {{ confirmation.confirmedByDisplayName }} em {{ formatInstant(confirmation.confirmedAt) }}
+                    · estimativa anterior {{ formatCurrency(confirmation.estimatedAmount) }}.</p>
+                }
               }
               <p>Categoria: {{ expense.categoryName ?? 'Sem categoria' }} · Responsável: {{ expense.responsibleDisplayName ?? 'Não definido' }}</p>
               @if (expense.status === 'PAID') {
@@ -416,6 +477,9 @@
                 }
                 <button matButton="outlined" type="button" (click)="openLifecycleAction(expense, 'REVERSE')" [disabled]="submitting()">Desfazer quitação</button>
               } @else if (expense.status === 'PENDING') {
+                @if (isEstimated(expense)) {
+                  <button matButton="outlined" type="button" (click)="openChargeConfirmation(expense)" [disabled]="submitting()">Confirmar valor da cobrança</button>
+                }
                 <button matButton="outlined" type="button" (click)="openPayment(expense)" [disabled]="submitting()">Quitar despesa</button>
                 <button matButton="outlined" type="button" (click)="openLifecycleAction(expense, 'CANCEL')" [disabled]="submitting()">Cancelar despesa</button>
               }

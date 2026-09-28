@@ -89,9 +89,39 @@ public final class ExpenseService {
         var actor = contextQuery.findByEmail(email);
         var payment = new com.malyah.accountmanager.expenses.domain.PaymentDetails(
                 ExpenseAmount.parse(command.paidAmount()), command.paymentDate(), command.paidByUserId(), command.paymentNotes());
+        var confirmedCharge = command.confirmedChargeAmount() == null ? null
+                : confirmedAmount(command.confirmedChargeAmount(), "confirmedChargeAmount");
         memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), payment.payerId());
-        var result = repository.settle(actor.spaceId(), actor.userId(), command, payment, clock.instant());
+        var settlement = command;
+        if (confirmedCharge != null) {
+            // RF-DES-04: confirm the estimate and settle in the same transaction; the same key protects both steps.
+            repository.confirmCharge(actor.spaceId(), actor.userId(), new ConfirmChargeCommand(command.expenseId(),
+                    command.version(), confirmedCharge.canonical(), command.idempotencyKey()), confirmedCharge,
+                    clock.instant());
+            settlement = new SettleExpenseCommand(command.expenseId(), command.version() + 1, command.paidAmount(),
+                    command.paymentDate(), command.paidByUserId(), command.paymentNotes(), command.idempotencyKey(),
+                    confirmedCharge.canonical());
+        }
+        var result = repository.settle(actor.spaceId(), actor.userId(), settlement, payment, clock.instant());
         return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
+    }
+
+    public ExpenseCreationResult confirmCharge(String email, ConfirmChargeCommand command) {
+        validateAction(command == null ? null : command.expenseId(), command == null ? -1 : command.version(),
+                command == null ? null : command.idempotencyKey(), "chargeConfirmation");
+        var amount = confirmedAmount(command.confirmedAmount(), "confirmedAmount");
+        var actor = contextQuery.findByEmail(email);
+        memberAccess.requireActiveParticipants(actor.spaceId(), actor.userId(), null);
+        var result = repository.confirmCharge(actor.spaceId(), actor.userId(), command, amount, clock.instant());
+        return new ExpenseCreationResult(view(result.expense(), actor.timeZone()), result.replayed());
+    }
+
+    private ExpenseAmount confirmedAmount(String raw, String field) {
+        try {
+            return ExpenseAmount.parse(raw);
+        } catch (com.malyah.accountmanager.expenses.domain.ExpenseValidationException error) {
+            throw new com.malyah.accountmanager.expenses.domain.ExpenseValidationException(field, error.getMessage());
+        }
     }
 
     public BatchSettlementResult settleBatch(String email, BatchSettlementCommand command) {
@@ -250,7 +280,13 @@ public final class ExpenseService {
                 referenceDate, overdue, expense.categoryName(), expense.categoryId(), expense.responsibleUserId(),
                 expense.responsibleDisplayName(), expense.notes(), expense.createdByUserId(),
                 expense.createdByDisplayName(), expense.paidByUserId(), expense.paidByDisplayName(),
-                expense.createdAt(), expense.version(), expense.paymentAudit(), history, expense.chargeConfirmed());
+                expense.createdAt(), expense.version(), expense.paymentAudit(), history, expense.chargeConfirmed(),
+                chargeConfirmation(expense.chargeConfirmation()));
+    }
+
+    private ChargeConfirmationView chargeConfirmation(ChargeConfirmationAudit audit) {
+        return audit == null ? null : new ChargeConfirmationView(audit.estimatedAmount().toPlainString(),
+                audit.confirmedAt(), audit.confirmedByUserId(), audit.confirmedByDisplayName());
     }
 
     private void validateAction(UUID expenseId, long version, UUID key, String field) {

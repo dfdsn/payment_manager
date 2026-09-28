@@ -1,6 +1,6 @@
 package com.malyah.accountmanager.expenses.application;
 
-public interface ExpenseUseCase {
+public interface ExpenseUseCase extends ChargeConfirmationUseCase {
     ExpenseCreationResult create(String actorEmail, CreateOneOffExpenseCommand command);
     ExpensePage list(String actorEmail, ExpenseListQuery query);
     ExpenseFilterOptions filterOptions(String actorEmail);

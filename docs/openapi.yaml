@@ -737,7 +737,47 @@ paths:
         "404":
           description: Despesa não encontrada no espaço ativo.
         "409":
-          description: Despesa já paga, versão desatualizada ou chave reutilizada com outro payload.
+          description: >-
+            Despesa já paga, versão desatualizada, chave reutilizada com outro payload ou
+            `CHARGE_CONFIRMATION_REQUIRED` quando a cobrança recorrente ainda é estimada e
+            `confirmedChargeAmount` não foi informado.
+  /expenses/{id}/charge-confirmation:
+    post:
+      operationId: confirmExpenseCharge
+      summary: Confirma o valor real de uma cobrança recorrente estimada (H04.4)
+      description: >-
+        Substitui a estimativa pelo valor confirmado, preserva a estimativa anterior e registra autor e instante.
+        Não quita a despesa. Somente despesas PENDING de origem RECURRENCE com `chargeConfirmed=false`
+        são elegíveis. As ocorrências posteriores ainda não confirmadas da mesma recorrência variável passam
+        a usar este valor como estimativa; anteriores, pagas, canceladas ou já confirmadas não mudam.
+        Ocorrência, despesa, auditoria e propagação são gravadas na mesma transação.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChargeConfirmationRequest" }
+      responses:
+        "200":
+          description: Valor confirmado ou repetição idempotente do mesmo resultado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Expense" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Despesa não encontrada no espaço ativo.
+        "409":
+          description: >-
+            `CHARGE_ALREADY_CONFIRMED` (use a correção individual), `EXPENSE_STATE_CONFLICT`
+            (versão desatualizada, despesa paga ou cancelada) ou `IDEMPOTENCY_CONFLICT`.
   /expenses/{id}/history:
     get:
       operationId: listExpenseHistory
@@ -945,6 +985,43 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: Calendário mudou, ocorrência fora do horizonte ou chave reutilizada com outro conteúdo. }
+  /recurrences/{recurrenceId}/occurrences/{scheduledDueDate}/charge-confirmation:
+    post:
+      summary: Confirma o valor de uma ocorrência variável a partir da previsão (H04.4)
+      description: >-
+        Reutiliza a materialização da H04.3 pela identidade `(recurrenceId, scheduledDueDate)` e confirma a
+        despesa resultante na mesma transação, sem duplicá-la. Se a ocorrência já estiver materializada, ainda
+        estimada e na versão original 0, confirma essa mesma despesa; se já tiver sido alterada, responde 409 e a
+        confirmação deve ser feita pela despesa com sua versão atual. Recorrências de valor fixo são recusadas.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: recurrenceId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: scheduledDueDate, required: true, schema: { type: string, format: date } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmedAmount]
+              properties:
+                confirmedAmount: { type: string, pattern: '^\d{1,8}(\.\d{1,2})?$' }
+      responses:
+        '200':
+          description: Ocorrência materializada e confirmada, ou repetição idempotente
+          content: { application/json: { schema: { $ref: '#/components/schemas/AnticipationResult' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: >-
+            `CHARGE_ALREADY_CONFIRMED`, `EXPENSE_STATE_CONFLICT` (a ocorrência mudou), `IDEMPOTENCY_CONFLICT`
+            ou ocorrência fora do calendário/horizonte.
 components:
   securitySchemes:
     sessionCookie:
@@ -1146,6 +1223,33 @@ components:
         paymentDate: { type: string, format: date }
         paidByUserId: { type: string, format: uuid }
         paymentNotes: { type: [string, "null"], maxLength: 2000 }
+        confirmedChargeAmount:
+          type: [string, "null"]
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          description: >-
+            Obrigatório somente para cobrança recorrente ainda estimada. Confirma o valor da cobrança e quita na
+            mesma transação; o valor pago (com juros ou desconto) nunca vira referência de estimativa.
+    ChargeConfirmationRequest:
+      type: object
+      additionalProperties: false
+      required: [version, confirmedAmount]
+      properties:
+        version: { type: integer, format: int64, minimum: 0 }
+        confirmedAmount:
+          type: string
+          pattern: '^\d{1,8}(\.\d{1,2})?$'
+          description: Valor real da cobrança, entre 0.01 e 99999999.99.
+    ChargeConfirmation:
+      type: object
+      required: [estimatedAmount, confirmedAt, confirmedByUserId, confirmedByDisplayName]
+      properties:
+        estimatedAmount:
+          type: string
+          pattern: '^\d+\.\d{2}$'
+          description: Estimativa substituída pela confirmação.
+        confirmedAt: { type: string, format: date-time }
+        confirmedByUserId: { type: string, format: uuid }
+        confirmedByDisplayName: { type: string }
     BatchPaymentRequest:
       type: object
       additionalProperties: false
@@ -1246,7 +1350,9 @@ components:
           description: Origem avulsa ou ocorrência materializada de uma recorrência.
         chargeConfirmed:
           type: boolean
-          description: Falso somente enquanto uma estimativa variável recorrente aguarda confirmação em H04.4.
+          description: >-
+            Falso somente enquanto uma estimativa variável recorrente aguarda confirmação. Nesse estado `amount`
+            é a estimativa atual, a quitação exige `confirmedChargeAmount` e o lote a recusa (`AMOUNT_UNCONFIRMED`).
         description: { type: string }
         amount:
           type: string
@@ -1281,6 +1387,11 @@ components:
           oneOf:
             - $ref: "#/components/schemas/PaymentAudit"
             - type: "null"
+        chargeConfirmation:
+          description: Auditoria da confirmação de uma estimativa variável; nulo quando a cobrança nunca foi estimada.
+          oneOf:
+            - $ref: "#/components/schemas/ChargeConfirmation"
+            - type: "null"
         history:
           type: array
           description: Eventos históricos no detalhe; a listagem retorna lista vazia.
@@ -1299,7 +1410,11 @@ components:
       properties:
         type:
           type: string
-          enum: [EXPENSE_CREATED, EXPENSE_PAID, PAYMENT_REVERSED, EXPENSE_CORRECTED, EXPENSE_CANCELLED]
+          enum: [EXPENSE_CREATED, EXPENSE_PAID, PAYMENT_REVERSED, EXPENSE_CORRECTED, EXPENSE_CANCELLED,
+            CHARGE_CONFIRMED, ESTIMATE_UPDATED]
+          description: >-
+            CHARGE_CONFIRMED registra estimativa anterior e valor confirmado; ESTIMATE_UPDATED registra a
+            atualização automática de uma estimativa posterior causada por uma confirmação.
         actorUserId: { type: string, format: uuid }
         actorDisplayName: { type: string }
         occurredAt: { type: string, format: date-time }

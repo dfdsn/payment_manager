@@ -67,4 +67,12 @@ public interface ExpenseRepository {
     StoredExpenseCreation cancel(UUID spaceId, UUID actorId,
             com.malyah.accountmanager.expenses.application.CancelExpenseCommand command,
             com.malyah.accountmanager.expenses.domain.ExpenseActionReason reason, Instant at);
+
+    /**
+     * Replaces the estimate of a pending recurring charge by the confirmed amount, records the audit event and
+     * refreshes later estimates of the same variable recurrence, all in the caller's transaction.
+     */
+    StoredExpenseCreation confirmCharge(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.ConfirmChargeCommand command,
+            com.malyah.accountmanager.expenses.domain.ExpenseAmount amount, Instant at);
 }

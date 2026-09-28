@@ -46,6 +46,17 @@ class ExpenseApiExceptionHandler {
         return response(HttpStatus.CONFLICT, "BATCH_SETTLEMENT_CONFLICT", exception.getMessage(), fields);
     }
 
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ChargeAlreadyConfirmedException.class)
+    ResponseEntity<ApiError> chargeAlreadyConfirmed(RuntimeException exception) {
+        return response(HttpStatus.CONFLICT, "CHARGE_ALREADY_CONFIRMED", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(com.malyah.accountmanager.expenses.application.ChargeConfirmationRequiredException.class)
+    ResponseEntity<ApiError> chargeConfirmationRequired(RuntimeException exception) {
+        return response(HttpStatus.CONFLICT, "CHARGE_CONFIRMATION_REQUIRED", exception.getMessage(),
+                List.of(new FieldError("confirmedChargeAmount", exception.getMessage())));
+    }
+
     @ExceptionHandler(com.malyah.accountmanager.expenses.application.ExpenseStateConflictException.class)
     ResponseEntity<ApiError> stateConflict(RuntimeException exception) {
         return response(HttpStatus.CONFLICT, "EXPENSE_STATE_CONFLICT", exception.getMessage(), List.of());

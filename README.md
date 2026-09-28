@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis (em validação; veja `docs/progresso.md`).
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -34,7 +34,7 @@ docs/                produto, arquitetura, progresso, evidências e guias
 .github/workflows/   CI de PR/main e publicação por tag
 ```
 
-O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V14 cobrem identidade, despesas e organização; V15 adiciona definições de recorrência, idempotência e auditoria, sem materializar lançamentos.
+O backend começa em `com.malyah.accountmanager`. Cada módulo funcional tem `domain`, `application`, `infrastructure` e `api`. O domínio não depende de Spring/JPA/HTTP; a aplicação não depende de adapters. `ArchitectureTest` torna essas fronteiras executáveis. V1–V14 cobrem identidade, despesas e organização; V15 adiciona definições de recorrência, idempotência e auditoria, sem materializar lançamentos; V16–V17 cobrem geração e antecipação; V18 adiciona a auditoria de confirmação de valores variáveis.
 
 ## Pré-requisitos
 
@@ -333,7 +333,7 @@ npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de criar/usar/renomear/arquivar categoria, atribuir responsável, consultar histórico, cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:smoke` usa respostas simuladas pelo próprio Playwright (nunca em produção) e cobre a configuração inicial e a confirmação de valor variável com conflito. `e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de criar/usar/renomear/arquivar categoria, atribuir responsável, consultar histórico, cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface, além de confirmar uma cobrança variável na despesa e numa previsão. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
 
 ## Integrações locais e reais
 
@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.2 está concluída; H03.3 permanece em validação independente. A próxima história funcional é H04.3.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.3 está concluída e H04.4 está em validação (falta o E2E full-stack com Docker). H03.3 permanece em validação independente. A próxima história funcional é H04.5, que não foi iniciada.
 
 ## Anexos privados (H03.3)
 
@@ -449,11 +449,11 @@ Após entrar, abra `/recorrencias` (também há um link na tela de despesas). Ad
 
 As frequências são mensal, bimestral, trimestral, semestral e anual. O primeiro vencimento fixa o dia-base: `31/01/2027` produz `28/02/2027` e depois `31/03/2027`, sem deslocamento acumulado. Em ano bissexto, fevereiro usa dia 29. Não há ajuste de fim de semana/feriado. O término é inclusivo e datas passadas são aceitas como referência, mas não geram ocorrências retroativas.
 
-“Calcular próximas datas” chama o backend e mostra até 12 datas; o frontend não replica o algoritmo. O cadastro persiste a definição e o job verifica, por padrão a cada 30 segundos, se existe uma ocorrência no mês vigente no fuso do espaço. Meses anteriores não são gerados retroativamente. Uma cobrança fixa nasce confirmada; uma estimativa variável aparece como **valor estimado a confirmar**, sem ser quitável até H04.4.
+“Calcular próximas datas” chama o backend e mostra até 12 datas; o frontend não replica o algoritmo. O cadastro persiste a definição e o job verifica, por padrão a cada 30 segundos, se existe uma ocorrência no mês vigente no fuso do espaço. Meses anteriores não são gerados retroativamente. Uma cobrança fixa nasce confirmada; uma estimativa variável aparece como **valor estimado a confirmar**, e só pode ser quitada depois de ter o valor confirmado (veja a seção seguinte).
 
 A identidade durável da ocorrência é `(recurrence_id, scheduled_due_date)`. A fila usa reserva PostgreSQL com `FOR UPDATE SKIP LOCKED`, lease de 120 segundos, fencing token e lote de 25. Processo interrompido pode ser retomado após expirar o lease; constraints impedem segunda despesa/auditoria. Categoria arquivada e responsável inativo são omitidos no novo lançamento, preservando a definição para tratamento definitivo em H04.5. Não existe endpoint público para disparar o job.
 
-A seção **Previsões e lançamentos** consulta o mês atual mais os 12 meses seguintes no fuso do espaço. Consultar não grava dados. Cada item é rotulado como previsão fixa/estimada ou lançamento real; quando a ocorrência já existe, valor, vencimento atual, confirmação e situação da despesa prevalecem, inclusive para paga ou cancelada, sem recriar a previsão. **Antecipar lançamento** exige confirmação, aceita apenas uma data ainda válida nesse horizonte e materializa a ocorrência numa transação. A mesma chave/conteúdo reproduz o resultado; chave reutilizada com outra ocorrência retorna `409`. A estimativa variável continua não confirmada até H04.4.
+A seção **Previsões e lançamentos** consulta o mês atual mais os 12 meses seguintes no fuso do espaço. Consultar não grava dados. Cada item é rotulado como previsão fixa/estimada ou lançamento real; quando a ocorrência já existe, valor, vencimento atual, confirmação e situação da despesa prevalecem, inclusive para paga ou cancelada, sem recriar a previsão. **Antecipar lançamento** exige confirmação, aceita apenas uma data ainda válida nesse horizonte e materializa a ocorrência numa transação. A mesma chave/conteúdo reproduz o resultado; chave reutilizada com outra ocorrência retorna `409`. Antecipar não confirma uma estimativa variável.
 
 Configuração operacional opcional: `APP_JOBS_RECURRENCE_ENABLED`, `APP_JOBS_RECURRENCE_FIXED_DELAY_MS`, `APP_JOBS_RECURRENCE_LEASE_SECONDS` e `APP_JOBS_RECURRENCE_BATCH_SIZE`. Os padrões são `true`, `30000`, `120` e `25`; não desabilite o job em produção. O modo explícito de migração o desativa automaticamente.
 
@@ -465,12 +465,53 @@ POST /api/v1/recurrences  Idempotency-Key: <UUID>
 GET  /api/v1/recurrences
 GET  /api/v1/recurrences/forecasts
 POST /api/v1/recurrences/<recurrenceId>/occurrences/<AAAA-MM-DD>/anticipation  Idempotency-Key: <UUID>
+POST /api/v1/recurrences/<recurrenceId>/occurrences/<AAAA-MM-DD>/charge-confirmation  Idempotency-Key: <UUID>
 ```
 
-Teste de geração, previsão/antecipação, persistência e migrações V1–V17:
+Teste de geração, previsão/antecipação, confirmação de valores variáveis, persistência e migrações V1–V18:
 
 ```powershell
-backend\scripts\run-integration-tests.ps1 -Tests RecurrenceGenerationPostgresIT,RecurrencePostgresIT,ExpensePostgresIT,FlywayPostgresIT
+backend\scripts\run-integration-tests.ps1 -Tests RecurrenceGenerationPostgresIT,RecurrencePostgresIT,VariableChargeConfirmationPostgresIT,ExpensePostgresIT,FlywayPostgresIT
 ```
 
 Diagnóstico seguro: consulte contagens/estados em `recurrence_generation_jobs` e `recurrence_occurrences`; `FAILED` inclui somente `last_error_code`, nunca dados financeiros. Não altere manualmente jobs concluídos. Falhas transitórias ficam elegíveis após 30 segundos; `PROCESSING` com lease vencido é retomado por outro worker.
+
+## Estimar, confirmar e quitar (H04.4)
+
+Uma recorrência de **valor variável** produz três valores distintos, e a interface nunca os mistura:
+
+| Conceito | O que é | Onde aparece |
+|---|---|---|
+| Estimativa | Valor previsto para uma cobrança ainda não confirmada. Não é cobrança nem pagamento. | Previsões, lançamento “valor estimado a confirmar” e `amount` com `chargeConfirmed=false`. |
+| Valor confirmado | Valor que a fatura realmente cobrou. Substitui a estimativa; a estimativa anterior fica em `chargeConfirmation.estimatedAmount` e no evento `CHARGE_CONFIRMED`. | `amount` com `chargeConfirmed=true` e `chargeConfirmation` (autor e instante). |
+| Pagamento | Quitação, com valor pago (juros ou desconto), data e pagador. | `paidAmount`, `paymentDate`, `paidByUserId` e o evento `EXPENSE_PAID`. |
+
+Como confirmar:
+
+- Em `/despesas`, um lançamento pendente com valor estimado mostra **Valor estimado atual** e o botão **Confirmar valor da cobrança**. Confirmar não quita: a despesa continua pendente.
+- Em `/recorrencias`, uma previsão estimada tem o mesmo botão. Ele reutiliza a materialização da H04.3 pela identidade `(recorrência, data prevista)` e confirma a despesa na mesma transação, sem duplicá-la.
+- **Quitar despesa** numa cobrança ainda estimada exige o campo **Valor confirmado da cobrança**; confirmação e quitação são gravadas juntas ou nada é gravado. A API responde `409 CHARGE_CONFIRMATION_REQUIRED` se o campo faltar.
+- O lote não aceita cobrança estimada (`AMOUNT_UNCONFIRMED`); a interface não permite selecioná-la. O lote inteiro é recusado sem efeitos parciais.
+
+Regras aplicadas (RF-REC-10/12/13, RF-DES-04/06, D20):
+
+- Só confirmam-se despesas `PENDING`, de origem recorrente, ainda não confirmadas, por administrador ou convidado ativo do mesmo espaço. Confirmar duas vezes retorna `409 CHARGE_ALREADY_CONFIRMED`; paga, cancelada ou versão desatualizada retornam `409 EXPENSE_STATE_CONFLICT`. A mesma `Idempotency-Key` com o mesmo conteúdo reproduz o resultado; com outro conteúdo, retorna `409 IDEMPOTENCY_CONFLICT`.
+- O valor é validado no backend: decimal com até duas casas, entre `0.01` e `99999999.99`.
+- **Efeito sobre ocorrências futuras:** a estimativa de uma ocorrência é o valor confirmado mais recente com data prevista anterior à dela; sem confirmação anterior, vale a estimativa inicial da definição. Ao confirmar, somente as ocorrências posteriores, pendentes e ainda não confirmadas da mesma recorrência são atualizadas (evento `ESTIMATE_UPDATED`, com a despesa de origem). Ocorrências anteriores, pagas, canceladas ou confirmadas não mudam, e o valor da definição da recorrência também não.
+- O valor pago nunca vira referência: juros ou desconto ficam somente no pagamento.
+- A geração mensal e as previsões usam essa mesma referência e nunca sobrescrevem um valor confirmado.
+- A correção genérica não altera o valor de uma estimativa. Um valor já confirmado pode ser corrigido individualmente (D20); se ele for a referência vigente, as estimativas posteriores são recalculadas na mesma transação.
+- Confirmação, correção e materialização travam a definição da recorrência antes das despesas, o que evita que confirmações concorrentes produzam referências inconsistentes.
+
+Exemplos autenticados (exigem CSRF):
+
+```text
+POST /api/v1/expenses/<id>/charge-confirmation  Idempotency-Key: <UUID>
+{"version": 2, "confirmedAmount": "205.40"}
+
+POST /api/v1/expenses/<id>/payment  Idempotency-Key: <UUID>
+{"version": 2, "paidAmount": "207.00", "paymentDate": "2026-10-10", "paidByUserId": "<UUID>", "confirmedChargeAmount": "205.40"}
+```
+
+Os reflexos em relatórios, fechamentos e notificações serão validados nos épicos E06–E08. O contrato preparado para eles é `chargeConfirmed` e `chargeConfirmation`.
+

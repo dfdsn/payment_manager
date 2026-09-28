@@ -39,6 +39,14 @@ class RecurrenceController {
         return ResponseEntity.ok(useCase.anticipate(principal.getName(),recurrenceId,scheduledDueDate,key));
     }
 
+    @PostMapping("/{recurrenceId}/occurrences/{scheduledDueDate}/charge-confirmation")
+    ResponseEntity<AnticipationResult> confirmForecastCharge(Principal principal,@PathVariable UUID recurrenceId,
+            @PathVariable LocalDate scheduledDueDate,@RequestHeader("Idempotency-Key") UUID key,
+            @Valid @RequestBody ForecastChargeConfirmationRequest request) {
+        return ResponseEntity.ok(useCase.confirmForecastCharge(principal.getName(),recurrenceId,scheduledDueDate,
+                request.confirmedAmount(),key));
+    }
+
     @PostMapping("/calendar-preview") List<LocalDate> preview(Principal principal,
             @Valid @RequestBody CalendarPreviewRequest request) {
         return useCase.preview(request.firstDueDate(),request.lastDueDate(),request.frequency());

@@ -12,6 +12,7 @@ describe('ExpenseComponent', () => {
   const api = {
     newIdempotencyKey: vi.fn(), list: vi.fn(), create: vi.fn(), settle: vi.fn(), get: vi.fn(), correct: vi.fn(),
     reversePayment: vi.fn(), cancel: vi.fn(), settleBatch: vi.fn(), history: vi.fn(), filterOptions: vi.fn(),
+    confirmCharge: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -322,5 +323,109 @@ describe('ExpenseComponent', () => {
     expect(api.history).toHaveBeenLastCalledWith('expense', 1, 10);
     expect(component.history()[0].changes[0].currentValue).toBe('Outro');
     expect(component.formatInstant('2026-09-25T13:00:00Z')).toContain('10:00:00');
+  });
+
+  const estimated = { id: 'bill', origin: 'RECURRENCE', chargeConfirmed: false, status: 'PENDING', description: 'Energia',
+    amount: '180.00', dueDate: '2026-10-10', referenceDate: '2026-10-10', version: 2, overdue: false, history: [] } as any;
+
+  it('shows the current estimate and a confirm action only for pending unconfirmed recurring charges', () => {
+    api.list.mockReturnValue(of({ content: [estimated,
+      { ...estimated, id: 'confirmed', description: 'Água', chargeConfirmed: true, chargeConfirmation: {
+        estimatedAmount: '90.00', confirmedAt: '2026-09-20T13:00:00Z', confirmedByUserId: 'actor', confirmedByDisplayName: 'Autor' } }],
+      page: 0, size: 20, totalElements: 2, totalPages: 1, sort: 'REFERENCE_DATE', direction: 'ASC' }));
+    const component = fixture.componentInstance;
+    component.clearFilters();
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Valor estimado atual: R$');
+    expect(text).toContain('valor estimado a confirmar');
+    expect(text).toContain('Valor da cobrança confirmado por Autor');
+    expect(text).toContain('estimativa anterior R$');
+    const buttons = [...fixture.nativeElement.querySelectorAll('button')].filter((b: HTMLButtonElement) =>
+      b.textContent?.includes('Confirmar valor da cobrança'));
+    expect(buttons.length).toBe(1);
+    expect(component.isEstimated({ ...estimated, origin: 'ONE_OFF' })).toBe(false);
+    expect(component.isEstimated({ ...estimated, status: 'PAID' })).toBe(false);
+    component.toggleBatch(estimated);
+    expect(component.selectedForBatch().size).toBe(0);
+  });
+
+  it('confirms the charge with version and key, converting decimal comma, without settling', () => {
+    const component = fixture.componentInstance;
+    component.openChargeConfirmation(estimated);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('confirmar não registra pagamento');
+    component.chargeForm.controls.confirmedAmount.setValue('0');
+    component.confirmChargeAmount();
+    expect(api.confirmCharge).not.toHaveBeenCalled();
+    component.chargeForm.controls.confirmedAmount.setValue('123456789');
+    expect(component.chargeForm.invalid).toBe(true);
+    component.chargeForm.controls.confirmedAmount.setValue('205,40');
+    api.confirmCharge.mockReturnValue(of({ ...estimated, amount: '205.40', chargeConfirmed: true, version: 3 }));
+    component.confirmChargeAmount();
+    expect(api.confirmCharge).toHaveBeenCalledWith('bill', { version: 2, confirmedAmount: '205.40' }, 'next-key');
+    expect(api.settle).not.toHaveBeenCalled();
+    expect(component.confirmingCharge()).toBeNull();
+    expect(component.message()).toContain('continua pendente de quitação');
+  });
+
+  it('preserves the typed value on validation failure and shows current data on conflict', () => {
+    const component = fixture.componentInstance;
+    component.openChargeConfirmation(estimated);
+    component.chargeForm.controls.confirmedAmount.setValue('205,40');
+    api.confirmCharge.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 400,
+      error: { message: 'Informe um valor válido.' } })));
+    component.confirmChargeAmount();
+    expect(component.errorMessage()).toBe('Informe um valor válido.');
+    expect(component.chargeForm.controls.confirmedAmount.value).toBe('205,40');
+    expect(component.confirmingCharge()).toBe(estimated);
+
+    api.confirmCharge.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 409,
+      error: { code: 'EXPENSE_STATE_CONFLICT', message: 'A despesa mudou.' } })));
+    api.get.mockReturnValueOnce(of({ ...estimated, version: 3, dueDate: '2026-10-12' }));
+    component.confirmChargeAmount();
+    fixture.detectChanges();
+    expect(component.chargeConflictCurrent()?.version).toBe(3);
+    expect(fixture.nativeElement.textContent).toContain('A cobrança mudou antes da confirmação.');
+    expect(component.chargeForm.controls.confirmedAmount.value).toBe('205,40');
+    component.useCurrentChargeVersion();
+    expect(component.confirmingCharge()?.version).toBe(3);
+    api.confirmCharge.mockReturnValueOnce(of({ ...estimated, chargeConfirmed: true }));
+    component.confirmChargeAmount();
+    expect(api.confirmCharge).toHaveBeenLastCalledWith('bill', { version: 3, confirmedAmount: '205.40' }, 'next-key');
+
+    component.openChargeConfirmation(estimated);
+    api.confirmCharge.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 409,
+      error: { code: 'CHARGE_ALREADY_CONFIRMED', message: 'O valor desta cobrança já foi confirmado.' } })));
+    api.get.mockReturnValueOnce(of({ ...estimated, chargeConfirmed: true, version: 3 }));
+    component.chargeForm.controls.confirmedAmount.setValue('10');
+    component.confirmChargeAmount();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('use a correção do lançamento');
+    component.useCurrentChargeVersion();
+    expect(component.confirmingCharge()?.version).toBe(2);
+  });
+
+  it('requires the confirmed charge amount when settling an estimated charge', () => {
+    const component = fixture.componentInstance;
+    component.openPayment(estimated);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Este valor ainda é estimado');
+    component.confirmPayment();
+    expect(api.settle).not.toHaveBeenCalled();
+    component.paymentForm.patchValue({ confirmedChargeAmount: '200,00', paidAmount: '205,00', paymentDate: '2026-10-10' });
+    api.settle.mockReturnValue(of({}));
+    component.confirmPayment();
+    expect(api.settle).toHaveBeenCalledWith('bill', { version: 2, paidAmount: '205.00', paymentDate: '2026-10-10',
+      paidByUserId: 'actor', paymentNotes: null, confirmedChargeAmount: '200.00' }, 'next-key');
+  });
+
+  it('keeps the estimated amount read-only in correction and labels confirmation history', () => {
+    const component = fixture.componentInstance;
+    component.openCorrection(estimated);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('muda somente pela confirmação');
+    expect(component.historyLabel('CHARGE_CONFIRMED')).toBe('Valor da cobrança confirmado');
+    expect(component.historyLabel('ESTIMATE_UPDATED')).toContain('Estimativa atualizada');
   });
 });

@@ -18,4 +18,8 @@ public interface RecurrenceRepository {
             UUID actorId, UUID recurrenceId, java.time.LocalDate scheduledDueDate, UUID key,
             String requestHash, Instant at);
     void completeAnticipation(UUID spaceId, UUID actorId, UUID key, UUID expenseId, Instant at);
+    /** Confirmed charges of every materialized occurrence of the space, the reference of later estimates. */
+    List<com.malyah.accountmanager.recurrences.application.StoredOccurrence> findConfirmedCharges(UUID spaceId);
+    /** Serializes a forecast confirmation with generation and other confirmations of the same recurrence. */
+    void lockForChargeConfirmation(UUID spaceId, UUID recurrenceId);
 }

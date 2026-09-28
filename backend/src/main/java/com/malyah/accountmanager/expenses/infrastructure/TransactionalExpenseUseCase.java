@@ -77,4 +77,10 @@ final class TransactionalExpenseUseCase implements ExpenseUseCase {
             com.malyah.accountmanager.expenses.application.CancelExpenseCommand command) {
         return Objects.requireNonNull(transactions.execute(status -> delegate.cancel(actorEmail, command)));
     }
+
+    @Override
+    public ExpenseCreationResult confirmCharge(String actorEmail,
+            com.malyah.accountmanager.expenses.application.ConfirmChargeCommand command) {
+        return Objects.requireNonNull(transactions.execute(status -> delegate.confirmCharge(actorEmail, command)));
+    }
 }

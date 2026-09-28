@@ -19,11 +19,11 @@ import com.malyah.accountmanager.expenses.application.port.ExpenseRepository;
 import com.malyah.accountmanager.expenses.domain.ExpenseStatus;
 import com.malyah.accountmanager.expenses.domain.OneOffExpense;
 
-final class JdbcExpenseRepository implements ExpenseRepository {
+public final class JdbcExpenseRepository implements ExpenseRepository {
     private static final String OPERATION = "CREATE_ONE_OFF_EXPENSE";
     private final JdbcTemplate jdbc;
 
-    JdbcExpenseRepository(JdbcTemplate jdbc) {
+    public JdbcExpenseRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
@@ -176,6 +176,18 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                     "EXPENSE_CANCELLED", rs.getObject(1, UUID.class), rs.getString(2),
                     rs.getTimestamp(3).toInstant(), rs.getString(4), null, rs.getLong(5), null, null, null,
                     null, null), spaceId, expenseId));
+        events.addAll(jdbc.query("""
+                select c.event_type, c.actor_user_id, actor.display_name, c.occurred_at, c.to_version,
+                       c.previous_amount, c.new_amount
+                  from expense_charge_events c
+                  join identity_users actor on actor.id=c.actor_user_id
+                 where c.space_id=? and c.expense_id=?
+                """, (rs, row) -> new com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent(
+                    rs.getString(1), rs.getObject(2, UUID.class), rs.getString(3), rs.getTimestamp(4).toInstant(),
+                    null, null, rs.getLong(5), null, null, null, null, "amount", null,
+                    java.util.List.of(new com.malyah.accountmanager.expenses.application.ExpenseFieldChange("amount",
+                            rs.getBigDecimal(6).toPlainString(), rs.getBigDecimal(7).toPlainString()))),
+                spaceId, expenseId));
         events.sort(java.util.Comparator.comparing(
                 com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent::occurredAt)
                 .thenComparingLong(com.malyah.accountmanager.expenses.application.ExpenseHistoryEvent::version)
@@ -225,6 +237,7 @@ final class JdbcExpenseRepository implements ExpenseRepository {
             return new StoredExpenseCreation(findById(spaceId, previous.expenseId()), true);
         }
 
+        var recurrence = lockVariableRecurrenceOf(spaceId, command.expenseId());
         var locked = jdbc.query("select id from expense_entries where id=? and space_id=? for update",
                 (rs, row) -> rs.getObject(1, UUID.class), command.expenseId(), spaceId);
         if (locked.isEmpty()) throw new com.malyah.accountmanager.expenses.application.ExpenseNotFoundException();
@@ -232,6 +245,10 @@ final class JdbcExpenseRepository implements ExpenseRepository {
         if (!com.malyah.accountmanager.expenses.domain.CorrectionEligibility.eligible(
                 current.status(), command.status(), current.version(), command.version()))
             throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
+        if (!com.malyah.accountmanager.expenses.domain.ChargeConfirmationEligibility.correctionKeepsEstimate(
+                current.chargeConfirmed(), current.amount(), corrected.amount().value()))
+            throw new com.malyah.accountmanager.expenses.domain.ExpenseValidationException("amount",
+                    "O valor estimado só muda pela confirmação do valor da cobrança.");
         var changedFields = changedFields(current, corrected);
         if (!Objects.equals(current.categoryId(), categoryId)) changedFields.add("categoryId");
         if (!Objects.equals(current.responsibleUserId(), responsibleUserId)) changedFields.add("responsibleUserId");
@@ -249,6 +266,9 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 payment == null ? null : payment.payerId(), payment == null ? null : payment.notes(),
                 command.expenseId(), spaceId, command.version(), command.status().name());
         recordCorrection(current, corrected, categoryId, responsibleUserId, actorId, at, String.join(",", changedFields));
+        // A corrected confirmed charge may be the reference of later estimates (RF-REC-13).
+        if (recurrence != null && current.chargeConfirmed() && changedFields.contains("amount"))
+            refreshLaterEstimates(spaceId, recurrence, command.expenseId(), actorId, at);
         jdbc.update("""
                 update expense_idempotency_requests set expense_id=?, completed_at=?
                 where space_id=? and actor_user_id=? and operation='CORRECT_EXPENSE' and idempotency_key=?
@@ -261,7 +281,8 @@ final class JdbcExpenseRepository implements ExpenseRepository {
             com.malyah.accountmanager.expenses.application.SettleExpenseCommand command,
             com.malyah.accountmanager.expenses.domain.PaymentDetails payment, Instant at) {
         // The record contains fixed-format amount/date/UUID fields followed by the free-text notes.
-        String payload = command.expenseId() + ":" + command.version() + ":" + payment.canonical();
+        String payload = command.expenseId() + ":" + command.version() + ":" + payment.canonical()
+                + (command.confirmedChargeAmount() == null ? "" : ":CONFIRMED:" + command.confirmedChargeAmount());
         String hash;
         try {
             hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
@@ -286,10 +307,12 @@ final class JdbcExpenseRepository implements ExpenseRepository {
         var current = findById(spaceId, command.expenseId());
         if (!com.malyah.accountmanager.expenses.domain.PaymentEligibility.eligible(current.status(), current.version(), command.version()))
             throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
+        if (!current.chargeConfirmed())
+            throw new com.malyah.accountmanager.expenses.application.ChargeConfirmationRequiredException();
         jdbc.update("""
                 update expense_entries set status='PAID', paid_amount=?, payment_date=?, paid_by_user_id=?,
                     payment_recorded_by_user_id=?, payment_notes=?, payment_recorded_at=?, version=version+1
-                where id=? and space_id=?
+                where id=? and space_id=? and charge_confirmed=true
                 """, payment.amount().value(), payment.date(), payment.payerId(), actorId, payment.notes(),
                 Timestamp.from(at), command.expenseId(), spaceId);
         recordPayment(command.expenseId(), spaceId, actorId, payment, at);
@@ -443,6 +466,108 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 """, Timestamp.from(at), actorId, reason.value(), command.expenseId(), spaceId, command.version());
         completeAction(spaceId, actorId, "CANCEL_EXPENSE", command.idempotencyKey(), command.expenseId(), at);
         return new StoredExpenseCreation(findById(spaceId, command.expenseId()), false);
+    }
+
+    @Override
+    public StoredExpenseCreation confirmCharge(UUID spaceId, UUID actorId,
+            com.malyah.accountmanager.expenses.application.ConfirmChargeCommand command,
+            com.malyah.accountmanager.expenses.domain.ExpenseAmount amount, Instant at) {
+        var hash = hashAction(command.expenseId(), command.version(), amount.canonical());
+        if (!claimAction(spaceId, actorId, "CONFIRM_CHARGE", command.idempotencyKey(), hash, at))
+            return new StoredExpenseCreation(findById(spaceId, command.expenseId()), true);
+        // Lock order: recurrence definition, then entries. Generation takes a share lock on the same row.
+        var recurrence = lockVariableRecurrenceOf(spaceId, command.expenseId());
+        lock(spaceId, command.expenseId());
+        var current = findById(spaceId, command.expenseId());
+        switch (com.malyah.accountmanager.expenses.domain.ChargeConfirmationEligibility.evaluate(
+                current.chargeConfirmed(), current.status(), current.version(), command.version())) {
+            case ALREADY_CONFIRMED -> throw new com.malyah.accountmanager.expenses.application.ChargeAlreadyConfirmedException();
+            case STATE_INCOMPATIBLE, VERSION_CONFLICT ->
+                    throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
+            case ELIGIBLE -> { }
+        }
+        var changed = jdbc.update("""
+                update expense_entries set charge_amount=?, charge_confirmed=true, estimated_charge_amount=charge_amount,
+                    charge_confirmed_at=?, charge_confirmed_by_user_id=?, version=version+1
+                where id=? and space_id=? and version=? and status='PENDING' and charge_confirmed=false
+                """, amount.value(), Timestamp.from(at), actorId, command.expenseId(), spaceId, command.version());
+        if (changed != 1) throw new com.malyah.accountmanager.expenses.application.ExpenseStateConflictException();
+        recordChargeEvent(command.expenseId(), spaceId, "CHARGE_CONFIRMED", actorId, at, command.version(),
+                current.amount(), amount.value(), null);
+        if (recurrence != null) refreshLaterEstimates(spaceId, recurrence, command.expenseId(), actorId, at);
+        completeAction(spaceId, actorId, "CONFIRM_CHARGE", command.idempotencyKey(), command.expenseId(), at);
+        return new StoredExpenseCreation(findById(spaceId, command.expenseId()), false);
+    }
+
+    /** Locks the variable recurrence that owns the entry, or returns null for other origins/fixed values. */
+    private RecurrenceLink lockVariableRecurrenceOf(UUID spaceId, UUID expenseId) {
+        var links = jdbc.query("""
+                select o.recurrence_id, o.scheduled_due_date from recurrence_occurrences o
+                 where o.expense_id=? and o.space_id=?
+                """, (rs, row) -> new RecurrenceLink(rs.getObject(1, UUID.class),
+                        rs.getObject(2, java.time.LocalDate.class), null), expenseId, spaceId);
+        if (links.isEmpty()) return null;
+        var link = links.getFirst();
+        var definition = jdbc.query("""
+                select amount, value_type from recurrence_definitions where id=? and space_id=? for no key update
+                """, (rs, row) -> "VARIABLE_ESTIMATE".equals(rs.getString(2)) ? rs.getBigDecimal(1) : null,
+                link.recurrenceId(), spaceId);
+        if (definition.isEmpty() || definition.getFirst() == null) return null;
+        return new RecurrenceLink(link.recurrenceId(), link.scheduledDueDate(), definition.getFirst());
+    }
+
+    /**
+     * RF-REC-12/13: pending, still estimated occurrences scheduled after the source are recalculated from the latest
+     * confirmed charge scheduled before each of them. Confirmed, paid, cancelled and earlier entries are untouched.
+     */
+    private void refreshLaterEstimates(UUID spaceId, RecurrenceLink recurrence, UUID sourceExpenseId, UUID actorId,
+            Instant at) {
+        var occurrences = jdbc.query("""
+                select o.scheduled_due_date, e.id, e.charge_confirmed, e.charge_amount
+                  from recurrence_occurrences o join expense_entries e on e.id=o.expense_id and e.space_id=o.space_id
+                 where o.recurrence_id=? and o.space_id=?
+                """, (rs, row) -> new OccurrenceCharge(rs.getObject(1, java.time.LocalDate.class),
+                        rs.getObject(2, UUID.class), rs.getBoolean(3), rs.getBigDecimal(4)),
+                recurrence.recurrenceId(), spaceId);
+        var confirmed = occurrences.stream().filter(OccurrenceCharge::confirmed)
+                .map(item -> new com.malyah.accountmanager.expenses.domain.VariableEstimateReference.ConfirmedCharge(
+                        item.scheduledDueDate(), item.amount()))
+                .toList();
+        var later = occurrences.stream()
+                .filter(item -> !item.confirmed() && item.scheduledDueDate().isAfter(recurrence.scheduledDueDate()))
+                .collect(java.util.stream.Collectors.toMap(OccurrenceCharge::expenseId, OccurrenceCharge::scheduledDueDate));
+        if (later.isEmpty()) return;
+        var ids = later.keySet().stream().sorted(java.util.Comparator.comparing(UUID::toString)).toList();
+        var arguments = new ArrayList<Object>(ids);
+        arguments.add(spaceId);
+        var lockedTargets = jdbc.query("""
+                select id, charge_amount, version from expense_entries
+                 where id in (%s) and space_id=? and status='PENDING' and charge_confirmed=false
+                 order by id for update
+                """.formatted(String.join(",", java.util.Collections.nCopies(ids.size(), "?"))),
+                (rs, row) -> new EstimateTarget(rs.getObject(1, UUID.class), rs.getBigDecimal(2), rs.getLong(3)),
+                arguments.toArray());
+        for (var target : lockedTargets) {
+            var estimate = com.malyah.accountmanager.expenses.domain.VariableEstimateReference.estimateFor(
+                    recurrence.initialEstimate(), confirmed, later.get(target.id()));
+            if (estimate.compareTo(target.amount()) == 0) continue;
+            jdbc.update("""
+                    update expense_entries set charge_amount=?, version=version+1
+                     where id=? and space_id=? and version=? and status='PENDING' and charge_confirmed=false
+                    """, estimate, target.id(), spaceId, target.version());
+            recordChargeEvent(target.id(), spaceId, "ESTIMATE_UPDATED", actorId, at, target.version(),
+                    target.amount(), estimate, sourceExpenseId);
+        }
+    }
+
+    private void recordChargeEvent(UUID expenseId, UUID spaceId, String type, UUID actorId, Instant at,
+            long fromVersion, java.math.BigDecimal previous, java.math.BigDecimal current, UUID sourceExpenseId) {
+        jdbc.update("""
+                insert into expense_charge_events(id, expense_id, space_id, event_type, actor_user_id, occurred_at,
+                    from_version, to_version, previous_amount, new_amount, source_expense_id)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, UUID.randomUUID(), expenseId, spaceId, type, actorId, Timestamp.from(at), fromVersion,
+                fromVersion + 1, previous, current, sourceExpenseId);
     }
 
     private boolean claimAction(UUID spaceId, UUID actorId, String operation, UUID key, String hash, Instant at) {
@@ -616,13 +741,16 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                        creator.display_name, e.paid_by_user_id, payer.display_name, e.created_at, e.version,
                        e.payment_recorded_by_user_id, recorder.display_name, e.payment_recorded_at, e.payment_notes,
                        e.category_id, category.name, e.responsible_user_id, responsible.display_name,
-                       e.origin, e.charge_confirmed
+                       e.origin, e.charge_confirmed,
+                       e.estimated_charge_amount, e.charge_confirmed_at, e.charge_confirmed_by_user_id,
+                       confirmer.display_name
                   from expense_entries e
                   join identity_users creator on creator.id = e.created_by_user_id
                   left join identity_users payer on payer.id = e.paid_by_user_id
                   left join identity_users recorder on recorder.id = e.payment_recorded_by_user_id
                   left join expense_categories category on category.id = e.category_id and category.space_id = e.space_id
                   left join identity_users responsible on responsible.id = e.responsible_user_id
+                  left join identity_users confirmer on confirmer.id = e.charge_confirmed_by_user_id
                 """;
     }
 
@@ -636,11 +764,22 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                         new com.malyah.accountmanager.expenses.application.PaymentAudit(rs.getObject(16, UUID.class),
                                 rs.getString(17), rs.getTimestamp(18).toInstant(), rs.getString(19)),
                 rs.getObject(20, UUID.class), rs.getString(21), rs.getObject(22, UUID.class), rs.getString(23),
-                rs.getString(24), rs.getBoolean(25));
+                rs.getString(24), rs.getBoolean(25), rs.getObject(26) == null ? null :
+                        new com.malyah.accountmanager.expenses.application.ChargeConfirmationAudit(
+                                rs.getBigDecimal(26), rs.getTimestamp(27).toInstant(), rs.getObject(28, UUID.class),
+                                rs.getString(29)));
     }
 
     private record IdempotencyRecord(String requestHash, UUID expenseId) {
     }
+
+    private record RecurrenceLink(UUID recurrenceId, java.time.LocalDate scheduledDueDate,
+            java.math.BigDecimal initialEstimate) { }
+
+    private record OccurrenceCharge(java.time.LocalDate scheduledDueDate, UUID expenseId, boolean confirmed,
+            java.math.BigDecimal amount) { }
+
+    private record EstimateTarget(UUID id, java.math.BigDecimal amount, long version) { }
 
     private record BatchOperationRecord(UUID id, String requestHash, Instant completedAt) { }
 
