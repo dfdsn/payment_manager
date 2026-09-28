@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.3 está concluída e H04.4 está em validação (falta o E2E full-stack com Docker; a CI já aprovou os ITs em PostgreSQL 17.6). H03.3 permanece em validação independente. H04.5 está implementada e em validação pelo mesmo motivo (E2E full-stack não executado). E04 só termina quando H04.4 e H04.5 forem concluídas. H05.1 (criar compra e parcelas) está implementada e em validação pelo mesmo motivo; H05.2 não foi iniciada.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.3 está concluída e H04.4 está em validação (falta o E2E full-stack com Docker; a CI já aprovou os ITs em PostgreSQL 17.6). H03.3 permanece em validação independente. H04.5 está implementada e em validação pelo mesmo motivo (E2E full-stack não executado). E04 só termina quando H04.4 e H04.5 forem concluídas. H05.1 (criar compra e parcelas) está implementada, com CI aprovada, e em validação pelo mesmo motivo; H05.2 não foi iniciada.
 
 ## Anexos privados (H03.3)
 
