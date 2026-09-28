@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public final class RecurrenceCalendar {
     public List<LocalDate> firstDates(LocalDate firstDueDate, LocalDate lastDueDate,
@@ -22,5 +23,17 @@ public final class RecurrenceCalendar {
             dates.add(date);
         }
         return List.copyOf(dates);
+    }
+
+    public Optional<LocalDate> occurrenceInMonth(LocalDate firstDueDate, LocalDate lastDueDate,
+            RecurrenceFrequency frequency, YearMonth targetMonth) {
+        if (firstDueDate == null || frequency == null || targetMonth == null)
+            throw new RecurrenceValidationException("calendar", "Informe primeiro vencimento, frequência e mês.");
+        var firstMonth = YearMonth.from(firstDueDate);
+        var distance = java.time.temporal.ChronoUnit.MONTHS.between(firstMonth, targetMonth);
+        if (distance < 0 || distance % frequency.months() != 0) return Optional.empty();
+        var date = targetMonth.atDay(Math.min(firstDueDate.getDayOfMonth(), targetMonth.lengthOfMonth()));
+        if (date.isBefore(firstDueDate) || lastDueDate != null && date.isAfter(lastDueDate)) return Optional.empty();
+        return Optional.of(date);
     }
 }

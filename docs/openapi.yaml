@@ -1177,11 +1177,17 @@ components:
         reason: { type: string, minLength: 1, maxLength: 2000 }
     Expense:
       type: object
-      required: [id, origin, description, amount, currency, status, referenceDate, overdue,
+      required: [id, origin, chargeConfirmed, description, amount, currency, status, referenceDate, overdue,
         createdByUserId, createdByDisplayName, createdAt, version, history]
       properties:
         id: { type: string, format: uuid }
-        origin: { const: ONE_OFF }
+        origin:
+          type: string
+          enum: [ONE_OFF, RECURRENCE]
+          description: Origem avulsa ou ocorrência materializada de uma recorrência.
+        chargeConfirmed:
+          type: boolean
+          description: Falso somente enquanto uma estimativa variável recorrente aguarda confirmação em H04.4.
         description: { type: string }
         amount:
           type: string

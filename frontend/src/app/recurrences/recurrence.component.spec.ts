@@ -19,7 +19,7 @@ describe('RecurrenceComponent', () => {
     fixture.detectChanges();
   });
 
-  it('previews short months through the server and creates without materializing launches', () => {
+  it('previews short months through the server and explains current-month materialization', () => {
     fixture.componentInstance.form.patchValue({ description: 'Condomínio', amount: '500,00',
       firstDueDate: '2027-01-31' });
     fixture.componentInstance.preview();
@@ -27,6 +27,6 @@ describe('RecurrenceComponent', () => {
     expect(fixture.componentInstance.previewDates()).toContain('2027-03-31');
     fixture.componentInstance.submit();
     expect(api.create).toHaveBeenCalled();
-    expect(fixture.componentInstance.message()).toContain('Nenhum lançamento foi gerado');
+    expect(fixture.componentInstance.message()).toContain('em até 30 segundos');
   });
 });

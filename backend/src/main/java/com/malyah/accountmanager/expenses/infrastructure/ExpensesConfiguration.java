@@ -21,6 +21,11 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQu
 @ConditionalOnProperty(name = "spring.datasource.url")
 class ExpensesConfiguration {
     @Bean
+    com.malyah.accountmanager.expenses.application.RecurringExpenseMaterializer recurringExpenseMaterializer(
+            JdbcTemplate jdbcTemplate, PlatformTransactionManager transactionManager) {
+        return new JdbcRecurringExpenseMaterializer(jdbcTemplate, new TransactionTemplate(transactionManager));
+    }
+    @Bean
     com.malyah.accountmanager.expenses.application.AttachmentUseCase attachmentUseCase(
             JdbcTemplate jdbcTemplate, AuthenticatedUserContextQuery contextQuery,
             PlatformTransactionManager transactionManager, Clock applicationClock,

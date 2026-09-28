@@ -41,4 +41,15 @@ class RecurrenceCalendarTest {
         assertThatThrownBy(()->calendar.firstDates(LocalDate.now(),null,RecurrenceFrequency.MONTHLY,13))
                 .isInstanceOf(RecurrenceValidationException.class);
     }
+
+    @Test void locatesOnlyTheOccurrenceBelongingToTheRequestedMonth() {
+        assertThat(calendar.occurrenceInMonth(LocalDate.of(2026,1,31),null,RecurrenceFrequency.BIMONTHLY,
+                java.time.YearMonth.of(2026,3))).contains(LocalDate.of(2026,3,31));
+        assertThat(calendar.occurrenceInMonth(LocalDate.of(2026,1,31),null,RecurrenceFrequency.BIMONTHLY,
+                java.time.YearMonth.of(2026,2))).isEmpty();
+        assertThat(calendar.occurrenceInMonth(LocalDate.of(2026,10,31),null,RecurrenceFrequency.MONTHLY,
+                java.time.YearMonth.of(2026,9))).isEmpty();
+        assertThat(calendar.occurrenceInMonth(LocalDate.of(2026,1,31),LocalDate.of(2026,8,31),RecurrenceFrequency.MONTHLY,
+                java.time.YearMonth.of(2026,9))).isEmpty();
+    }
 }

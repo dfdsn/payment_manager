@@ -244,13 +244,13 @@ public final class ExpenseService {
         var overdue = expense.status() == com.malyah.accountmanager.expenses.domain.ExpenseStatus.PENDING
                 && expense.dueDate().isBefore(today);
         return new ExpenseView(
-                expense.id(), "ONE_OFF", expense.description(), expense.amount().toPlainString(), "BRL",
+                expense.id(), expense.origin(), expense.description(), expense.amount().toPlainString(), "BRL",
                 expense.status(), expense.dueDate(), expense.paymentDate(),
                 expense.paidAmount() == null ? null : expense.paidAmount().toPlainString(),
                 referenceDate, overdue, expense.categoryName(), expense.categoryId(), expense.responsibleUserId(),
                 expense.responsibleDisplayName(), expense.notes(), expense.createdByUserId(),
                 expense.createdByDisplayName(), expense.paidByUserId(), expense.paidByDisplayName(),
-                expense.createdAt(), expense.version(), expense.paymentAudit(), history);
+                expense.createdAt(), expense.version(), expense.paymentAudit(), history, expense.chargeConfirmed());
     }
 
     private void validateAction(UUID expenseId, long version, UUID key, String field) {

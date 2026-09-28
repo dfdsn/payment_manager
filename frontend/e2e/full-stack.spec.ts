@@ -7,7 +7,7 @@ const guestEmail = 'guest@example.com';
 const guestPassword = 'senha convidada 2026';
 
 test('runs setup, email confirmation, login, reset and session revocation against real services', async ({ browser, page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(110_000);
   await page.goto('/configuracao-inicial');
   await page.getByLabel('Segredo temporário').fill('local-only-setup-secret-change-me');
   await page.getByLabel('Nome do administrador').fill('Diego');
@@ -295,8 +295,28 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByText('2027-02-28')).toBeVisible();
   await expect(page.getByText('2027-03-31')).toBeVisible();
   await page.getByRole('button', { name: 'Cadastrar recorrência' }).click();
-  await expect(page.getByText(/Nenhum lançamento foi gerado nesta etapa/)).toBeVisible();
+  await expect(page.getByText(/em até 30 segundos/)).toBeVisible();
   await expect(page.getByText('Condomínio recorrente', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cadastrar recorrência' })).toBeEnabled();
+
+  await page.getByLabel('Descrição').fill('Energia estimada automática');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('180,50');
+  await page.getByLabel('Tipo do valor').selectOption('VARIABLE_ESTIMATE');
+  await page.getByLabel('Primeiro vencimento').fill('2026-09-30');
+  await page.getByRole('button', { name: 'Cadastrar recorrência' }).click();
+  await expect(page.getByText('Energia estimada automática', { exact: true })).toBeVisible();
+  await page.goto('/despesas');
+  await expect.poll(() => page.evaluate(async () => {
+    const response = await fetch('/api/v1/expenses?search=Energia%20estimada%20autom%C3%A1tica', {
+      credentials: 'include', headers: { 'X-User-Activity': 'true' },
+    });
+    if (!response.ok) return false;
+    const result = await response.json() as { content?: { description: string }[] };
+    return result.content?.some(item => item.description === 'Energia estimada automática') ?? false;
+  }), { timeout: 45_000 }).toBe(true);
+  await page.reload();
+  await expect(page.getByText('Energia estimada automática', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Gerada por recorrência · valor estimado a confirmar/)).toBeVisible();
 
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);

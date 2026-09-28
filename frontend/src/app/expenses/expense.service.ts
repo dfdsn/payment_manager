@@ -43,7 +43,8 @@ export interface CorrectExpenseData {
 
 export interface Expense {
   id: string;
-  origin: 'ONE_OFF';
+  origin: 'ONE_OFF' | 'RECURRENCE';
+  chargeConfirmed: boolean;
   description: string;
   amount: string;
   currency: 'BRL';

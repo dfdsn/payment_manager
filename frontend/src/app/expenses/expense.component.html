@@ -403,6 +403,9 @@
                 <span class="status-label">{{ expense.status === 'CANCELLED' ? 'Cancelada' : (expense.status === 'PAID' ? 'Paga' : (expense.overdue ? 'Atrasada' : 'Pendente')) }}</span>
                 — referência {{ formatDate(expense.referenceDate) }}
               </p>
+              @if (expense.origin === 'RECURRENCE') {
+                <p>Gerada por recorrência{{ expense.chargeConfirmed ? '' : ' · valor estimado a confirmar' }}.</p>
+              }
               <p>Categoria: {{ expense.categoryName ?? 'Sem categoria' }} · Responsável: {{ expense.responsibleDisplayName ?? 'Não definido' }}</p>
               @if (expense.status === 'PAID') {
                 <p>Pagamento em {{ formatDate(expense.paymentDate) }} por {{ expense.paidByDisplayName }}.</p>

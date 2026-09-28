@@ -615,7 +615,8 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                        e.payment_date, e.paid_amount, e.notes, e.created_by_user_id,
                        creator.display_name, e.paid_by_user_id, payer.display_name, e.created_at, e.version,
                        e.payment_recorded_by_user_id, recorder.display_name, e.payment_recorded_at, e.payment_notes,
-                       e.category_id, category.name, e.responsible_user_id, responsible.display_name
+                       e.category_id, category.name, e.responsible_user_id, responsible.display_name,
+                       e.origin, e.charge_confirmed
                   from expense_entries e
                   join identity_users creator on creator.id = e.created_by_user_id
                   left join identity_users payer on payer.id = e.paid_by_user_id
@@ -634,7 +635,8 @@ final class JdbcExpenseRepository implements ExpenseRepository {
                 rs.getTimestamp(14).toInstant(), rs.getLong(15), rs.getObject(16) == null ? null :
                         new com.malyah.accountmanager.expenses.application.PaymentAudit(rs.getObject(16, UUID.class),
                                 rs.getString(17), rs.getTimestamp(18).toInstant(), rs.getString(19)),
-                rs.getObject(20, UUID.class), rs.getString(21), rs.getObject(22, UUID.class), rs.getString(23));
+                rs.getObject(20, UUID.class), rs.getString(21), rs.getObject(22, UUID.class), rs.getString(23),
+                rs.getString(24), rs.getBoolean(25));
     }
 
     private record IdempotencyRecord(String requestHash, UUID expenseId) {

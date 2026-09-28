@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1 permite cadastrar definições de recorrência e calcular seu calendário sem gerar despesas antecipadamente.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01 e o E02 estão validados. Além dos fluxos manuais, H04.1/H04.2 cadastram recorrências, calculam o calendário e geram com segurança a ocorrência do mês vigente.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -417,7 +417,7 @@ CSV financeiro não é exportação pessoal completa. P09 precisa definir format
 
 ## Estado e próximo passo
 
-Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.1 está concluída; H03.3 permanece em validação independente. A próxima história funcional é H04.2.
+Consulte [`docs/progresso.md`](docs/progresso.md) para resultados executados e limites. H04.2 está concluída; H03.3 permanece em validação independente. A próxima história funcional é H04.3.
 
 ## Anexos privados (H03.3)
 
@@ -443,13 +443,17 @@ GET /api/v1/expenses/filter-options
 
 Parâmetros inválidos, página negativa, tamanho fora de 1–100, período invertido, enum ou campo de ordenação desconhecido retornam `400`; a API não aceita SQL ou nome livre como ordenação.
 
-## Recorrências e calendário (H04.1)
+## Recorrências, calendário e geração (H04.1/H04.2)
 
 Após entrar, abra `/recorrencias` (também há um link na tela de despesas). Administrador e convidado ativos podem cadastrar descrição, valor, modalidade fixa ou estimativa variável, frequência, primeiro vencimento e, opcionalmente, término, categoria e responsável. Categoria e responsável precisam estar ativos e pertencer ao mesmo espaço.
 
 As frequências são mensal, bimestral, trimestral, semestral e anual. O primeiro vencimento fixa o dia-base: `31/01/2027` produz `28/02/2027` e depois `31/03/2027`, sem deslocamento acumulado. Em ano bissexto, fevereiro usa dia 29. Não há ajuste de fim de semana/feriado. O término é inclusivo e datas passadas são aceitas como referência, mas não geram ocorrências retroativas.
 
-“Calcular próximas datas” chama o backend e mostra até 12 datas; o frontend não replica o algoritmo. “Cadastrar recorrência” persiste somente a definição. H04.1 não cria despesas, jobs ou previsões materializadas — isso começa em H04.2.
+“Calcular próximas datas” chama o backend e mostra até 12 datas; o frontend não replica o algoritmo. O cadastro persiste a definição e o job verifica, por padrão a cada 30 segundos, se existe uma ocorrência no mês vigente no fuso do espaço. Meses anteriores não são gerados retroativamente. Uma cobrança fixa nasce confirmada; uma estimativa variável aparece como **valor estimado a confirmar**, sem ser quitável até H04.4.
+
+A identidade durável da ocorrência é `(recurrence_id, scheduled_due_date)`. A fila usa reserva PostgreSQL com `FOR UPDATE SKIP LOCKED`, lease de 120 segundos, fencing token e lote de 25. Processo interrompido pode ser retomado após expirar o lease; constraints impedem segunda despesa/auditoria. Categoria arquivada e responsável inativo são omitidos no novo lançamento, preservando a definição para tratamento definitivo em H04.5. Não existe endpoint público para disparar o job.
+
+Configuração operacional opcional: `APP_JOBS_RECURRENCE_ENABLED`, `APP_JOBS_RECURRENCE_FIXED_DELAY_MS`, `APP_JOBS_RECURRENCE_LEASE_SECONDS` e `APP_JOBS_RECURRENCE_BATCH_SIZE`. Os padrões são `true`, `30000`, `120` e `25`; não desabilite o job em produção. O modo explícito de migração o desativa automaticamente.
 
 Exemplos autenticados (operações `POST` também exigem CSRF):
 
@@ -459,8 +463,10 @@ POST /api/v1/recurrences  Idempotency-Key: <UUID>
 GET  /api/v1/recurrences
 ```
 
-Teste de persistência e migração V15:
+Teste de geração, persistência, regressão e migração V16:
 
 ```powershell
-backend\scripts\run-integration-tests.ps1 -Tests RecurrencePostgresIT,FlywayPostgresIT
+backend\scripts\run-integration-tests.ps1 -Tests RecurrenceGenerationPostgresIT,RecurrencePostgresIT,ExpensePostgresIT,FlywayPostgresIT
 ```
+
+Diagnóstico seguro: consulte contagens/estados em `recurrence_generation_jobs` e `recurrence_occurrences`; `FAILED` inclui somente `last_error_code`, nunca dados financeiros. Não altere manualmente jobs concluídos. Falhas transitórias ficam elegíveis após 30 segundos; `PROCESSING` com lease vencido é retomado por outro worker.
