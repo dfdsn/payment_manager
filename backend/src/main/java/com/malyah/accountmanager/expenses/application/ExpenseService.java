@@ -254,14 +254,7 @@ public final class ExpenseService {
         }
         if (query.sort() == null) throw new ExpenseQueryValidationException("sort", "Informe a ordenação.");
         if (query.direction() == null) throw new ExpenseQueryValidationException("direction", "Informe a direção.");
-        if (query.search() != null && query.search().trim().length() > 200)
-            throw new ExpenseQueryValidationException("search", "A busca deve ter até 200 caracteres.");
-        if (query.dateFrom() != null && query.dateTo() != null && query.dateFrom().isAfter(query.dateTo()))
-            throw new ExpenseQueryValidationException("dateFrom", "A data inicial não pode ser posterior à final.");
-        if (query.categoryId() != null && query.withoutCategory())
-            throw new ExpenseQueryValidationException("category", "Escolha uma categoria ou Sem categoria.");
-        if (query.responsibleUserId() != null && query.withoutResponsible())
-            throw new ExpenseQueryValidationException("responsible", "Escolha um responsável ou Sem responsável.");
+        query.selection().validate();
     }
 
     private ExpenseView view(StoredExpense expense, String timeZone) {

@@ -11,4 +11,9 @@ public record ExpenseListQuery(int page, int size, ExpenseSort sort, SortDirecti
         this(page, size, sort, direction, null, null, null, ExpenseDateBasis.DUE_DATE,
                 null, false, null, false, null, ExpenseStatusFilter.ACTIVE, null);
     }
+
+    public ExpenseSelection selection() {
+        return new ExpenseSelection(search, dateFrom, dateTo, dateBasis, categoryId, withoutCategory,
+                responsibleUserId, withoutResponsible, payerUserId, status, today);
+    }
 }

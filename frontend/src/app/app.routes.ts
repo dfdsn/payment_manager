@@ -11,6 +11,7 @@ export const routes: Routes = [
   { path: 'redefinir-senha', component: AccountAccessComponent, data: { mode: 'reset' } },
   { path: 'membros', component: InvitationComponent, data: { mode: 'manage' } },
   { path: 'despesas', loadComponent: () => import('./expenses/expense.component').then(module => module.ExpenseComponent) },
+  { path: 'painel', loadComponent: () => import('./reports/due-dashboard.component').then(module => module.DueDashboardComponent) },
   { path: 'categorias', loadComponent: () => import('./expenses/category.component').then(module => module.CategoryComponent) },
   { path: 'recorrencias', loadComponent: () => import('./recurrences/recurrence.component').then(module => module.RecurrenceComponent) },
   { path: 'compras-parceladas', loadComponent: () => import('./installments/installment-purchase.component').then(module => module.InstallmentPurchaseComponent) },
