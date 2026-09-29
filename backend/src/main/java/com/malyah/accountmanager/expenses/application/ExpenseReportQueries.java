@@ -18,4 +18,10 @@ public interface ExpenseReportQueries {
      */
     PaymentRecordPage payments(UUID spaceId, ExpenseSelection selection, int page, int size, PaymentSort sort,
             SortDirection direction);
+
+    /**
+     * E07: every non-cancelled expense of the selection, read by one statement so that the rows describe a single
+     * consistent state even while members change expenses. Ordered by reference date, description and id.
+     */
+    List<ReportedExpense> entries(UUID spaceId, ExpenseSelection selection);
 }

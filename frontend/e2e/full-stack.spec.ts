@@ -522,6 +522,64 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   })).status);
   expect(anonymousExportStatus).toBe(401);
 
+  // H07.1: closing the current month saves its snapshot and leaves every expense as it was.
+  await page.goto('/painel');
+  const dashboardPending = await page.getByTestId('pending-total').textContent();
+  await page.goto('/fechamento');
+  await expect(page.getByTestId('closing-status')).toContainText('Mês não fechado');
+  const currentPlanned = await page.getByTestId('current-planned').textContent();
+  await page.getByRole('button', { name: 'Fechar mês…' }).click();
+  if (await page.getByTestId('pending-warning').isVisible())
+    await page.getByLabel('Estou ciente das pendências e quero fechar mesmo assim.').check();
+  await page.getByRole('button', { name: 'Confirmar fechamento' }).click();
+  await expect(page.getByTestId('closing-status')).toContainText('Mês fechado');
+  await expect(page.getByTestId('closing-status')).toContainText('versão 1');
+  await expect(page.getByTestId('closing-status')).toContainText('Diego');
+  await expect(page.getByTestId('saved-planned')).toHaveText(currentPlanned!);
+  await page.reload();
+  await expect(page.getByTestId('saved-planned')).toHaveText(currentPlanned!);
+  await page.goto('/painel');
+  await expect(page.getByTestId('pending-total')).toHaveText(dashboardPending!);
+  const anonymousClosingStatus = await page.evaluate(async () => (await fetch('/api/v1/reports/closings/2026-09', {
+    credentials: 'omit',
+  })).status);
+  expect(anonymousClosingStatus).toBe(401);
+
+  // H07.2: a later inclusion in the closed month flags the closing and never rewrites the saved snapshot.
+  const closedMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' })
+    .format(new Date());
+  await page.goto('/despesas');
+  await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Ajuste pós-fechamento');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('12,34');
+  await page.locator('form').first().getByLabel('Situação').selectOption('PAID');
+  await page.getByLabel('Data do pagamento').fill(`${closedMonth}-01`);
+  await page.getByRole('button', { name: 'Salvar despesa' }).click();
+  await expect(page.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
+  await page.goto('/fechamento');
+  await expect(page.getByTestId('closing-outdated')).toContainText('1 diferença(s)');
+  await expect(page.getByTestId('closing-changes')).toContainText('Ajuste pós-fechamento');
+  await expect(page.getByTestId('closing-changes')).toContainText('Entrou no mês depois do fechamento');
+  await expect(page.getByTestId('saved-planned')).toHaveText(currentPlanned!);
+  await expect(page.getByTestId('current-planned')).not.toHaveText(currentPlanned!);
+  await expect(page.getByTestId(`closing-item-${closedMonth}`)).toContainText('Alterado depois');
+
+  // H07.3: a new version takes the current data; version 1 keeps the values of the first closing.
+  const updatedPlanned = await page.getByTestId('current-planned').textContent();
+  await page.getByRole('button', { name: 'Gerar nova versão…' }).click();
+  if (await page.getByTestId('pending-warning').isVisible())
+    await page.getByLabel('Estou ciente das pendências e quero fechar mesmo assim.').check();
+  await page.getByRole('button', { name: 'Gerar versão 2' }).click();
+  await expect(page.getByTestId('closing-status')).toContainText('versão 2 (vigente)');
+  await expect(page.getByTestId('closing-up-to-date')).toBeVisible();
+  await expect(page.getByTestId('saved-planned')).toHaveText(updatedPlanned!);
+  await expect(page.getByTestId('version-2')).toContainText('Vigente');
+  await page.getByTestId('version-1').getByRole('button', { name: 'Ver retrato' }).click();
+  await expect(page.getByTestId('old-version')).toContainText('Versão 1 — anterior');
+  await expect(page.getByTestId('version-planned')).toHaveText(currentPlanned!);
+  await page.reload();
+  await expect(page.getByTestId('closing-status')).toContainText('versão 2 (vigente)');
+  await expect(page.getByTestId(`closing-item-${closedMonth}`)).toContainText('Atualizado');
+
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);

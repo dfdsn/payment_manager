@@ -60,6 +60,12 @@ class ReportingServiceTest {
             pageCalls.add(page + "/" + size + "/" + sort + "/" + direction);
             return paymentPage;
         }
+
+        @Override
+        public List<com.malyah.accountmanager.expenses.application.ReportedExpense> entries(UUID spaceId,
+                ExpenseSelection selection) {
+            throw new UnsupportedOperationException("Not used by the E06 reports.");
+        }
     };
 
     private ReportingService service(Instant now) {

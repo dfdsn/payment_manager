@@ -20,6 +20,7 @@ import com.malyah.accountmanager.expenses.application.InstallmentLink;
 import com.malyah.accountmanager.expenses.application.PaymentRecord;
 import com.malyah.accountmanager.expenses.application.PaymentRecordPage;
 import com.malyah.accountmanager.expenses.application.PaymentSort;
+import com.malyah.accountmanager.expenses.application.ReportedExpense;
 import com.malyah.accountmanager.expenses.application.SortDirection;
 import com.malyah.accountmanager.expenses.domain.ExpenseStatus;
 
@@ -107,6 +108,31 @@ public final class JdbcExpenseReportQueries implements ExpenseReportQueries {
                 """ + predicate.where() + " order by " + order + " " + dir + ", lower(e.description) " + dir
                 + ", e.id " + dir + " limit ? offset ?", this::payment, parameters.toArray());
         return new PaymentRecordPage(content, total == null ? 0 : total);
+    }
+
+    @Override
+    public List<ReportedExpense> entries(UUID spaceId, ExpenseSelection selection) {
+        Objects.requireNonNull(selection.today(), "today");
+        var predicate = ExpenseSelectionPredicate.of(spaceId, selection);
+        var parameters = new ArrayList<Object>();
+        parameters.add(selection.today());
+        parameters.addAll(predicate.parameters());
+        return jdbc.query("""
+                select e.id, e.origin, e.installment_purchase_id, e.installment_number, e.installment_count,
+                       e.description, e.reference_date, e.due_date is not null, e.status, e.charge_amount,
+                       e.charge_confirmed, e.paid_amount, (e.status = 'PENDING' and e.due_date < ?), e.category_id,
+                       category.name
+                  from expense_entries e
+                  left join expense_categories category on category.id = e.category_id and category.space_id = e.space_id
+                """ + predicate.where() + " and e.status <> 'CANCELLED' order by e.reference_date, lower(e.description), e.id",
+                (rs, row) -> {
+                    var purchase = rs.getObject(3, UUID.class);
+                    return new ReportedExpense(rs.getObject(1, UUID.class), rs.getString(2),
+                            purchase == null ? null : new InstallmentLink(purchase, rs.getInt(4), rs.getInt(5)),
+                            rs.getString(6), rs.getObject(7, LocalDate.class), rs.getBoolean(8),
+                            ExpenseStatus.valueOf(rs.getString(9)), rs.getBigDecimal(10), rs.getBoolean(11),
+                            rs.getBigDecimal(12), rs.getBoolean(13), rs.getObject(14, UUID.class), rs.getString(15));
+                }, parameters.toArray());
     }
 
     private static final String PAYMENT_FIELDS_PATTERN =

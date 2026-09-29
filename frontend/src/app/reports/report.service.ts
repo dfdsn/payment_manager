@@ -1,5 +1,6 @@
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
+import { switchMap } from 'rxjs';
 import { ExpenseStatusFilter } from '../expenses/expense.service';
 
 /** Filters shared with the expense list (H03.4), except the period: reports always cover one calendar month. */
@@ -89,6 +90,60 @@ export interface Planning {
 export type PlanningFilters = Pick<ReportFilters, 'search' | 'categoryId' | 'withoutCategory' | 'responsibleUserId'
   | 'withoutResponsible'>;
 
+/** E07: one category of a closing; {@code categoryId} null is “Sem categoria”. */
+export interface ClosingCategory {
+  categoryId: string | null; categoryName: string | null; count: number; plannedTotal: string;
+  plannedEstimated: string; paidTotal: string; pendingCount: number; pendingTotal: string;
+}
+
+/** One entry of a closing, with the labels of the moment the content was taken. */
+export interface ClosingLine {
+  expenseId: string; description: string; origin: 'ONE_OFF' | 'RECURRENCE' | 'INSTALLMENT';
+  installmentNumber: number | null; installmentCount: number | null; referenceDate: string; dueDateInformed: boolean;
+  status: 'PENDING' | 'PAID'; chargeAmount: string; estimated: boolean; paidAmount: string | null;
+  adjustment: string | null; overdue: boolean; categoryId: string | null; categoryName: string | null;
+}
+
+/** Saved version (version, author and instant filled) or current data of a month (those null). */
+export interface ClosingSnapshot {
+  version: number | null; authorUserId: string | null; authorDisplayName: string | null; closedAt: string | null;
+  businessDate: string; timeZone: string; pendingAcknowledged: boolean; contentDigest: string;
+  indicators: DueIndicators; categories: ClosingCategory[]; lines: ClosingLine[];
+}
+
+export type ClosingStatus = 'NOT_CLOSED' | 'UP_TO_DATE' | 'OUTDATED';
+export type ClosingField = 'REFERENCE_DATE' | 'SITUATION' | 'CHARGE' | 'ESTIMATE' | 'PAID_AMOUNT' | 'CATEGORY';
+
+/** H07.2: one difference between the saved version and the current data, computed by the server. */
+export interface ClosingChange {
+  kind: 'ADDED' | 'REMOVED' | 'CHANGED'; expenseId: string; fields: ClosingField[];
+  saved: ClosingLine | null; current: ClosingLine | null;
+}
+
+export interface MonthClosing {
+  month: string; periodStart: string; periodEnd: string; dateBasis: 'DUE_DATE'; today: string; timeZone: string;
+  closable: boolean; status: ClosingStatus; changes: ClosingChange[]; saved: ClosingSnapshot | null;
+  current: ClosingSnapshot;
+}
+
+/** H07.3: every version of a month, oldest first; {@code currentVersion} null while the month is not closed. */
+export interface ClosingVersionList {
+  month: string; currentVersion: number | null;
+  versions: {
+    version: number; authorUserId: string; authorDisplayName: string; closedAt: string; businessDate: string;
+    pendingAcknowledged: boolean; indicators: DueIndicators; current: boolean;
+  }[];
+}
+
+/** H07.3: the stored snapshot of one version. */
+export interface ClosingVersion { month: string; currentVersion: number; current: boolean; snapshot: ClosingSnapshot }
+
+/** H07.2: the closed months of a year with the situation of each. */
+export interface MonthClosingList {
+  year: number;
+  closings: { month: string; version: number; authorDisplayName: string; closedAt: string; status: ClosingStatus }[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class ReportService {
   private readonly http = inject(HttpClient);
@@ -110,6 +165,39 @@ export class ReportService {
     let query = params(month ?? '', { ...filters, page, size });
     if (!month) query = query.delete('month');
     return this.http.get<Planning>(`${this.endpoint}/planning`, { params: query });
+  }
+
+  /** E07: the saved closing of the month, if any, and its current data. */
+  closing(month: string) {
+    return this.http.get<MonthClosing>(`${this.endpoint}/closings/${month}`);
+  }
+
+  /** H07.2: closed months of the year and whether each one differs from its saved version. */
+  closings(year: number) {
+    return this.http.get<MonthClosingList>(`${this.endpoint}/closings`, { params: new HttpParams().set('year', year) });
+  }
+
+  /** H07.3: the versions of a closed month. */
+  closingVersions(month: string) {
+    return this.http.get<ClosingVersionList>(`${this.endpoint}/closings/${month}/versions`);
+  }
+
+  closingVersion(month: string, version: number) {
+    return this.http.get<ClosingVersion>(`${this.endpoint}/closings/${month}/versions/${version}`);
+  }
+
+  /** H07.3: {@code expectedVersion} is the version in force on screen; the key is reused on a retry. */
+  generateClosingVersion(month: string, expectedVersion: number, acknowledgePending: boolean, key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() => this.http.post<MonthClosing>(
+      `${this.endpoint}/closings/${month}/versions`, { expectedVersion, acknowledgePending },
+      { headers: new HttpHeaders({ 'Idempotency-Key': key }) })));
+  }
+
+  /** H07.1: the same key must be reused when the same confirmation is sent again after a failure. */
+  closeMonth(month: string, acknowledgePending: boolean, key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() => this.http.post<MonthClosing>(
+      `${this.endpoint}/closings/${month}`, { acknowledgePending },
+      { headers: new HttpHeaders({ 'Idempotency-Key': key }) })));
   }
 }
 
@@ -181,4 +269,37 @@ const PAYMENT_FIELD_LABELS: Record<string, string> = {
 
 export function paymentFields(fields: string[]): string {
   return fields.map(field => PAYMENT_FIELD_LABELS[field] ?? field).join(', ');
+}
+
+const CLOSING_FIELD_LABELS: Record<ClosingField, string> = {
+  REFERENCE_DATE: 'Vencimento', SITUATION: 'Situação', CHARGE: 'Cobrança', ESTIMATE: 'Estimativa',
+  PAID_AMOUNT: 'Valor pago', CATEGORY: 'Categoria',
+};
+
+function closingFieldValue(field: ClosingField, line: ClosingLine): string {
+  switch (field) {
+    case 'REFERENCE_DATE': return formatDate(line.referenceDate);
+    case 'SITUATION': return line.status === 'PAID' ? 'Paga' : 'Pendente';
+    case 'CHARGE': return formatCurrency(line.chargeAmount);
+    case 'ESTIMATE': return line.estimated ? 'a confirmar' : 'confirmado';
+    case 'PAID_AMOUNT': return line.paidAmount === null ? '—' : formatCurrency(line.paidAmount);
+    case 'CATEGORY': return line.categoryName ?? 'Sem categoria';
+  }
+}
+
+/** “Cobrança: R$ 100,00 → R$ 120,00” for each field of a changed entry, saved value first. */
+export function closingChangeDetails(change: ClosingChange): string[] {
+  if (change.kind !== 'CHANGED' || !change.saved || !change.current) return [];
+  const saved = change.saved;
+  const current = change.current;
+  return change.fields.map(field =>
+    `${CLOSING_FIELD_LABELS[field]}: ${closingFieldValue(field, saved)} → ${closingFieldValue(field, current)}`);
+}
+
+export function closingChangeLabel(change: ClosingChange): string {
+  switch (change.kind) {
+    case 'ADDED': return 'Entrou no mês depois do fechamento';
+    case 'REMOVED': return 'Saiu do mês: cancelada ou com data em outro mês';
+    case 'CHANGED': return 'Alterada depois do fechamento';
+  }
 }

@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 29/09/2026.
 
-**Estado atual: E06 concluído (H06.1–H06.4).** H06.1 (painel por vencimento), H06.2 (pagamentos pela data efetiva), H06.3 (planejamento integrado do mês atual e dos 12 seguintes, sem dupla contagem) e H06.4 (CSV da seleção de Despesas e CSV separado de previsões, para Excel pt-BR) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04, E05 e E06 estão concluídos; H03.3 mantém validação independente.
+**Estado atual: E07 concluído (H07.1–H07.3).** H07.1 (fechar mês com retrato imutável), H07.2 (sinalizar alterações posteriores, calculada a cada consulta) e H07.3 (gerar e consultar versões) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04, E05, E06 e E07 estão concluídos; H03.3 mantém validação independente.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 29/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 24 de 46 concluídas; E01, E02, E04, E05 e E06 concluídos; E03 depende da validação final de H03.3. |
+| Histórias | 27 de 46 concluídas; E01, E02, E04, E05, E06 e E07 concluídos; E03 depende da validação final de H03.3. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Revisar e mesclar o PR da H06.3/H06.4; conferir um CSV no Excel pelo roteiro do README; próximo épico E07 (fechamento mensal), não iniciado. |
+| Próxima ação | Revisar e mesclar o PR do E07 (H07.1–H07.3); conferir o fechamento pelo roteiro manual do README; próximo épico E08 (lembretes), não iniciado. |
 
 ## Estados permitidos
 
@@ -67,9 +67,9 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H06.2 | Consultar pagamentos e ajustes | Concluído | `/pagamentos` e `GET /reports/payments`: quitações ativas pela data efetiva, totais pela mesma porta do painel, pagador, autor, lote e última correção da quitação ativa; reversão retira e nova quitação conta uma vez; sem migração. 245 Java, JaCoCo 94,24%/86,98%, PIT 87%, 100 ITs em Testcontainers 17.6 (12 de relatórios), 101 frontend, smoke 8/8 e E2E full-stack aprovados; regressão H06.1 aprovada. Evidência: `docs/evidencias/H06.2.md`. |
 | H06.3 | Consultar planejamento futuro integrado | Concluído | `/planejamento` e `GET /reports/planning`: mês atual + 12, lançamentos ativos (avulsas, parcelas, recorrências) e previsões ainda não lançadas reconciliadas pela identidade da ocorrência, estimado × confirmado, já pago e em aberto, por mês e origem; filtros em tudo; nada é gravado; sem migração. 261 Java, JaCoCo 97,79%/91,17%, PIT 88%, 106 ITs em Testcontainers 17.6 (6 da matriz M1–M14), 107 frontend, smoke 9/9 e E2E full-stack aprovados; regressão H06.1/H06.2 aprovada. Evidência: `docs/evidencias/H06.3.md`. |
 | H06.4 | Exportar CSV filtrado | Concluído | **Exportar CSV** em Despesas (`GET /reports/expenses/export`: população e ordem da lista, todas as linhas, cancelados só quando pedidos) e **Exportar previsões (CSV)** em Planejamento (`GET /reports/planning/export`); UTF-8 com BOM, `;`, `dd/mm/aaaa`, vírgula decimal, proteção contra fórmula; limite de 10.000 linhas com `422` antes de escrever; retrato único `REPEATABLE READ`; sem migração. 280 Java, JaCoCo 97,89%/91,83%, PIT 88%, 114 ITs em Testcontainers 17.6 (8 da matriz C1–C13; 10.000 linhas em 153 ms), 113 frontend, smoke 10/10 e E2E full-stack com download real aprovados; regressão H06.3 aprovada. Abertura no Excel instalado não executada (sem Excel no container). Evidência: `docs/evidencias/H06.4.md`. |
-| H07.1 | Fechar mês com resumo | Não iniciado | — |
-| H07.2 | Sinalizar alterações posteriores | Não iniciado | — |
-| H07.3 | Gerar e consultar versões | Não iniciado | — |
+| H07.1 | Fechar mês com resumo | Concluído | Tela **Fechamento** e `GET/POST /reports/closings/{month}`: retrato imutável do mês por vencimento (totais H06.1, categorias, estimativas, pendências com aviso confirmado, autor e instante), sem efeito sobre despesas; único por espaço e mês, idempotente, atômico com evento `MONTH_CLOSED`, serializado com as escritas pelo bloqueio do espaço (V22, T28). 299 Java, JaCoCo 97,90%/92,14%, PIT 88%, 128 ITs em Testcontainers 17.6 (14 da matriz C1–C14), 119 frontend, smoke 11/11 e E2E full-stack aprovados. Evidência: `docs/evidencias/H07.1.md`. |
+| H07.2 | Sinalizar alterações posteriores | Concluído | Situação do fechamento (`NOT_CLOSED`, `UP_TO_DATE`, `OUTDATED`) e diferenças por lançamento calculadas no backend a cada consulta, comparando o retrato salvo com os dados atuais pela mesma leitura e chave de conteúdo (sem marcador gravado); mudanças entre meses nos dois meses; lista anual `GET /reports/closings?year=`; tela com retrato salvo e dados atuais lado a lado (T29). 306 Java, JaCoCo 98,01%/92,54%, PIT 89%, 145 ITs em Testcontainers 17.6 (17 da matriz D1–D17), 121 frontend, smoke 12/12 e E2E full-stack aprovados. Evidência: `docs/evidencias/H07.2.md`. |
+| H07.3 | Gerar e consultar versões | Concluído | **Gerar nova versão…** e `POST/GET /reports/closings/{month}/versions`, `GET .../versions/{n}`: nova versão dos dados atuais pelos dois papéis, sem motivo e mesmo sem diferenças, com `expectedVersion`, idempotência, bloqueio do cabeçalho e do espaço, troca atômica da vigente e evento `VERSION_GENERATED` (V23, T30); versões anteriores imutáveis e consultáveis. 311 Java, JaCoCo 98,06%/92,61%, PIT 89%, 157 ITs em Testcontainers 17.6 (12 da matriz V1–V13 e regressões H07.1/H07.2), 123 frontend, smoke 13/13 e E2E full-stack aprovados. Evidência: `docs/evidencias/H07.3.md`. |
 | H08.1 | Configurar canal, consentimento e horários | Não iniciado | — |
 | H08.2 | Calcular elegibilidade e resumo | Não iniciado | — |
 | H08.3 | Disponibilizar notificações internas | Não iniciado | — |
@@ -97,7 +97,8 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | CA-02 — uso pelos dois perfis | Em validação transversal | Matriz/bloqueio administrativo, cadastro/listagem e quitação da mesma despesa pelos dois papéis aprovados; ausência de WhatsApp será executada em E08. |
 | CA-03 — saída/remoção e transferência | Em validação transversal | Revogação, histórico de associação, vaga e transferência aprovados; responsabilidades/anexos/novo consentimento serão revalidados em E03/E04/E08. |
 | CA-04 — avulsa pendente/paga | Em validação transversal | Cadastro pendente/já pago, atraso, quitação posterior, valor efetivo e identificação de pagador/autor aprovados; reflexos no dashboard e histórico mensal dependem de E06/E07. |
-| CA-05 a CA-32 do PRD | Não executados | Registrar resultado individual, cenário, ambiente e evidência; não inferir aprovação a partir de cobertura. |
+| CA-16 — fechamento e correção | Aprovado no ambiente local | E2E full-stack (fechar com pendência, incluir depois, ver a sinalização, gerar versão 2 e consultar a versão 1 com os valores originais) e matrizes C1–C14, D1–D17 e V1–V13 em PostgreSQL 17.6 (`docs/evidencias/H07.1.md` a `H07.3.md`). Revalidar no aceite integrado (H11.5). |
+| CA-05 a CA-32 do PRD (exceto CA-16) | Não executados | Registrar resultado individual, cenário, ambiente e evidência; não inferir aprovação a partir de cobertura. |
 | Email real | Não executado | Confirmação, convite, reset, expiração/reenvio; sem expor tokens. |
 | WhatsApp real | Não executado | Entrega ao administrador, ausência para convidado, agrupamento, quitação/falha/retomada. |
 | Groq real | Não executado | Extração por imagem, revisão, cota concorrente, retenção e fallback manual. |
@@ -554,3 +555,6 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 29/09/2026 | H06.2 concluída: visão de pagamentos pela data efetiva com matriz conferida em PostgreSQL 17.6, gates (JaCoCo 94,24%/86,98%, PIT 87%), frontend, smoke 8/8, E2E full-stack e regressão da H06.1. |
 | 29/09/2026 | H06.3 concluída: planejamento integrado com matriz M1–M14 conferida em PostgreSQL 17.6, gates (JaCoCo 97,79%/91,17%, PIT 88%), 107 frontend, smoke 9/9 (corrigida rolagem horizontal a 390 px), E2E full-stack e regressão H06.1/H06.2. Checkpoint atendido; H06.4 iniciada. |
 | 29/09/2026 | H06.4 concluída: CSV da seleção de Despesas e CSV separado de previsões com matriz C1–C13 conferida em PostgreSQL 17.6 (10.000 linhas em 153 ms; concorrência), gates (JaCoCo 97,89%/91,83%, PIT 88%), 113 frontend, smoke 10/10, E2E full-stack com download real e regressão H06.3. E06 concluído. |
+| 29/09/2026 | H07.1 concluída: fechamento do mês com retrato imutável, matriz C1–C14 conferida em PostgreSQL 17.6 (concorrência, rollback, alteração simultânea), gates (JaCoCo 97,90%/92,14%, PIT 88%), 119 frontend, smoke 11/11, E2E full-stack e regressão E06. Checkpoint atendido; H07.2 iniciada. |
+| 29/09/2026 | H07.2 concluída: sinalização derivada de alterações posteriores com matriz D1–D17 conferida em PostgreSQL 17.6 (concorrência, entre meses), gates (JaCoCo 98,01%/92,54%, PIT 89%), 121 frontend, smoke 12/12, E2E full-stack e regressão H07.1. Checkpoint atendido; H07.3 iniciada. |
+| 29/09/2026 | H07.3 concluída: versões do fechamento com matriz V1–V13 conferida em PostgreSQL 17.6 (concorrência, repetição, falha), gates (JaCoCo 98,06%/92,61%, PIT 89%), 123 frontend, smoke 13/13, E2E full-stack e regressões H07.1/H07.2. E07 concluído. |

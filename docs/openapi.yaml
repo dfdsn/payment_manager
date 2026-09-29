@@ -1533,6 +1533,198 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
+  /reports/closings:
+    get:
+      operationId: monthClosings
+      summary: Meses fechados de um ano, com a versão vigente e a situação atual de cada um (H07.2)
+      description: >-
+        Para cada mês fechado do ano, a versão vigente, seu autor e instante e a situação calculada agora: UP_TO_DATE
+        quando os dados atuais têm os mesmos valores e classificações do retrato salvo (mesma chave de conteúdo),
+        OUTDATED quando diferem. Os lançamentos do ano são lidos numa única instrução e agrupados por mês de
+        referência. Nada é gravado. Os dois papéis consultam.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: year, in: query, required: false, description: Ano AAAA (2000 ou depois); padrão o ano atual no fuso do espaço., schema: { type: string, pattern: '^[0-9]{4}$' } }
+      responses:
+        "200":
+          description: Meses fechados do ano, em ordem.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthClosingList" }
+        "400":
+          description: Ano inválido (REPORT_QUERY_INVALID, campo year).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /reports/closings/{month}:
+    parameters:
+      - { name: month, in: path, required: true, description: Mês AAAA-MM., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+    get:
+      operationId: monthClosing
+      summary: Retrato salvo do mês (versão vigente) e dados atuais recalculados, por vencimento
+      description: >-
+        E07. saved é o conteúdo gravado no fechamento, lido só das tabelas do fechamento (rótulos e valores do
+        instante em que foi salvo), ou null se o mês não foi fechado. current é recalculado agora dos lançamentos
+        atuais com as mesmas regras e nunca é gravado. Base temporal DUE_DATE, sem filtros; canceladas, previsões não
+        geradas e cabeçalho de compra parcelada não entram; pendências de meses anteriores ficam no fechamento do mês
+        de origem. Leitura em transação somente leitura REPEATABLE READ. Os dois papéis consultam. H07.2: status e
+        changes comparam o retrato salvo com os dados atuais a cada leitura (nada é gravado nem marcado); só
+        diferenças de valores ou classificações contam (vencimento, situação, cobrança, estimativa, valor pago,
+        categoria, entrada ou saída do mês), nunca descrição, nome de categoria ou o passar do tempo.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Fechamento do mês.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthClosing" }
+        "400":
+          description: Mês inválido (REPORT_QUERY_INVALID).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    post:
+      operationId: closeMonth
+      summary: Fecha o mês salvando a versão 1 do retrato (H07.1)
+      description: >-
+        Os dois papéis fecham. Só o mês atual (no fuso do espaço) ou anteriores. Os lançamentos do mês são lidos numa
+        única instrução; totais, categorias e pendências vêm dessas linhas com as regras do painel H06.1. Cabeçalho,
+        versão, categorias, linhas, evento MONTH_CLOSED e chave de repetição são gravados numa transação. Não altera
+        nenhuma despesa. Com pendências, exige acknowledgePending = true.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, description: Mesma chave e mesmo pedido devolvem o fechamento original (200)., schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                acknowledgePending: { type: boolean, default: false, description: Confirmação do aviso de pendências (RF-FEC-02). }
+            example: { acknowledgePending: true }
+      responses:
+        "201":
+          description: Mês fechado; Location aponta para GET /reports/closings/{month}.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthClosing" }
+        "200":
+          description: Repetição da mesma chave e do mesmo pedido; devolve o fechamento original.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthClosing" }
+        "400":
+          description: Mês, corpo ou Idempotency-Key inválidos (REPORT_QUERY_INVALID).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND) ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409":
+          description: >-
+            MONTH_ALREADY_CLOSED (o mês já tem fechamento; atualizar é gerar nova versão em /versions) ou IDEMPOTENCY_CONFLICT
+            (chave usada para outro pedido).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "422":
+          description: >-
+            CLOSING_MONTH_NOT_ALLOWED (mês futuro no fuso do espaço) ou CLOSING_PENDING_CONFIRMATION_REQUIRED (há
+            pendências e o aviso não foi confirmado; nada é gravado).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+  /reports/closings/{month}/versions:
+    parameters:
+      - { name: month, in: path, required: true, description: Mês AAAA-MM., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+    get:
+      operationId: monthClosingVersions
+      summary: Versões do fechamento do mês, da mais antiga para a mais recente (H07.3)
+      description: >-
+        Número, autor, instante, data do atraso, pendências confirmadas, totais e se é a vigente. Mês não fechado
+        devolve lista vazia e currentVersion null. Os dois papéis consultam.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Versões do mês.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClosingVersionList" }
+        "400": { description: Mês inválido (REPORT_QUERY_INVALID)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    post:
+      operationId: generateClosingVersion
+      summary: Gera nova versão do fechamento a partir dos dados atuais (H07.3)
+      description: >-
+        Os dois papéis geram, só em mês já fechado, sem motivo obrigatório e mesmo sem diferenças (atualiza rótulos e
+        a data do atraso). expectedVersion é a versão vigente que o membro revisou; se outra versão foi gerada antes,
+        409 CLOSING_VERSION_CONFLICT sem gravar. Com pendências, exige acknowledgePending = true. Versão, troca da
+        vigente, evento VERSION_GENERATED e chave de repetição são gravados numa transação; uma falha mantém a versão
+        anterior vigente. Versões anteriores continuam imutáveis e consultáveis; não há exclusão.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, description: Mesma chave e mesmo pedido devolvem a versão já gerada (200)., schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1, description: Versão vigente revisada. }
+                acknowledgePending: { type: boolean, default: false, description: Confirmação do aviso de pendências. }
+            example: { expectedVersion: 1, acknowledgePending: true }
+      responses:
+        "201":
+          description: Versão gerada; Location aponta para GET /reports/closings/{month}/versions/{number}. O corpo é o fechamento do mês com a nova versão em saved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthClosing" }
+        "200":
+          description: Repetição da mesma chave e do mesmo pedido.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthClosing" }
+        "400": { description: Mês, corpo, expectedVersion ou Idempotency-Key inválidos (REPORT_QUERY_INVALID)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND) ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: MONTH_NOT_CLOSED, CLOSING_VERSION_CONFLICT (campo expectedVersion) ou IDEMPOTENCY_CONFLICT., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "422": { description: CLOSING_PENDING_CONFIRMATION_REQUIRED (campo acknowledgePending); nada é gravado., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /reports/closings/{month}/versions/{number}:
+    parameters:
+      - { name: month, in: path, required: true, description: Mês AAAA-MM., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+      - { name: number, in: path, required: true, description: Número da versão (1 ou mais)., schema: { type: string, pattern: '^[1-9][0-9]{0,5}$' } }
+    get:
+      operationId: monthClosingVersion
+      summary: Retrato de uma versão, exatamente como foi salvo (H07.3)
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Versão do fechamento.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClosingVersion" }
+        "400": { description: Mês ou número inválidos (REPORT_QUERY_INVALID)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: CLOSING_VERSION_NOT_FOUND (mês sem fechamento ou versão inexistente)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
 components:
   securitySchemes:
     sessionCookie:
@@ -2521,6 +2713,129 @@ components:
         timeZone: { type: string, example: America/Sao_Paulo }
         indicators: { $ref: "#/components/schemas/DueIndicators" }
         previousPending: { $ref: "#/components/schemas/PreviousPending" }
+    MonthClosing:
+      type: object
+      required: [month, periodStart, periodEnd, dateBasis, today, timeZone, closable, status, changes, current]
+      properties:
+        month: { type: string, example: "2026-10" }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        dateBasis: { type: string, enum: [DUE_DATE] }
+        today: { type: string, format: date, description: Data local do espaço. }
+        timeZone: { type: string, example: America/Sao_Paulo }
+        closable: { type: boolean, description: Mês atual ou anterior no fuso do espaço. }
+        status: { type: string, enum: [NOT_CLOSED, UP_TO_DATE, OUTDATED], description: Situação do fechamento em relação aos dados atuais (H07.2). }
+        changes:
+          type: array
+          description: Diferenças entre o retrato salvo e os dados atuais, por data, descrição e id; vazio se não fechado ou atualizado.
+          items: { $ref: "#/components/schemas/ClosingChange" }
+        saved: { oneOf: [{ $ref: "#/components/schemas/ClosingSnapshot" }, { type: 'null' }], description: Versão vigente gravada; null se o mês não foi fechado. }
+        current: { $ref: "#/components/schemas/ClosingSnapshot" }
+    ClosingChange:
+      type: object
+      required: [kind, expenseId, fields]
+      properties:
+        kind: { type: string, enum: [ADDED, REMOVED, CHANGED], description: ADDED entrou no mês depois do fechamento; REMOVED saiu (cancelada ou com data em outro mês); CHANGED mudou campo do resumo. }
+        expenseId: { type: string, format: uuid }
+        fields:
+          type: array
+          description: Campos alterados (só em CHANGED).
+          items: { type: string, enum: [REFERENCE_DATE, SITUATION, CHARGE, ESTIMATE, PAID_AMOUNT, CATEGORY] }
+        saved: { oneOf: [{ $ref: "#/components/schemas/ClosingLine" }, { type: 'null' }], description: Linha no retrato salvo; null em ADDED. }
+        current: { oneOf: [{ $ref: "#/components/schemas/ClosingLine" }, { type: 'null' }], description: Linha atual; null em REMOVED. }
+    MonthClosingList:
+      type: object
+      required: [year, closings]
+      properties:
+        year: { type: integer, example: 2026 }
+        closings:
+          type: array
+          items:
+            type: object
+            required: [month, version, authorDisplayName, closedAt, status]
+            properties:
+              month: { type: string, example: "2026-10" }
+              version: { type: integer, description: Versão vigente. }
+              authorDisplayName: { type: string, description: Autor da versão vigente. }
+              closedAt: { type: string, format: date-time, description: Instante da versão vigente. }
+              status: { type: string, enum: [UP_TO_DATE, OUTDATED] }
+    ClosingVersionList:
+      type: object
+      required: [month, versions]
+      properties:
+        month: { type: string, example: "2026-10" }
+        currentVersion: { type: [integer, 'null'], description: Versão vigente; null se o mês não foi fechado. }
+        versions:
+          type: array
+          items:
+            type: object
+            required: [version, authorUserId, authorDisplayName, closedAt, businessDate, pendingAcknowledged, indicators, current]
+            properties:
+              version: { type: integer }
+              authorUserId: { type: string, format: uuid }
+              authorDisplayName: { type: string }
+              closedAt: { type: string, format: date-time }
+              businessDate: { type: string, format: date, description: Data local usada para o atraso. }
+              pendingAcknowledged: { type: boolean }
+              indicators: { $ref: "#/components/schemas/DueIndicators" }
+              current: { type: boolean }
+    ClosingVersion:
+      type: object
+      required: [month, currentVersion, current, snapshot]
+      properties:
+        month: { type: string, example: "2026-10" }
+        currentVersion: { type: integer }
+        current: { type: boolean, description: Se esta é a versão vigente. }
+        snapshot: { $ref: "#/components/schemas/ClosingSnapshot" }
+    ClosingSnapshot:
+      type: object
+      description: >-
+        Conteúdo de um fechamento. Na versão salva, version, autor e closedAt vêm preenchidos e businessDate é a data
+        local usada para o atraso; nos dados atuais esses campos são null e businessDate é hoje. contentDigest (SHA-256)
+        identifica valores e classificações (lançamento, referência, situação, cobrança, estimativa, valor pago,
+        categoria), nunca rótulos nem atraso.
+      properties:
+        version: { type: [integer, 'null'] }
+        authorUserId: { type: [string, 'null'], format: uuid }
+        authorDisplayName: { type: [string, 'null'], description: Nome do autor no momento do fechamento. }
+        closedAt: { type: [string, 'null'], format: date-time }
+        businessDate: { type: string, format: date }
+        timeZone: { type: string }
+        pendingAcknowledged: { type: boolean }
+        contentDigest: { type: string, minLength: 64, maxLength: 64 }
+        indicators: { $ref: "#/components/schemas/DueIndicators" }
+        categories: { type: array, items: { $ref: "#/components/schemas/ClosingCategory" } }
+        lines: { type: array, items: { $ref: "#/components/schemas/ClosingLine" } }
+    ClosingCategory:
+      type: object
+      description: Categoria com o nome do momento; categoryId e categoryName null significam Sem categoria (sempre por último).
+      properties:
+        categoryId: { type: [string, 'null'], format: uuid }
+        categoryName: { type: [string, 'null'] }
+        count: { type: integer, format: int64 }
+        plannedTotal: { type: string }
+        plannedEstimated: { type: string }
+        paidTotal: { type: string }
+        pendingCount: { type: integer, format: int64 }
+        pendingTotal: { type: string }
+    ClosingLine:
+      type: object
+      properties:
+        expenseId: { type: string, format: uuid }
+        description: { type: string }
+        origin: { type: string, enum: [ONE_OFF, RECURRENCE, INSTALLMENT] }
+        installmentNumber: { type: [integer, 'null'] }
+        installmentCount: { type: [integer, 'null'] }
+        referenceDate: { type: string, format: date }
+        dueDateInformed: { type: boolean, description: false para paga sem vencimento (referência = data do pagamento). }
+        status: { type: string, enum: [PENDING, PAID] }
+        chargeAmount: { type: string }
+        estimated: { type: boolean }
+        paidAmount: { type: [string, 'null'] }
+        adjustment: { type: [string, 'null'], description: Pago menos cobrança, só para pagas. }
+        overdue: { type: boolean, description: Atraso na businessDate do conteúdo. }
+        categoryId: { type: [string, 'null'], format: uuid }
+        categoryName: { type: [string, 'null'] }
     DueIndicators:
       type: object
       description: >-

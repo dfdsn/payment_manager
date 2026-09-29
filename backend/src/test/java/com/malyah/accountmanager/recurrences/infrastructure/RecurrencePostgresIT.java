@@ -37,7 +37,7 @@ class RecurrencePostgresIT {
     @BeforeEach void reset() {
         var ds=new DriverManagerDataSource(POSTGRES.getJdbcUrl(),POSTGRES.getUsername(),POSTGRES.getPassword());
         var flyway=Flyway.configure().dataSource(ds).cleanDisabled(false).load(); flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(21);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
         jdbc=new JdbcTemplate(ds); insertSpace(SPACE,"Casa"); insertUser(ADMIN,"Admin","admin@example.com",SPACE,"ADMINISTRATOR");
         insertUser(GUEST,"Convidado","guest@example.com",SPACE,"GUEST"); insertSpace(OTHER,"Outra");
         var context=new AuthenticatedUserContextService(contextRepository());

@@ -54,6 +54,10 @@ class ReportingConfigurationTest {
                 .withBean(ExpenseExportQueries.class, () -> exportQueries)
                 .withBean(AuthenticatedUserContextQuery.class, () -> contexts)
                 .withBean(Clock.class, Clock::systemUTC)
+                .withBean(org.springframework.jdbc.core.JdbcTemplate.class,
+                        () -> mock(org.springframework.jdbc.core.JdbcTemplate.class))
+                .withBean(com.malyah.accountmanager.identity.application.FinancialMemberAccess.class,
+                        () -> mock(com.malyah.accountmanager.identity.application.FinancialMemberAccess.class))
                 .withBean(PlatformTransactionManager.class, () -> manager)
                 .withUserConfiguration(ReportingConfiguration.class)
                 .run(context -> {
@@ -83,6 +87,8 @@ class ReportingConfigurationTest {
                     assertThat(definition.getValue().isReadOnly()).isTrue();
                     assertThat(definition.getValue().getIsolationLevel())
                             .isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                                    assertThat(context.getBean(com.malyah.accountmanager.reporting.application.MonthClosingUseCase.class))
+                            .isInstanceOf(TransactionalMonthClosingUseCase.class);
                 });
     }
 }
