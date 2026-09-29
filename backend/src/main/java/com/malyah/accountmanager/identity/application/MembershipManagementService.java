@@ -18,6 +18,7 @@ public final class MembershipManagementService {
     private final IdentifierGenerator identifiers;
     private final Clock clock;
     private final java.util.List<MembershipDepartureHandler> departureHandlers;
+    private final java.util.List<AdministrationTransferHandler> transferHandlers;
 
     public MembershipManagementService(
             MembershipRepository repository,
@@ -33,11 +34,22 @@ public final class MembershipManagementService {
             IdentifierGenerator identifiers,
             Clock clock,
             java.util.List<MembershipDepartureHandler> departureHandlers) {
+        this(repository, sessionRevoker, identifiers, clock, departureHandlers, java.util.List.of());
+    }
+
+    public MembershipManagementService(
+            MembershipRepository repository,
+            SessionRevoker sessionRevoker,
+            IdentifierGenerator identifiers,
+            Clock clock,
+            java.util.List<MembershipDepartureHandler> departureHandlers,
+            java.util.List<AdministrationTransferHandler> transferHandlers) {
         this.repository = repository;
         this.sessionRevoker = sessionRevoker;
         this.identifiers = identifiers;
         this.clock = clock;
         this.departureHandlers = java.util.List.copyOf(departureHandlers);
+        this.transferHandlers = java.util.List.copyOf(transferHandlers);
     }
 
     public List<ManagedMember> members(String rawActorEmail) {
@@ -87,9 +99,12 @@ public final class MembershipManagementService {
         if (target.userId().equals(actor.userId()) || target.role() != SpaceRole.GUEST) {
             throw new MembershipConflictException("Escolha o membro convidado ativo para receber a administração.");
         }
+        var now = clock.instant();
         repository.transferAdministration(actor.spaceId(), actor.userId(), target.userId());
         repository.append(event(actor, target, Type.ADMINISTRATION_TRANSFERRED,
-                SpaceRole.GUEST, SpaceRole.ADMINISTRATOR, clock.instant()));
+                SpaceRole.GUEST, SpaceRole.ADMINISTRATOR, now));
+        transferHandlers.forEach(handler -> handler.afterAdministrationTransferred(
+                actor.spaceId(), actor.userId(), target.userId(), now));
     }
 
     private MembershipActor administrator(String rawEmail) {

@@ -267,14 +267,49 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   expect(anonymousDashboardStatus).toBe(401);
   await anonymousContext.close();
 
+  // H08.1: the administrator configures times, number, explicit consent and activation; nothing can be sent yet.
+  await page.goto('/lembretes');
+  await expect(page.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'RECIPIENT_REQUIRED');
+  await page.getByLabel('Primeiro horário').fill('08:30');
+  await page.getByLabel('Segundo horário').fill('20:00');
+  await page.getByRole('button', { name: 'Salvar horários' }).click();
+  await expect(page.getByTestId('settings-success')).toContainText('08:30 e 20:00');
+  await page.getByLabel('Seu celular com DDD').fill('(11) 98765-4321');
+  await page.getByRole('button', { name: 'Salvar número' }).click();
+  await expect(page.getByTestId('recipient')).toHaveText('+55 11 98765-4321');
+  await page.getByRole('button', { name: 'Autorizar recebimento…' }).click();
+  await page.getByLabel('Li e autorizo o envio para este número.').check();
+  await page.getByRole('button', { name: 'Registrar consentimento' }).click();
+  await expect(page.getByTestId('consent-status')).toContainText('Registrado por Diego');
+  await page.getByRole('button', { name: 'Ativar canal' }).click();
+  await expect(page.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'PROVIDER_UNAVAILABLE');
+  await page.reload();
+  await expect(page.getByTestId('channel-status')).toHaveText('Ativado');
+  await expect(page.getByLabel('Primeiro horário')).toHaveValue('08:30');
+  await expect(page.getByTestId('settings-events')).toContainText('Canal ativado por Diego');
+  await guestPage.goto('/lembretes');
+  await expect(guestPage.getByTestId('schedule-readonly')).toContainText('08:30');
+  await expect(guestPage.getByTestId('guest-whatsapp')).toContainText('terminado em 4321');
+  await expect(guestPage.getByLabel('Seu celular com DDD')).toHaveCount(0);
+  await expect(guestPage.getByText('98765')).toHaveCount(0);
+
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();
 
-  await page.reload();
+  await page.goto('/membros');
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Transferir administração' }).click();
   await expect(page.getByText(/Administração transferida/)).toBeVisible();
   await expect(page.getByText(/Como convidado/)).toBeVisible();
+
+  // H08.1: the transfer revokes the previous consent and number; the new administrator starts without them.
+  await guestPage.goto('/lembretes');
+  await expect(guestPage.getByTestId('recipient')).toHaveText('Não cadastrado');
+  await expect(guestPage.getByTestId('consent-status')).toContainText('Não registrado');
+  await expect(guestPage.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'RECIPIENT_REQUIRED');
+  await expect(guestPage.getByLabel('Primeiro horário')).toHaveValue('08:30');
+  await expect(guestPage.getByTestId('settings-events')).toContainText('Consentimento revogado');
+  await guestPage.goto('/membros');
 
   await guestPage.reload();
   await expect(guestPage.getByRole('button', { name: 'Transferir administração' })).toBeVisible();

@@ -1,0 +1,34 @@
+:host { display: block; }
+.page { width: min(100%, 60rem); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+.page > *, mat-card-content { min-width: 0; }
+.page-header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap; }
+.page-header h1 { margin: 0; }
+h2 { margin: 0 0 .5rem; font-size: 1.25rem; }
+p { line-height: 1.5; }
+.explain { margin: 0; padding: .75rem 1rem; background: #eef3f9; border-left: .25rem solid #52677d; }
+.explain ul { margin: .25rem 0 0; padding-left: 1.25rem; line-height: 1.6; }
+.status-card { padding: .75rem 1rem; border-left: .25rem solid #52677d; background: #e9eef5; }
+.status-card.ok { border-color: #1b6e3a; background: #e3f3e8; }
+.status-card.attention { border-color: #7a4d00; background: #fff1d6; }
+.status-card p { margin: .25rem 0; }
+.error-summary, .success-summary { padding: .75rem 1rem; border-left: .25rem solid; }
+.error-summary { border-color: #ba1a1a; background: #ffdad6; }
+.success-summary { border-color: #1b6e3a; background: #e3f3e8; }
+form { display: grid; gap: .75rem; }
+.times { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem 1rem; }
+.actions { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; }
+.consent-panel { display: grid; gap: .75rem; padding: 1rem; border: 1px solid #52677d; border-radius: .5rem; background: white; }
+.consent-panel p { margin: 0; }
+.consent-text { padding: .75rem; background: #f6f7f9; border-radius: .25rem; }
+.checkbox-field { display: flex; gap: .5rem; align-items: flex-start; line-height: 1.4; }
+.checkbox-field input { width: 1.25rem; height: 1.25rem; margin-top: .1rem; }
+.events { margin: 0; padding-left: 1.25rem; line-height: 1.6; }
+.hint { color: #454f5b; font-size: .875rem; margin: 0; }
+.field-error { color: #ba1a1a; margin: 0; }
+dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .25rem 1rem; margin: 0; }
+dt { font-weight: 600; }
+dd { margin: 0; word-break: break-word; }
+@media (max-width: 36rem) {
+  .times { grid-template-columns: 1fr; }
+  dl { grid-template-columns: 1fr; }
+}

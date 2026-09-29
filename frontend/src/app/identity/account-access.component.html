@@ -20,6 +20,7 @@
           <h2>Olá, {{ user.displayName }}</h2>
           <p>Você entrou em <strong>{{ user.spaceName }}</strong> como {{ user.role === 'ADMINISTRATOR' ? 'administrador' : 'convidado' }}.</p>
           <p><a routerLink="/despesas">Cadastrar e consultar despesas</a></p>
+          <p><a routerLink="/lembretes">Lembretes e WhatsApp</a></p>
           @if (user.role === 'ADMINISTRATOR') { <p><a routerLink="/membros">Convidar ou gerenciar o segundo membro</a></p> }
           <div class="actions">
             <button matButton="outlined" type="button" (click)="logout(false)" [disabled]="submitting()">Sair deste dispositivo</button>

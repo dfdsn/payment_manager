@@ -1725,6 +1725,177 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "404": { description: CLOSING_VERSION_NOT_FOUND (mês sem fechamento ou versão inexistente)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/settings:
+    get:
+      operationId: reminderSettings
+      summary: Horários dos lembretes e canal WhatsApp do administrador (H08.1)
+      description: >-
+        Os dois papéis consultam. Sem nada gravado devolve versão 0, 09:00/18:00 no fuso do espaço e WhatsApp
+        desativado. O convidado não recebe o número completo nem autor/data do consentimento (recipient,
+        recipientFormatted, consent.grantedAt e consent.grantedByDisplayName vêm null). O estado efetivo separa o que
+        foi configurado da disponibilidade do provedor; não há campo de credencial.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Configuração do espaço.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReminderSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/settings/events:
+    get:
+      operationId: reminderSettingsEvents
+      summary: Auditoria das alterações de horários, número, consentimento e ativação (H08.1)
+      description: Só o administrador. Os 50 eventos mais recentes; o número aparece mascarado.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Eventos.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReminderSettingsEvents" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED ou ACTIVE_SPACE_ACCESS_NOT_FOUND., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/settings/schedule:
+    put:
+      operationId: changeReminderSchedule
+      summary: Altera os dois horários diários do espaço (H08.1)
+      description: Só o administrador. HH:mm no fuso do espaço; o segundo precisa ser posterior ao primeiro. Os mesmos horários não criam versão nem evento.
+      security:
+        - { sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }
+      parameters:
+        - $ref: "#/components/parameters/ReminderIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, firstTime, secondTime]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+                firstTime: { type: string, example: "08:30" }
+                secondTime: { type: string, example: "20:00" }
+      responses:
+        "200": { $ref: "#/components/responses/ReminderSettingsChanged" }
+        "400": { description: REMINDER_SCHEDULE_INVALID_FORMAT ou REMINDER_SETTINGS_INVALID., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED, ACTIVE_SPACE_ACCESS_NOT_FOUND ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { $ref: "#/components/responses/ReminderSettingsConflict" }
+        "422": { description: REMINDER_SCHEDULE_INVALID (segundo horário não posterior ao primeiro)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/settings/whatsapp/recipient:
+    put:
+      operationId: changeWhatsAppRecipient
+      summary: Informa o número que recebe os resumos pelo WhatsApp (H08.1)
+      description: >-
+        Só o administrador. Celular brasileiro normalizado em E.164. Um número diferente revoga o consentimento
+        anterior (RECIPIENT_CHANGED) e desativa o canal; o mesmo número não muda nada. Informar número não cria
+        consentimento.
+      security:
+        - { sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }
+      parameters:
+        - $ref: "#/components/parameters/ReminderIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, phone]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+                phone: { type: string, example: "(11) 98765-4321" }
+      responses:
+        "200": { $ref: "#/components/responses/ReminderSettingsChanged" }
+        "400": { description: WHATSAPP_RECIPIENT_INVALID ou REMINDER_SETTINGS_INVALID., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED, ACTIVE_SPACE_ACCESS_NOT_FOUND ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { $ref: "#/components/responses/ReminderSettingsConflict" }
+  /notifications/settings/whatsapp/consent:
+    post:
+      operationId: grantWhatsAppConsent
+      summary: Registra o consentimento explícito do administrador (H08.1)
+      description: >-
+        Só o administrador, com accepted = true e o mesmo número cadastrado. Grava autor, número, versão do texto e
+        instante UTC. Um consentimento ativo por espaço; consentir de novo com um ativo não cria outro. Não ativa o
+        canal.
+      security:
+        - { sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }
+      parameters:
+        - $ref: "#/components/parameters/ReminderIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, phone, accepted]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+                phone: { type: string, description: Número confirmado pelo administrador. }
+                accepted: { type: boolean, enum: [true] }
+      responses:
+        "200": { $ref: "#/components/responses/ReminderSettingsChanged" }
+        "400": { description: REMINDER_SETTINGS_INVALID (aceite ausente/falso) ou WHATSAPP_RECIPIENT_INVALID., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED, ACTIVE_SPACE_ACCESS_NOT_FOUND ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: WHATSAPP_RECIPIENT_MISMATCH, NOTIFICATION_SETTINGS_VERSION_CONFLICT ou IDEMPOTENCY_CONFLICT., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "422": { description: WHATSAPP_RECIPIENT_REQUIRED., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/settings/whatsapp/consent/revocation:
+    post:
+      operationId: revokeWhatsAppConsent
+      summary: Revoga o consentimento ativo e desativa o canal (H08.1)
+      security:
+        - { sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }
+      parameters:
+        - $ref: "#/components/parameters/ReminderIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        "200": { $ref: "#/components/responses/ReminderSettingsChanged" }
+        "400": { description: REMINDER_SETTINGS_INVALID., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED, ACTIVE_SPACE_ACCESS_NOT_FOUND ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: WHATSAPP_CONSENT_NOT_ACTIVE, NOTIFICATION_SETTINGS_VERSION_CONFLICT ou IDEMPOTENCY_CONFLICT., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/settings/whatsapp/channel:
+    put:
+      operationId: changeWhatsAppChannel
+      summary: Ativa ou desativa o canal WhatsApp (H08.1)
+      description: >-
+        Ativar exige número e consentimento ativo do administrador atual para esse número; não cria consentimento.
+        Desativar mantém número e consentimento. Com o canal ativo e o provedor indisponível o estado efetivo é
+        PROVIDER_UNAVAILABLE e nada é enviado.
+      security:
+        - { sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }
+      parameters:
+        - $ref: "#/components/parameters/ReminderIdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, enabled]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+                enabled: { type: boolean }
+      responses:
+        "200": { $ref: "#/components/responses/ReminderSettingsChanged" }
+        "400": { description: REMINDER_SETTINGS_INVALID., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED, ACTIVE_SPACE_ACCESS_NOT_FOUND ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { $ref: "#/components/responses/ReminderSettingsConflict" }
+        "422": { description: WHATSAPP_RECIPIENT_REQUIRED ou WHATSAPP_CONSENT_REQUIRED., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
 components:
   securitySchemes:
     sessionCookie:
@@ -1768,7 +1939,23 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/GenericEmailResponse"
+    ReminderSettingsChanged:
+      description: Configuração depois da alteração (ou a mesma, na repetição da chave ou quando nada muda).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ReminderSettings" }
+    ReminderSettingsConflict:
+      description: NOTIFICATION_SETTINGS_VERSION_CONFLICT (campo expectedVersion) ou IDEMPOTENCY_CONFLICT; nada é gravado.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
   parameters:
+    ReminderIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Mesma chave e mesmo pedido repetem a resposta sem novo efeito; outro pedido com a mesma chave dá 409 IDEMPOTENCY_CONFLICT.
+      schema: { type: string, format: uuid }
     MemberUserId:
       name: userId
       in: path
@@ -2759,6 +2946,66 @@ components:
               authorDisplayName: { type: string, description: Autor da versão vigente. }
               closedAt: { type: string, format: date-time, description: Instante da versão vigente. }
               status: { type: string, enum: [UP_TO_DATE, OUTDATED] }
+    ReminderSettings:
+      type: object
+      required: [canManage, timeZone, version, schedule, whatsapp]
+      properties:
+        canManage: { type: boolean, description: Verdadeiro só para o administrador ativo. }
+        timeZone: { type: string, example: America/Sao_Paulo }
+        version: { type: integer, description: 0 antes da primeira gravação. }
+        updatedAt: { type: [string, 'null'], format: date-time }
+        schedule:
+          type: object
+          required: [firstTime, secondTime, defaultFirstTime, defaultSecondTime]
+          properties:
+            firstTime: { type: string, example: "09:00" }
+            secondTime: { type: string, example: "18:00" }
+            defaultFirstTime: { type: string, example: "09:00" }
+            defaultSecondTime: { type: string, example: "18:00" }
+        whatsapp:
+          type: object
+          required: [hasRecipient, enabled, consent, provider, state, consentTextVersion, consentText]
+          properties:
+            hasRecipient: { type: boolean }
+            recipient: { type: [string, 'null'], description: E.164; só para o administrador., example: "+5511987654321" }
+            recipientFormatted: { type: [string, 'null'], description: Só para o administrador., example: "+55 11 98765-4321" }
+            recipientLastDigits: { type: [string, 'null'], example: "4321" }
+            enabled: { type: boolean, description: Canal ativado pelo administrador (configuração). }
+            consent:
+              type: object
+              required: [active]
+              properties:
+                active: { type: boolean }
+                grantedAt: { type: [string, 'null'], format: date-time, description: Só para o administrador. }
+                grantedByDisplayName: { type: [string, 'null'], description: Só para o administrador. }
+                recipientLastDigits: { type: [string, 'null'] }
+            provider:
+              type: object
+              description: Disponibilidade do envio real, separada da configuração. Sem credenciais.
+              required: [available, code, message]
+              properties:
+                available: { type: boolean }
+                code: { type: string, example: PROVIDER_NOT_IMPLEMENTED }
+                message: { type: string }
+            state: { type: string, enum: [RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, PROVIDER_UNAVAILABLE, READY] }
+            consentTextVersion: { type: string, example: WHATSAPP-RESUMOS-V1 }
+            consentText: { type: string }
+    ReminderSettingsEvents:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [type, actorDisplayName, occurredAt, fromVersion, toVersion, detail]
+            properties:
+              type: { type: string, enum: [SCHEDULE_CHANGED, RECIPIENT_CHANGED, CONSENT_GRANTED, CONSENT_REVOKED, CHANNEL_ENABLED, CHANNEL_DISABLED] }
+              actorDisplayName: { type: string }
+              occurredAt: { type: string, format: date-time }
+              fromVersion: { type: integer }
+              toVersion: { type: integer }
+              detail: { type: string, description: Resumo sem número completo. }
     ClosingVersionList:
       type: object
       required: [month, versions]

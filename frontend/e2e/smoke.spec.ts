@@ -747,3 +747,65 @@ test('H07.3 generates a new version and still shows the first one as it was save
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test('H08.1 registers the number, an explicit consent and activation, and separates the channel from the provider', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const provider = { available: false, code: 'PROVIDER_NOT_IMPLEMENTED',
+    message: 'O envio real pela Meta ainda não está disponível nesta versão (H08.4). A configuração fica salva e nenhum resumo é enviado pelo WhatsApp.' };
+  const base = { canManage: true, timeZone: 'America/Sao_Paulo', updatedAt: '2026-09-29T12:00:00Z',
+    schedule: { firstTime: '09:00', secondTime: '18:00', defaultFirstTime: '09:00', defaultSecondTime: '18:00' } };
+  const whatsapp = { hasRecipient: false, recipient: null, recipientFormatted: null, recipientLastDigits: null, enabled: false,
+    consent: { active: false, grantedAt: null, grantedByDisplayName: null, recipientLastDigits: null }, provider,
+    state: 'RECIPIENT_REQUIRED', consentTextVersion: 'WHATSAPP-RESUMOS-V1',
+    consentText: 'Autorizo o account_Manager a enviar, a partir do número dedicado do aplicativo, resumos de contas a vencer e vencidas para o meu WhatsApp neste número.' };
+  const number = { hasRecipient: true, recipient: '+5511987654321', recipientFormatted: '+55 11 98765-4321', recipientLastDigits: '4321' };
+  const consent = { active: true, grantedAt: '2026-09-29T12:00:00Z', grantedByDisplayName: 'Diego', recipientLastDigits: '4321' };
+  let current: Record<string, unknown> = { ...base, version: 0, whatsapp };
+  const writes: { path: string; key: string | undefined; body: unknown }[] = [];
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ token: 't' })));
+  await page.route('**/api/v1/notifications/settings**', route => {
+    const request = route.request();
+    if (request.method() === 'GET') return route.fulfill(json(current));
+    const path = new URL(request.url()).pathname.replace('/api/v1/notifications/settings', '');
+    writes.push({ path, key: request.headers()['idempotency-key'], body: request.postDataJSON() });
+    if (path === '/schedule') current = { ...current, version: 1, schedule: { ...base.schedule, firstTime: '08:30', secondTime: '20:00' } };
+    if (path === '/whatsapp/recipient') current = { ...current, version: 2, whatsapp: { ...whatsapp, ...number, state: 'CONSENT_REQUIRED' } };
+    if (path === '/whatsapp/consent') current = { ...current, version: 3, whatsapp: { ...whatsapp, ...number, consent, state: 'DISABLED' } };
+    if (path === '/whatsapp/channel') current = { ...current, version: 4, whatsapp: { ...whatsapp, ...number, consent, enabled: true, state: 'PROVIDER_UNAVAILABLE' } };
+    return route.fulfill(json(current));
+  });
+  // Registered last so it takes precedence over the settings route above.
+  await page.route('**/api/v1/notifications/settings/events', route => route.fulfill(json({ items: [] })));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/lembretes');
+  await expect(page.getByRole('heading', { name: 'Lembretes e WhatsApp' })).toBeVisible();
+  await expect(page.getByTestId('reminders-explain')).toContainText('somente para o administrador');
+  await expect(page.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'RECIPIENT_REQUIRED');
+  await page.getByLabel('Primeiro horário').fill('08:30');
+  await page.getByLabel('Segundo horário').fill('20:00');
+  await page.getByRole('button', { name: 'Salvar horários' }).click();
+  await expect(page.getByTestId('settings-success')).toContainText('08:30 e 20:00');
+  await page.getByLabel('Seu celular com DDD').fill('(11) 98765-4321');
+  await page.getByRole('button', { name: 'Salvar número' }).click();
+  await expect(page.getByTestId('recipient')).toHaveText('+55 11 98765-4321');
+  await expect(page.getByRole('button', { name: 'Ativar canal' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Autorizar recebimento…' }).click();
+  await expect(page.getByTestId('consent-text')).toContainText('Autorizo');
+  await page.getByLabel('Li e autorizo o envio para este número.').check();
+  await page.getByRole('button', { name: 'Registrar consentimento' }).click();
+  await expect(page.getByTestId('consent-status')).toContainText('Registrado por Diego');
+  await page.getByRole('button', { name: 'Ativar canal' }).click();
+  await expect(page.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'PROVIDER_UNAVAILABLE');
+  await expect(page.getByTestId('whatsapp-state')).toContainText('envio real ainda não está disponível');
+  expect(writes.map(write => write.path)).toEqual(['/schedule', '/whatsapp/recipient', '/whatsapp/consent', '/whatsapp/channel']);
+  expect(writes.map(write => write.body)).toEqual([
+    { expectedVersion: 0, firstTime: '08:30', secondTime: '20:00' },
+    { expectedVersion: 1, phone: '(11) 98765-4321' },
+    { expectedVersion: 2, phone: '+5511987654321', accepted: true },
+    { expectedVersion: 3, enabled: true },
+  ]);
+  expect(new Set(writes.map(write => write.key)).size).toBe(4);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});

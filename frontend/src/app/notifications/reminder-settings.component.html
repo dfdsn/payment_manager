@@ -1,0 +1,118 @@
+<section class="page" aria-labelledby="reminders-title">
+  <header class="page-header">
+    <div>
+      <h1 id="reminders-title">Lembretes e WhatsApp</h1>
+      <p>Horários dos resumos de vencimentos e o canal WhatsApp do administrador.</p>
+    </div>
+    <nav aria-label="Outras telas"><a routerLink="/despesas">Despesas</a> · <a routerLink="/painel">Painel</a> · <a routerLink="/entrar">Início</a></nav>
+  </header>
+
+  <div class="explain" data-testid="reminders-explain">
+    <strong>Como funciona</strong>
+    <ul>
+      <li>Até dois resumos por dia, nos horários abaixo, no fuso do espaço{{ settings() ? ' (' + settings()!.timeZone + ')' : '' }}.</li>
+      <li>O WhatsApp vai <strong>somente para o administrador</strong>, no número que ele cadastrar e autorizar. O responsável por uma conta não muda o destinatário.</li>
+      <li>O convidado consulta os avisos só dentro do aplicativo.</li>
+      <li>Pagamentos continuam sendo registrados somente no aplicativo.</li>
+    </ul>
+  </div>
+
+  @if (error()) { <div class="error-summary" role="alert">{{ error() }} @if (!settings()) { <button matButton type="button" (click)="reload()">Tentar novamente</button> }</div> }
+  @if (success()) { <div class="success-summary" role="status" data-testid="settings-success">{{ success() }}</div> }
+  @if (loading() && !settings()) { <p role="status">Carregando configurações…</p> }
+
+  @if (settings(); as s) {
+    <mat-card appearance="outlined">
+      <mat-card-content>
+        <h2>Horários dos resumos</h2>
+        @if (s.canManage) {
+          <form [formGroup]="scheduleForm" (ngSubmit)="saveSchedule()" novalidate aria-label="Horários dos resumos">
+            <div class="times">
+              <mat-form-field appearance="outline">
+                <mat-label>Primeiro horário</mat-label>
+                <input matInput type="time" formControlName="firstTime" data-testid="first-time" />
+                <mat-error>Use o formato HH:mm.</mat-error>
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Segundo horário</mat-label>
+                <input matInput type="time" formControlName="secondTime" data-testid="second-time" />
+                <mat-error>Use o formato HH:mm.</mat-error>
+              </mat-form-field>
+            </div>
+            @if (scheduleOrderInvalid()) { <p class="field-error" role="alert">O segundo horário precisa ser posterior ao primeiro.</p> }
+            <p class="hint">Padrão: {{ s.schedule.defaultFirstTime }} e {{ s.schedule.defaultSecondTime }}. O primeiro resumo traz contas atrasadas e as que vencem em até cinco dias; o segundo, só as de hoje e amanhã.</p>
+            <div class="actions"><button matButton="filled" type="submit" [disabled]="busy() !== null" data-testid="save-schedule">{{ busy() === 'schedule' ? 'Salvando…' : 'Salvar horários' }}</button></div>
+          </form>
+        } @else {
+          <p data-testid="schedule-readonly">Primeiro resumo às <strong>{{ s.schedule.firstTime }}</strong> e segundo às <strong>{{ s.schedule.secondTime }}</strong>. Somente o administrador altera os horários.</p>
+        }
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card appearance="outlined">
+      <mat-card-content>
+        <h2>WhatsApp do administrador</h2>
+        <div class="status-card" [class.ok]="s.whatsapp.state === 'READY'" [class.attention]="s.whatsapp.state !== 'READY'" data-testid="whatsapp-state" [attr.data-state]="s.whatsapp.state">
+          <p><strong>{{ stateLabels[s.whatsapp.state] }}</strong></p>
+          @if (!s.whatsapp.provider.available) { <p data-testid="provider-status">{{ s.whatsapp.provider.message }}</p> }
+        </div>
+
+        @if (s.canManage) {
+          <dl>
+            <dt>Número</dt><dd data-testid="recipient">{{ s.whatsapp.recipientFormatted ?? 'Não cadastrado' }}</dd>
+            <dt>Consentimento</dt>
+            <dd data-testid="consent-status">@if (s.whatsapp.consent.active) { Registrado por {{ s.whatsapp.consent.grantedByDisplayName }} em {{ formatInstant(s.whatsapp.consent.grantedAt!) }} } @else { Não registrado }</dd>
+            <dt>Canal</dt><dd data-testid="channel-status">{{ s.whatsapp.enabled ? 'Ativado' : 'Desativado' }}</dd>
+          </dl>
+
+          <form [formGroup]="recipientForm" (ngSubmit)="saveRecipient()" novalidate aria-label="Número receptor">
+            <mat-form-field appearance="outline">
+              <mat-label>Seu celular com DDD</mat-label>
+              <input matInput type="tel" inputmode="tel" autocomplete="tel" formControlName="phone" placeholder="(11) 98765-4321" data-testid="phone" />
+              <mat-error>Informe um celular brasileiro com DDD.</mat-error>
+            </mat-form-field>
+            <p class="hint">Celular brasileiro, com DDD. Trocar o número revoga o consentimento anterior e desativa o canal.</p>
+            <div class="actions"><button matButton="outlined" type="submit" [disabled]="busy() !== null" data-testid="save-recipient">{{ busy() === 'recipient' ? 'Salvando…' : 'Salvar número' }}</button></div>
+          </form>
+
+          @if (s.whatsapp.hasRecipient && !s.whatsapp.consent.active && !consenting()) {
+            <div class="actions"><button matButton="filled" type="button" (click)="startConsent()" data-testid="start-consent">Autorizar recebimento…</button></div>
+          }
+          @if (consenting()) {
+            <form class="consent-panel" [formGroup]="consentForm" (ngSubmit)="grantConsent()" novalidate aria-label="Consentimento do WhatsApp">
+              <p><strong>Número que vai receber:</strong> {{ s.whatsapp.recipientFormatted }}</p>
+              <p class="consent-text" data-testid="consent-text">{{ s.whatsapp.consentText }}</p>
+              <label class="checkbox-field"><input type="checkbox" formControlName="accepted" data-testid="consent-accept" /> Li e autorizo o envio para este número.</label>
+              <div class="actions">
+                <button matButton="filled" type="submit" [disabled]="busy() !== null" data-testid="grant-consent">{{ busy() === 'consent' ? 'Registrando…' : 'Registrar consentimento' }}</button>
+                <button matButton="outlined" type="button" (click)="cancelConsent()" [disabled]="busy() !== null">Cancelar</button>
+              </div>
+            </form>
+          }
+          <div class="actions">
+            @if (s.whatsapp.consent.active && !s.whatsapp.enabled) { <button matButton="filled" type="button" (click)="setChannel(true)" [disabled]="busy() !== null" data-testid="enable-channel">Ativar canal</button> }
+            @if (s.whatsapp.enabled) { <button matButton="outlined" type="button" (click)="setChannel(false)" [disabled]="busy() !== null" data-testid="disable-channel">Desativar canal</button> }
+            @if (s.whatsapp.consent.active) { <button matButton="outlined" type="button" (click)="revokeConsent()" [disabled]="busy() !== null" data-testid="revoke-consent">Revogar consentimento</button> }
+          </div>
+          <p class="hint">Credenciais da Meta ficam somente na configuração do servidor; esta tela não as exibe. Ao transferir a administração, o número e o consentimento deixam de valer e o novo administrador precisa cadastrar os seus.</p>
+        } @else {
+          <p data-testid="guest-whatsapp">@if (s.whatsapp.hasRecipient) { O administrador cadastrou um número terminado em {{ s.whatsapp.recipientLastDigits }}. } @else { O administrador ainda não cadastrou um número. }
+            Você recebe os avisos somente no aplicativo; não é possível habilitar o WhatsApp para o convidado.</p>
+        }
+      </mat-card-content>
+    </mat-card>
+
+    @if (s.canManage && events().length) {
+      <mat-card appearance="outlined">
+        <mat-card-content>
+          <h2>Alterações recentes</h2>
+          <ul class="events" data-testid="settings-events">
+            @for (event of events(); track event.toVersion + event.type + event.occurredAt) {
+              <li>{{ formatInstant(event.occurredAt) }} · {{ eventLabels[event.type] ?? event.type }} por {{ event.actorDisplayName }} · {{ event.detail }}</li>
+            }
+          </ul>
+        </mat-card-content>
+      </mat-card>
+    }
+  }
+</section>
