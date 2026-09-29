@@ -110,6 +110,16 @@ final class JdbcRecurrenceRepository implements RecurrenceRepository {
                 spaceId);
     }
 
+    @Override public com.malyah.accountmanager.recurrences.application.GenerationEligibility generationEligibility(
+            UUID spaceId) {
+        var categories=jdbc.queryForList(
+                "select id from expense_categories where space_id=? and archived_at is null",UUID.class,spaceId);
+        var members=jdbc.queryForList(
+                "select user_id from space_memberships where space_id=? and active=true",UUID.class,spaceId);
+        return new com.malyah.accountmanager.recurrences.application.GenerationEligibility(
+                new java.util.HashSet<>(categories),new java.util.HashSet<>(members));
+    }
+
     @Override public void lockForChargeConfirmation(UUID spaceId, UUID recurrenceId) {
         jdbc.query("select id from recurrence_definitions where id=? and space_id=? for no key update",
                 (rs,row)->rs.getObject(1,UUID.class),recurrenceId,spaceId);

@@ -1415,6 +1415,124 @@ paths:
               schema: { $ref: "#/components/schemas/ApiError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /reports/planning:
+    get:
+      operationId: planningReport
+      summary: Planejamento do mês atual e dos 12 seguintes, com lançamentos e previsões sem dupla contagem
+      description: >-
+        Base temporal DUE_DATE. Soma os lançamentos ativos (avulsas, parcelas e ocorrências de recorrência, pendentes
+        ou pagos; canceladas fora) e as previsões das recorrências cujo período ainda não tem lançamento (identidade
+        recorrência + período; o lançamento prevalece, mesmo remarcado ou cancelado). Totais do horizonte e de cada mês
+        somam toda a seleção; a lista traz um mês por vez, por data, lançamentos antes de previsões no mesmo dia.
+        Somente leitura: abrir o planejamento não gera lançamentos. Não há receitas, saldo nem orçamento.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: month, in: query, description: Mês AAAA-MM da lista, dentro do horizonte; ausente usa o mês atual no fuso do espaço., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutCategory, in: query, schema: { type: boolean, default: false } }
+        - { name: responsibleUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutResponsible, in: query, schema: { type: boolean, default: false } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Totais do horizonte, de cada mês e do mês escolhido, e uma página desse mês; dinheiro em strings decimais exatas.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Planning" }
+        "400":
+          description: Mês fora do horizonte ou inválido, página, tamanho ou combinação de filtros inválida (REPORT_QUERY_INVALID).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /reports/expenses/export:
+    get:
+      operationId: exportExpensesCsv
+      summary: CSV de todos os lançamentos da seleção da lista de despesas, para Excel em português
+      description: >-
+        Mesma população e ordem de GET /expenses para os mesmos filtros (sem página): sem datas, o mês atual no fuso do
+        espaço; cancelados só com status CANCELLED ou ALL, identificados na coluna Situação. Previsões nunca entram
+        (arquivo separado em /reports/planning/export) e anexos, observações e ids internos também não. UTF-8 com BOM,
+        separador ponto e vírgula, CRLF, datas dd/mm/aaaa, valores com vírgula decimal e sem milhar, textos entre aspas
+        (RFC 4180); texto que começa com =, +, -, @, tabulação ou retorno de carro recebe um apóstrofo. Colunas:
+        Descrição; Categoria; Vencimento; Valor da cobrança; Estimativa; Situação; Valor pago; Data do pagamento;
+        Responsável; Pagador; Origem; Parcela; ID do lançamento. Contagem e linhas vêm de um único retrato (REPEATABLE
+        READ); acima de 10.000 linhas a exportação é recusada antes de escrever, nunca truncada.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: dateFrom, in: query, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, schema: { type: string, format: date } }
+        - { name: dateBasis, in: query, schema: { type: string, enum: [DUE_DATE, PAYMENT_DATE], default: DUE_DATE } }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutCategory, in: query, schema: { type: boolean, default: false } }
+        - { name: responsibleUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutResponsible, in: query, schema: { type: boolean, default: false } }
+        - { name: payerUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [ACTIVE, PENDING, OVERDUE, PAID, CANCELLED, ALL], default: ACTIVE } }
+        - { name: sort, in: query, description: Desempate por instante de criação e id., schema: { type: string, enum: [REFERENCE_DATE, AMOUNT, DESCRIPTION], default: REFERENCE_DATE } }
+        - { name: direction, in: query, schema: { type: string, enum: [ASC, DESC], default: ASC } }
+      responses:
+        "200":
+          description: Arquivo completo; seleção vazia devolve só o cabeçalho com X-Export-Rows 0.
+          headers:
+            Content-Disposition: { description: 'attachment; filename="despesas_vencimento_2026-10-01_a_2026-10-31.csv" (base e período; "desde_"/"ate_" quando o período é aberto)', schema: { type: string } }
+            X-Export-Rows: { description: Quantidade de linhas de dados., schema: { type: integer } }
+            Cache-Control: { schema: { type: string, example: no-store } }
+          content:
+            text/csv:
+              schema: { type: string }
+        "400":
+          description: Filtros inválidos (REPORT_QUERY_INVALID).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "422":
+          description: Mais de 10.000 linhas (EXPORT_LIMIT_EXCEEDED); a mensagem traz a quantidade e o limite. Nada é gerado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+  /reports/planning/export:
+    get:
+      operationId: exportForecastsCsv
+      summary: CSV separado das previsões de recorrência ainda não lançadas no horizonte do planejamento
+      description: >-
+        Mesmo horizonte (mês atual e os 12 seguintes) e filtros de GET /reports/planning; somente previsões, nunca
+        lançamentos. Mesmo formato do CSV de despesas. Colunas: Descrição; Categoria; Vencimento previsto; Valor
+        previsto; Estimativa; Responsável; Tipo (Previsão de recorrência); ID da recorrência. Limite de 10.000 linhas.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutCategory, in: query, schema: { type: boolean, default: false } }
+        - { name: responsibleUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutResponsible, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: 'Arquivo completo, filename="previsoes_2026-10_a_2027-10.csv"; X-Export-Rows com a quantidade.'
+          content:
+            text/csv:
+              schema: { type: string }
+        "400":
+          description: Filtros inválidos (REPORT_QUERY_INVALID).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "422":
+          description: Mais de 10.000 previsões (EXPORT_LIMIT_EXCEEDED).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
 components:
   securitySchemes:
     sessionCookie:
@@ -2434,6 +2552,78 @@ components:
         estimated: { type: string }
         overdueCount: { type: integer, format: int64 }
         overdueTotal: { type: string }
+    Planning:
+      type: object
+      required: [horizonStart, horizonEnd, periodStart, periodEnd, dateBasis, today, timeZone, totals, months, month, monthTotals, content, page, size, totalElements, totalPages]
+      properties:
+        horizonStart: { type: string, example: "2026-10" }
+        horizonEnd: { type: string, example: "2027-10" }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        dateBasis: { type: string, enum: [DUE_DATE] }
+        today: { type: string, format: date, description: Dia local no fuso do espaço. }
+        timeZone: { type: string, example: America/Sao_Paulo }
+        totals: { $ref: "#/components/schemas/PlanningTotals" }
+        months:
+          type: array
+          description: Os 13 meses do horizonte, em ordem.
+          items:
+            type: object
+            properties:
+              month: { type: string, example: "2026-11" }
+              totals: { $ref: "#/components/schemas/PlanningTotals" }
+        month: { type: string, example: "2026-10" }
+        monthTotals: { $ref: "#/components/schemas/PlanningTotals" }
+        content: { type: array, items: { $ref: "#/components/schemas/PlanningItem" } }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+    PlanningTotals:
+      type: object
+      description: >-
+        planned = confirmed + estimated = materialized + forecast = oneOff + installment + recurrence. paid é o valor
+        efetivamente pago das quitações ativas; open soma pendentes e previsões.
+      properties:
+        count: { type: integer, format: int64 }
+        plannedTotal: { type: string, example: "6900.00" }
+        confirmedTotal: { type: string }
+        estimatedTotal: { type: string }
+        materializedCount: { type: integer, format: int64 }
+        materializedTotal: { type: string }
+        forecastCount: { type: integer, format: int64 }
+        forecastTotal: { type: string }
+        paidCount: { type: integer, format: int64 }
+        paidTotal: { type: string }
+        openCount: { type: integer, format: int64 }
+        openTotal: { type: string }
+        oneOffTotal: { type: string }
+        installmentTotal: { type: string }
+        recurrenceTotal: { type: string }
+    PlanningItem:
+      type: object
+      properties:
+        kind: { type: string, enum: [EXPENSE, FORECAST] }
+        expenseId: { type: [string, "null"], format: uuid }
+        recurrenceId: { type: [string, "null"], format: uuid, description: Somente em previsões. }
+        origin: { type: string, enum: [ONE_OFF, RECURRENCE, INSTALLMENT] }
+        installment:
+          type: [object, "null"]
+          properties:
+            purchaseId: { type: string, format: uuid }
+            number: { type: integer }
+            count: { type: integer }
+        description: { type: string }
+        date: { type: string, format: date, description: Data de referência do lançamento ou vencimento previsto. }
+        dueDate: { type: [string, "null"], format: date }
+        amount: { type: string, description: Valor da cobrança (ou previsto). }
+        estimated: { type: boolean, description: Valor a confirmar. }
+        status: { type: string, enum: [PENDING, PAID, FORECAST] }
+        overdue: { type: boolean }
+        paidAmount: { type: [string, "null"] }
+        paymentDate: { type: [string, "null"], format: date }
+        categoryName: { type: [string, "null"] }
+        responsibleDisplayName: { type: [string, "null"] }
     PaymentReport:
       type: object
       required: [month, periodStart, periodEnd, dateBasis, timeZone, indicators, content, page, size, totalElements, totalPages, sort, direction]

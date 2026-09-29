@@ -69,6 +69,18 @@ class ExpensesConfiguration {
     }
 
     @Bean
+    com.malyah.accountmanager.expenses.application.ExpensePlanningQueries expensePlanningQueries(
+            JdbcTemplate jdbcTemplate) {
+        return new JdbcExpensePlanningQueries(jdbcTemplate);
+    }
+
+    @Bean
+    com.malyah.accountmanager.expenses.application.ExpenseExportQueries expenseExportQueries(
+            JdbcTemplate jdbcTemplate) {
+        return new JdbcExpenseExportQueries(jdbcTemplate);
+    }
+
+    @Bean
     ExpenseRepository expenseRepository(JdbcTemplate jdbcTemplate) {
         return new JdbcExpenseRepository(jdbcTemplate);
     }

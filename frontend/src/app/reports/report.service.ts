@@ -62,6 +62,33 @@ export interface PaymentReport {
   totalPages: number; sort: PaymentSort; direction: 'ASC' | 'DESC';
 }
 
+/** H06.3 indicators: every value is a sum of lines, never a difference between totals. */
+export interface PlanningTotals {
+  count: number; plannedTotal: string; confirmedTotal: string; estimatedTotal: string;
+  materializedCount: number; materializedTotal: string; forecastCount: number; forecastTotal: string;
+  paidCount: number; paidTotal: string; openCount: number; openTotal: string;
+  oneOffTotal: string; installmentTotal: string; recurrenceTotal: string;
+}
+
+export interface PlanningItem {
+  kind: 'EXPENSE' | 'FORECAST'; expenseId: string | null; recurrenceId: string | null;
+  origin: 'ONE_OFF' | 'RECURRENCE' | 'INSTALLMENT';
+  installment: { purchaseId: string; number: number; count: number } | null;
+  description: string; date: string; dueDate: string | null; amount: string; estimated: boolean;
+  status: 'PENDING' | 'PAID' | 'FORECAST'; overdue: boolean; paidAmount: string | null; paymentDate: string | null;
+  categoryName: string | null; responsibleDisplayName: string | null;
+}
+
+export interface Planning {
+  horizonStart: string; horizonEnd: string; periodStart: string; periodEnd: string; dateBasis: 'DUE_DATE';
+  today: string; timeZone: string; totals: PlanningTotals; months: { month: string; totals: PlanningTotals }[];
+  month: string; monthTotals: PlanningTotals; content: PlanningItem[]; page: number; size: number;
+  totalElements: number; totalPages: number;
+}
+
+export type PlanningFilters = Pick<ReportFilters, 'search' | 'categoryId' | 'withoutCategory' | 'responsibleUserId'
+  | 'withoutResponsible'>;
+
 @Injectable({ providedIn: 'root' })
 export class ReportService {
   private readonly http = inject(HttpClient);
@@ -76,6 +103,13 @@ export class ReportService {
     direction: 'ASC' | 'DESC') {
     const query = params(month, { ...filters, page, size, sort, direction });
     return this.http.get<PaymentReport>(`${this.endpoint}/payments`, { params: query });
+  }
+
+  /** H06.3: current month plus 12; {@code month} picks which month of the horizon is listed. */
+  planning(month: string | null, filters: PlanningFilters, page: number, size: number) {
+    let query = params(month ?? '', { ...filters, page, size });
+    if (!month) query = query.delete('month');
+    return this.http.get<Planning>(`${this.endpoint}/planning`, { params: query });
   }
 }
 

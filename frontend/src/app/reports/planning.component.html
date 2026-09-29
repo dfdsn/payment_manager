@@ -1,0 +1,132 @@
+<section class="report-container" aria-labelledby="planning-title">
+  <header class="page-header">
+    <div>
+      <h1 id="planning-title">Planejamento dos próximos meses</h1>
+      <p>Quanto está comprometido no mês atual e nos 12 seguintes, sem contar duas vezes.</p>
+    </div>
+    <nav aria-label="Outras telas"><a routerLink="/painel">Painel por vencimento</a> · <a routerLink="/pagamentos">Pagamentos do mês</a> · <a routerLink="/despesas">Despesas</a> · <a routerLink="/recorrencias">Recorrências</a></nav>
+  </header>
+
+  <mat-card appearance="outlined">
+    <mat-card-content>
+      <form class="filters" [formGroup]="filterForm" (ngSubmit)="applyFilters()" novalidate aria-label="Filtros do planejamento">
+        <mat-form-field appearance="outline"><mat-label>Buscar na descrição</mat-label>
+          <input matInput formControlName="search" maxlength="200" autocomplete="off" />
+        </mat-form-field>
+        <label class="select-field">Categoria
+          <select formControlName="category"><option value="">Todas</option><option [value]="none">Sem categoria</option>
+            @for (category of categories(); track category.id) { <option [value]="category.id">{{ category.name }}@if (category.archived) { (arquivada)}</option> }
+          </select>
+        </label>
+        <label class="select-field">Responsável
+          <select formControlName="responsible"><option value="">Todos</option><option [value]="none">Sem responsável</option>
+            @for (person of responsiblePeople(); track person.userId) { <option [value]="person.userId">{{ person.displayName }}@if (!person.activeMember) { (ex-membro)}</option> }
+          </select>
+        </label>
+        <div class="form-actions">
+          <button matButton="filled" type="submit">Aplicar filtros</button>
+          <button matButton="outlined" type="button" (click)="clearFilters()" [disabled]="!filtersActive()">Limpar filtros</button>
+        </div>
+      </form>
+    </mat-card-content>
+  </mat-card>
+
+  @if (error()) {
+    <div class="error-summary" role="alert">{{ error() }} <button matButton type="button" (click)="reload()">Tentar novamente</button></div>
+  }
+
+  @if (planning(); as p) {
+    <p class="basis" id="planning-basis">
+      <strong>Base temporal: vencimento</strong>, de {{ monthLabel(p.horizonStart) }} a {{ monthLabel(p.horizonEnd) }}
+      (mês atual e os próximos 12, no fuso do espaço). Soma as despesas já lançadas (avulsas, parcelas e recorrências
+      geradas, pendentes ou pagas) e as <strong>previsões</strong> das recorrências que ainda não viraram lançamento.
+      Quando a ocorrência é gerada ou antecipada, a previsão sai e os dados do lançamento prevalecem. Canceladas não
+      entram. Valores <span class="estimate">a confirmar</span> são estimativas. Não mostra receitas, saldo nem orçamento.
+      @if (filtersActive()) { <strong>Filtros aplicados a todos os valores.</strong> }
+    </p>
+    <div class="indicators" [attr.aria-busy]="loading()" aria-describedby="planning-basis" aria-live="polite">
+      <article class="indicator" aria-labelledby="planned-horizon-title">
+        <h3 id="planned-horizon-title">Total no horizonte</h3>
+        <p class="value" data-testid="planning-total">{{ formatCurrency(p.totals.plannedTotal) }}</p>
+        <p>{{ p.totals.count }} valor(es) em 13 meses.</p>
+      </article>
+      <article class="indicator" aria-labelledby="composition-title">
+        <h3 id="composition-title">Lançamentos e previsões</h3>
+        <p data-testid="planning-materialized">Lançamentos: {{ formatCurrency(p.totals.materializedTotal) }} ({{ p.totals.materializedCount }})</p>
+        <p data-testid="planning-forecast">Previsões: {{ formatCurrency(p.totals.forecastTotal) }} ({{ p.totals.forecastCount }})</p>
+      </article>
+      <article class="indicator" aria-labelledby="estimated-title">
+        <h3 id="estimated-title">Confirmado e estimado</h3>
+        <p>Confirmado: {{ formatCurrency(p.totals.confirmedTotal) }}</p>
+        <p class="estimate" data-testid="planning-estimated">A confirmar: {{ formatCurrency(p.totals.estimatedTotal) }}</p>
+      </article>
+      <article class="indicator" aria-labelledby="open-title">
+        <h3 id="open-title">Pago e em aberto</h3>
+        <p data-testid="planning-open">Em aberto: {{ formatCurrency(p.totals.openTotal) }} ({{ p.totals.openCount }})</p>
+        <p>Já pago: {{ formatCurrency(p.totals.paidTotal) }} ({{ p.totals.paidCount }}), pelo valor efetivamente pago.</p>
+      </article>
+    </div>
+
+    <div class="csv-export-row">
+      <app-csv-export-button label="Exportar previsões (CSV)" [request]="exportForecasts" fallbackName="previsoes.csv"
+        statusId="forecast-export-status"
+        emptyMessage="Nenhuma previsão com os filtros atuais; nenhum arquivo foi baixado." />
+      <p class="subtle">Arquivo separado só com as previsões de recorrência ainda não lançadas no horizonte, com os filtros aplicados. Os lançamentos são exportados em Despesas.</p>
+    </div>
+
+    <mat-card appearance="outlined">
+      <mat-card-header><mat-card-title>Mês a mês</mat-card-title>
+        <mat-card-subtitle>Escolha um mês para ver os valores que o compõem.</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        <div class="table-wrap"><table>
+          <thead><tr><th scope="col">Mês</th><th scope="col" class="amount">Total</th><th scope="col" class="amount">Lançamentos</th><th scope="col" class="amount">Previsões</th><th scope="col" class="amount">A confirmar</th><th scope="col" class="amount">Em aberto</th><th scope="col"><span class="visually-hidden">Ação</span></th></tr></thead>
+          <tbody>
+            @for (row of p.months; track row.month) {
+              <tr [attr.aria-current]="row.month === p.month ? 'true' : null" [attr.data-testid]="'planning-month-' + row.month">
+                <th scope="row">{{ monthLabel(row.month) }}</th>
+                <td class="amount">{{ formatCurrency(row.totals.plannedTotal) }}</td>
+                <td class="amount">{{ formatCurrency(row.totals.materializedTotal) }}</td>
+                <td class="amount">{{ formatCurrency(row.totals.forecastTotal) }}</td>
+                <td class="amount estimate">{{ formatCurrency(row.totals.estimatedTotal) }}</td>
+                <td class="amount">{{ formatCurrency(row.totals.openTotal) }}</td>
+                <td>@if (row.month === p.month) {<strong>Em exibição</strong>} @else {<button matButton type="button" (click)="selectMonth(row.month)" [disabled]="loading()" [attr.aria-label]="'Ver ' + monthLabel(row.month)">Ver</button>}</td>
+              </tr>
+            }
+          </tbody>
+        </table></div>
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card appearance="outlined">
+      <mat-card-header><mat-card-title data-testid="planning-month-title">{{ monthLabel(p.month) }}: {{ formatCurrency(p.monthTotals.plannedTotal) }}</mat-card-title>
+        <mat-card-subtitle>Avulsas {{ formatCurrency(p.monthTotals.oneOffTotal) }} · parcelas {{ formatCurrency(p.monthTotals.installmentTotal) }} · recorrências {{ formatCurrency(p.monthTotals.recurrenceTotal) }}. {{ p.totalElements }} valor(es); os totais somam todos, não só esta página.</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        @if (p.content.length === 0) {
+          <div class="empty-state" role="status">Nenhuma despesa nem previsão neste mês com os filtros escolhidos.</div>
+        } @else {
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">Vencimento</th><th scope="col">Descrição</th><th scope="col">Tipo</th><th scope="col" class="amount">Valor</th><th scope="col">Situação</th></tr></thead>
+            <tbody>
+              @for (item of p.content; track (item.expenseId ?? item.recurrenceId + item.date)) {
+                <tr [class.overdue]="item.overdue" data-testid="planning-item">
+                  <td>{{ formatDate(item.date) }}</td>
+                  <td>{{ item.description }}<span class="subtle"> · {{ origin(item) }}</span>@if (item.categoryName) {<span class="subtle"> · {{ item.categoryName }}</span>}@if (item.responsibleDisplayName) {<span class="subtle"> · {{ item.responsibleDisplayName }}</span>}</td>
+                  <td>@if (item.kind === 'FORECAST') {<strong>Previsão</strong>} @else {Lançamento}</td>
+                  <td class="amount">{{ formatCurrency(item.amount) }}@if (item.estimated) {<br /><span class="estimate">a confirmar</span>}</td>
+                  <td>{{ situation(item) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table></div>
+          @if (p.totalPages > 1) {
+            <div class="pagination"><button matButton type="button" (click)="previousPage()" [disabled]="page() === 0 || loading()">Anterior</button>
+              <span>Página {{ page() + 1 }} de {{ p.totalPages }}</span>
+              <button matButton type="button" (click)="nextPage()" [disabled]="page() + 1 >= p.totalPages || loading()">Próxima</button></div>
+          }
+        }
+      </mat-card-content>
+    </mat-card>
+  } @else if (loading()) {
+    <p class="loading" role="status">Carregando o planejamento…</p>
+  }
+</section>

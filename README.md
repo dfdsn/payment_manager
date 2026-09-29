@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) e H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -802,4 +802,83 @@ Teste manual (continua o do painel):
 5. Escolha um mês sem pagamentos: “Nenhum pagamento neste mês com os filtros escolhidos.” e todos os valores em R$ 0,00.
 
 Testes: os mesmos de H06.1 (`ReportingPostgresIT` cobre as duas visões).
+
+## Planejamento dos próximos meses (H06.3)
+
+Em `/planejamento` (link **Planejamento** em Despesas, no painel e em Pagamentos) fica **quanto está comprometido no mês atual e nos 12 seguintes**, pelo vencimento e no fuso do espaço.
+
+- **O que entra:** despesas já lançadas (avulsas, parcelas e ocorrências de recorrência, pendentes ou pagas) e **previsões** das recorrências ativas cujo período ainda não virou lançamento. Canceladas e o cabeçalho da compra parcelada não entram. Não há receitas, saldo nem orçamento.
+- **Sem dupla contagem:** a previsão e o lançamento da mesma ocorrência (recorrência + período) nunca aparecem juntos. Quando a ocorrência é gerada, antecipada, remarcada, paga ou cancelada, o lançamento prevalece com seus dados reais; o período cancelado não volta como previsão.
+- **Alteração e encerramento:** as previsões usam o valor, a descrição, a categoria e o responsável vigentes em cada período; depois do encerramento não há previsões. Previsão de categoria arquivada ou de responsável que saiu do espaço aparece sem eles, como a geração gravaria.
+- **Indicadores** (horizonte e cada mês, sobre toda a seleção): total planejado; lançamentos × previsões; confirmado × **a confirmar** (estimativas); **já pago** (pelo valor efetivamente pago) e **em aberto** (pendentes + previsões); composição avulsas/parcelas/recorrências.
+- **Filtros:** descrição, categoria/sem categoria e responsável/sem responsável, aplicados a lançamentos, previsões e totais. A lista mostra um mês por vez (botão **Ver** na tabela mês a mês), por data, 20 por página.
+- **Somente leitura:** abrir o planejamento não gera lançamentos nem grava nada.
+
+```text
+GET /api/v1/reports/planning?month=2026-12&categoryId=<uuid>&page=0&size=20
+→ 200 {"horizonStart": "2026-10", "horizonEnd": "2027-10", "dateBasis": "DUE_DATE", "today": "2026-10-15",
+       "totals": {"count": 39, "plannedTotal": "6900.00", "confirmedTotal": "5220.00", "estimatedTotal": "1680.00",
+                  "materializedCount": 11, "materializedTotal": "3770.00", "forecastCount": 28, "forecastTotal": "3130.00",
+                  "paidCount": 2, "paidTotal": "980.00", "openCount": 37, "openTotal": "5900.00", ...},
+       "months": [{"month": "2026-10", "totals": {...}}, ...13 meses],
+       "month": "2026-12", "monthTotals": {...},
+       "content": [{"kind": "EXPENSE", "description": "Luz", "date": "2026-12-02", "amount": "210.00", "estimated": true,
+                    "status": "PENDING", ...},
+                   {"kind": "FORECAST", "recurrenceId": "...", "description": "Internet", "date": "2026-12-05",
+                    "amount": "100.00", "estimated": false, "status": "FORECAST", ...}],
+       "page": 0, "size": 20, "totalElements": 4, "totalPages": 1}
+```
+
+Erros: `400 REPORT_QUERY_INVALID` (mês fora do horizonte, página negativa, tamanho fora de 1–100, filtros incompatíveis), `401` sem sessão e `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`.
+
+Teste manual:
+
+1. Cadastre uma recorrência fixa de R$ 100,00 vencendo no dia 5 a partir do mês que vem. Em **Planejamento**, cada mês do horizonte a partir do próximo mostra R$ 100,00 em **Previsões**.
+2. Em **Recorrências**, antecipe o lançamento do próximo mês. No planejamento, esse mês passa a mostrar o valor em **Lançamentos** e não mais em Previsões; o total não muda.
+3. Remarque esse lançamento para o mês seguinte em Despesas: ele aparece no mês novo como lançamento, junto com a previsão daquele mês, e o mês antigo fica sem o valor.
+4. Cancele o lançamento: o valor some e o período não volta como previsão.
+5. Cadastre uma recorrência variável de R$ 180,00: seus valores aparecem **a confirmar** e somam no indicador “A confirmar”.
+6. Encerre a recorrência: as previsões depois do último vencimento somem.
+7. Filtre por uma categoria: totais, meses e lista mudam juntos.
+
+Testes: `PlanningPostgresIT` (matriz M1–M14 em PostgreSQL real), `PlanningDomainTest`, `PlanningServiceTest`, `planning.component.spec.ts`, smoke E2E e E2E full-stack. Evidência: `docs/evidencias/H06.3.md`.
+
+## Exportar CSV (H06.4)
+
+Em **Despesas**, o botão **Exportar CSV** baixa **todos** os lançamentos da seleção exibida (filtros aplicados, base do período e ordem), não só a página. Em **Planejamento**, **Exportar previsões (CSV)** baixa, em arquivo separado, as previsões de recorrência ainda não lançadas no horizonte, com os filtros do planejamento. Esta exportação não substitui a exportação administrativa completa de dados e anexos (procedimento 10).
+
+- **O que entra:** a mesma população da lista. Canceladas só com a situação “Canceladas” ou “Todas”, identificadas na coluna Situação. Previsões nunca entram no arquivo de despesas. Anexos, observações e dados internos não entram.
+- **Colunas (despesas):** Descrição; Categoria; Vencimento; Valor da cobrança; Estimativa (Sim/Não); Situação (Pendente, Atrasada, Paga, Cancelada); Valor pago; Data do pagamento; Responsável; Pagador; Origem (Avulsa, Recorrência, Parcela); Parcela (“2 de 3”); ID do lançamento.
+- **Colunas (previsões):** Descrição; Categoria; Vencimento previsto; Valor previsto; Estimativa; Responsável; Tipo (“Previsão de recorrência”); ID da recorrência.
+- **Formato para Excel em português:** UTF-8 com BOM (acentos corretos), separador `;`, datas `dd/mm/aaaa`, valores com vírgula decimal e sem separador de milhar (o Excel lê como número), textos entre aspas. Texto que começa com `=`, `+`, `-` ou `@` ganha um apóstrofo (`'=...`) para o Excel não executá-lo como fórmula; valores e datas não são alterados.
+- **Limite:** até **10.000 linhas** por arquivo. Acima disso a exportação é recusada com a quantidade encontrada (“A seleção tem 12.345 registros e a exportação aceita até 10.000…”); reduza o período ou aplique filtros e exporte em partes. Nunca sai um arquivo cortado.
+- **Seleção vazia:** a tela avisa “Nenhum lançamento com os filtros atuais; nenhum arquivo foi baixado.”
+- **Momento do arquivo:** cada arquivo é o retrato do instante do pedido (uma única leitura consistente); “Atrasada” usa o dia atual no fuso do espaço.
+
+```text
+GET /api/v1/reports/expenses/export?dateFrom=2026-10-01&dateTo=2026-10-31&dateBasis=DUE_DATE&status=ALL&sort=REFERENCE_DATE&direction=ASC
+→ 200 text/csv;charset=UTF-8
+  Content-Disposition: attachment; filename="despesas_vencimento_2026-10-01_a_2026-10-31.csv"
+  X-Export-Rows: 10
+  Cache-Control: no-store
+  "Descrição";"Categoria";"Vencimento";"Valor da cobrança";"Estimativa";"Situação";"Valor pago";...
+  "Aluguel; sala ""B""";"Casa";05/10/2026;1500,00;Não;Atrasada;;;"Bia";;Avulsa;;<id>
+  "Sofá";;25/10/2026;33,33;Não;Pendente;;;;;Parcela;1 de 3;<id>
+
+GET /api/v1/reports/planning/export?categoryId=<uuid>
+→ 200 text/csv, filename="previsoes_2026-10_a_2027-10.csv"
+```
+
+Parâmetros: os mesmos de `GET /api/v1/expenses` sem `page`/`size` (padrão: mês atual por vencimento, ativas, data crescente) e, para previsões, os do planejamento. Erros: `422 EXPORT_LIMIT_EXCEEDED`, `400 REPORT_QUERY_INVALID`, `401` sem sessão e `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`.
+
+Teste manual (inclui a conferência no Excel, não executada no container de desenvolvimento):
+
+1. Em Despesas, cadastre no mês atual “Luz; água "casa"” 150,00, “=1+1” 0,01, “Café” 12,50 e “Revisão” 30,00; quite o Café e cancele a Revisão. Clique **Exportar CSV**: baixa `despesas_vencimento_<início>_a_<fim>.csv` com 3 linhas (a cancelada não entra) e a tela diz quantos registros foram baixados.
+2. Abra o arquivo no Excel em português com duplo clique: acentos corretos, uma coluna por campo, “Luz; água "casa"” inteira numa célula, `=1+1` como texto `'=1+1` (sem calcular 2), datas como datas e valores como números (some a coluna Valor da cobrança e confira com a lista).
+3. Mude a Situação para **Todas**, aplique e exporte de novo: a cancelada aparece como “Cancelada”.
+4. Troque a base para **Data de pagamento**: o arquivo passa a se chamar `despesas_pagamento_…` e traz só as pagas no período.
+5. Digite outra busca sem aplicar e exporte: o arquivo segue a seleção que está na tela.
+6. Em Planejamento, com uma recorrência cadastrada, clique **Exportar previsões (CSV)**: cada linha é “Previsão de recorrência”; o mês já lançado não aparece.
+
+Testes: `ExportPostgresIT` (matriz C1–C13 em PostgreSQL real, 10.000 linhas e concorrência), `CsvDocumentTest`, `ExportServiceTest`, `ReportExportHttpTest`, `csv-export-button.component.spec.ts`, smoke E2E com download e E2E full-stack com download real. Evidência: `docs/evidencias/H06.4.md`.
 

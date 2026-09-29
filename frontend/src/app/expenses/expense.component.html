@@ -4,7 +4,7 @@
       <h1 id="expenses-title">Despesas</h1>
       <p>Cadastre contas pendentes ou despesas que já foram pagas.</p>
     </div>
-    <div><a routerLink="/painel">Painel por vencimento</a> · <a routerLink="/pagamentos">Pagamentos do mês</a> · <a routerLink="/categorias">Gerenciar categorias</a> · <a routerLink="/recorrencias">Gerenciar recorrências</a> · <a routerLink="/compras-parceladas">Compras parceladas</a> · <a routerLink="/entrar">Voltar ao início</a></div>
+    <div><a routerLink="/painel">Painel por vencimento</a> · <a routerLink="/pagamentos">Pagamentos do mês</a> · <a routerLink="/planejamento">Planejamento</a> · <a routerLink="/categorias">Gerenciar categorias</a> · <a routerLink="/recorrencias">Gerenciar recorrências</a> · <a routerLink="/compras-parceladas">Compras parceladas</a> · <a routerLink="/entrar">Voltar ao início</a></div>
   </header>
 
   <mat-card appearance="outlined" class="expense-form-card">
@@ -429,6 +429,12 @@
           {{ direction() === 'ASC' ? 'Crescente' : 'Decrescente' }}
         </button>
       </div>
+    </div>
+    <div class="csv-export-row">
+      <app-csv-export-button label="Exportar CSV" [request]="exportRequest" fallbackName="despesas.csv"
+        statusId="expense-export-status"
+        emptyMessage="Nenhum lançamento com os filtros atuais; nenhum arquivo foi baixado." />
+      <p class="csv-hint">Exporta todos os lançamentos da seleção exibida (filtros, base do período e ordem), não só esta página. Previsões de recorrência saem em Planejamento; anexos não são exportados.</p>
     </div>
 
     @if (loading()) {

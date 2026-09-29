@@ -73,4 +73,16 @@ final class ExpenseSelectionPredicate {
     List<Object> parameters() {
         return parameters;
     }
+
+    /** The list order (H03.4), total and stable: the chosen key, then creation instant and id. */
+    static String orderBy(com.malyah.accountmanager.expenses.application.ExpenseSort sort,
+            com.malyah.accountmanager.expenses.application.SortDirection direction) {
+        var key = switch (sort) {
+            case REFERENCE_DATE -> "e.reference_date";
+            case AMOUNT -> "e.charge_amount";
+            case DESCRIPTION -> "lower(e.description)";
+        };
+        var way = direction.name();
+        return " order by " + key + " " + way + ", e.created_at " + way + ", e.id " + way;
+    }
 }

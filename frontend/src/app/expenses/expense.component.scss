@@ -35,3 +35,6 @@ form button[type='submit'] { justify-self: start; }
 .batch-selector { margin-right: .5rem; }
 .field-error { color: #b3261e; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+.csv-export-row { display: grid; gap: .25rem; margin: 0 0 1rem; min-width: 0; }
+.csv-hint { margin: 0; color: #555; font-size: .9em; }

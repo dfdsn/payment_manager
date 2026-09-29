@@ -40,4 +40,13 @@ class RecurrencesConfiguration {
                 applicationClock,UUID::randomUUID,new RecurrenceCalendar(),materializer,chargeConfirmation,adjuster);
         return new TransactionalRecurrenceUseCase(service,new TransactionTemplate(manager));
     }
+    /** H06.3: read-only forecasts for the planning report; runs in the caller's transaction. */
+    @Bean com.malyah.accountmanager.recurrences.application.RecurrenceForecastQueries recurrenceForecastQueries(
+            JdbcTemplate jdbc, AuthenticatedUserContextQuery context, CategoryRepository categories,
+            FinancialMemberAccess members, Clock applicationClock,
+            com.malyah.accountmanager.expenses.application.RecurringExpenseMaterializer materializer) {
+        return new com.malyah.accountmanager.recurrences.application.RecurrenceForecastCatalog(new RecurrenceService(
+                new JdbcRecurrenceRepository(jdbc),context,categories,members,applicationClock,UUID::randomUUID,
+                new RecurrenceCalendar(),materializer));
+    }
 }

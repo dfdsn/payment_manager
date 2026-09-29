@@ -32,6 +32,12 @@ import com.malyah.accountmanager.reporting.application.PaymentIndicatorsView;
 import com.malyah.accountmanager.reporting.application.PaymentReportQuery;
 import com.malyah.accountmanager.reporting.application.PaymentReportView;
 import com.malyah.accountmanager.reporting.application.PaymentRowView;
+import com.malyah.accountmanager.reporting.application.PlanningItemView;
+import com.malyah.accountmanager.reporting.application.PlanningMonthView;
+import com.malyah.accountmanager.reporting.application.PlanningQuery;
+import com.malyah.accountmanager.reporting.application.PlanningTotalsView;
+import com.malyah.accountmanager.reporting.application.PlanningUseCase;
+import com.malyah.accountmanager.reporting.application.PlanningView;
 import com.malyah.accountmanager.reporting.application.PreviousPendingView;
 import com.malyah.accountmanager.reporting.application.ReportFilters;
 import com.malyah.accountmanager.reporting.application.ReportQueryValidationException;
@@ -41,12 +47,14 @@ import com.malyah.accountmanager.reporting.application.ReportingUseCase;
 class ReportingHttpTest {
     private static final UUID CATEGORY = UUID.fromString("00000000-0000-0000-0000-00000000000c");
     private ReportingUseCase useCase;
+    private PlanningUseCase planning;
     private MockMvc mvc;
 
     @BeforeEach
     void setup() {
         useCase = mock(ReportingUseCase.class);
-        mvc = MockMvcBuilders.standaloneSetup(new ReportingController(useCase))
+        planning = mock(PlanningUseCase.class);
+        mvc = MockMvcBuilders.standaloneSetup(new ReportingController(useCase, planning))
                 .setControllerAdvice(new ReportingApiExceptionHandler()).build();
     }
 
@@ -148,6 +156,51 @@ class ReportingHttpTest {
         mvc.perform(get("/reports/payments").principal(() -> "ana@example.com").param("size", "101"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors[0].field").value("size"));
         mvc.perform(get("/reports/payments").principal(() -> "ana@example.com"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACTIVE_SPACE_ACCESS_NOT_FOUND"));
+    }
+
+    @Test
+    void planningMapsFiltersAndPageAndIdentifiesForecastsAndEstimates() throws Exception {
+        var totals = new PlanningTotalsView(5, "1583.33", "1373.33", "210.00", 2, "1233.33", 3, "350.00", 1,
+                "880.00", 4, "683.33", "900.00", "333.33", "350.00");
+        var recurrence = UUID.fromString("00000000-0000-0000-0000-0000000000b1");
+        when(planning.planning(eq("ana@example.com"), any())).thenReturn(new PlanningView("2026-10", "2027-10",
+                LocalDate.of(2026, 10, 1), LocalDate.of(2027, 10, 31), "DUE_DATE", LocalDate.of(2026, 10, 15),
+                "America/Sao_Paulo", totals, List.of(new PlanningMonthView("2027-01", totals)), "2027-01", totals,
+                List.of(new PlanningItemView("FORECAST", null, recurrence, "RECURRENCE", null, "Luz",
+                        LocalDate.of(2027, 1, 20), LocalDate.of(2027, 1, 20), "210.00", true, "FORECAST", false,
+                        null, null, null, null)), 1, 2, 5, 3));
+
+        mvc.perform(get("/reports/planning").principal(() -> "ana@example.com").param("month", "2027-01")
+                        .param("search", "luz").param("withoutCategory", "true").param("responsibleUserId",
+                                CATEGORY.toString()).param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.horizonStart").value("2026-10"))
+                .andExpect(jsonPath("$.horizonEnd").value("2027-10"))
+                .andExpect(jsonPath("$.dateBasis").value("DUE_DATE"))
+                .andExpect(jsonPath("$.totals.plannedTotal").value("1583.33"))
+                .andExpect(jsonPath("$.totals.estimatedTotal").value("210.00"))
+                .andExpect(jsonPath("$.months[0].totals.forecastTotal").value("350.00"))
+                .andExpect(jsonPath("$.content[0].kind").value("FORECAST"))
+                .andExpect(jsonPath("$.content[0].estimated").value(true))
+                .andExpect(jsonPath("$.content[0].amount").value("210.00"))
+                .andExpect(jsonPath("$.totalPages").value(3));
+        verify(planning).planning("ana@example.com", new PlanningQuery("2027-01", "luz", null, true, CATEGORY,
+                false, 1, 2));
+    }
+
+    @Test
+    void planningDefaultsToTheCurrentMonthAndMapsErrors() throws Exception {
+        mvc.perform(get("/reports/planning").principal(() -> "ana@example.com")).andExpect(status().isOk());
+        verify(planning).planning("ana@example.com", PlanningQuery.currentMonth());
+        mvc.perform(get("/reports/planning").principal(() -> "ana@example.com").param("size", "x"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors[0].field").value("size"));
+        when(planning.planning(eq("ana@example.com"), any()))
+                .thenThrow(new ReportQueryValidationException("month", "Escolha um mês do horizonte."))
+                .thenThrow(new AuthenticatedUserContextNotFoundException());
+        mvc.perform(get("/reports/planning").principal(() -> "ana@example.com").param("month", "2030-01"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors[0].field").value("month"));
+        mvc.perform(get("/reports/planning").principal(() -> "ana@example.com"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACTIVE_SPACE_ACCESS_NOT_FOUND"));
     }
 }

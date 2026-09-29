@@ -68,15 +68,9 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
         var where = predicate.where();
         var parameters = predicate.parameters();
         var total = jdbc.queryForObject("select count(*) from expense_entries e"+where, Long.class, parameters.toArray());
-        var order = switch (query.sort()) {
-            case REFERENCE_DATE -> "e.reference_date";
-            case AMOUNT -> "e.charge_amount";
-            case DESCRIPTION -> "lower(e.description)";
-        };
-        var direction = query.direction().name();
         var itemParameters=new java.util.ArrayList<>(parameters);itemParameters.add(query.size());itemParameters.add((long)query.page()*query.size());
-        var items = jdbc.query(selectBase() + where + " order by " + order + " " + direction
-                        + ", e.created_at " + direction + ", e.id " + direction + " limit ? offset ?",
+        var items = jdbc.query(selectBase() + where + ExpenseSelectionPredicate.orderBy(query.sort(), query.direction())
+                        + " limit ? offset ?",
                 this::map, itemParameters.toArray());
         return new StoredExpensePage(items, total == null ? 0 : total);
     }

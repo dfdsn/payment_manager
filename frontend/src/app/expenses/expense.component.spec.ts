@@ -6,6 +6,7 @@ import { ExpenseService } from './expense.service';
 import { provideRouter } from '@angular/router';
 import { AccountAccessService } from '../identity/account-access.service';
 import { CategoryService } from './category.service';
+import { CsvExportService } from '../reports/csv-export.service';
 
 describe('ExpenseComponent', () => {
   let fixture: ComponentFixture<ExpenseComponent>;
@@ -14,6 +15,7 @@ describe('ExpenseComponent', () => {
     reversePayment: vi.fn(), cancel: vi.fn(), settleBatch: vi.fn(), history: vi.fn(), filterOptions: vi.fn(),
     confirmCharge: vi.fn(),
   };
+  const csv = { expenses: vi.fn(() => new Subject<any>()), forecasts: vi.fn() };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -26,7 +28,7 @@ describe('ExpenseComponent', () => {
     api.filterOptions.mockReturnValue(of({ responsiblePeople: [], payerPeople: [] }));
     await TestBed.configureTestingModule({
       imports: [ExpenseComponent],
-      providers: [{ provide: ExpenseService, useValue: api }, provideRouter([]),
+      providers: [{ provide: ExpenseService, useValue: api }, provideRouter([]), { provide: CsvExportService, useValue: csv },
         { provide: CategoryService, useValue: { list: () => of([]) } },
         { provide: AccountAccessService, useValue: {
           context: () => of({ userId: 'actor', timeZone: 'America/Sao_Paulo' }),
@@ -53,6 +55,21 @@ describe('ExpenseComponent', () => {
     expect(api.list).toHaveBeenLastCalledWith(0,20,'REFERENCE_DATE','ASC',expect.objectContaining({
       search:'energia',dateFrom:'2026-09-01',dateTo:'2026-09-30',status:'OVERDUE',withoutCategory:true,
     }));
+  });
+
+  it('exports the selection on screen, not filters typed but not applied yet', () => {
+    const component=fixture.componentInstance;
+    component.filterForm.patchValue({search:' luz ',dateBasis:'PAYMENT_DATE',status:'ALL'});
+    component.applyFilters();
+    component.changeSort('AMOUNT');
+    component.filterForm.patchValue({search:'digitado depois'});
+    fixture.detectChanges();
+    const button = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
+      .find(b => b.textContent!.trim() === 'Exportar CSV')!;
+    button.click();
+    expect(csv.expenses).toHaveBeenCalledWith(expect.objectContaining({search:'luz',dateBasis:'PAYMENT_DATE',status:'ALL'}),
+      'AMOUNT','ASC');
+    expect(fixture.nativeElement.textContent).toContain('não só esta página');
   });
 
   it('does not allow an older search response to replace the latest result', () => {
