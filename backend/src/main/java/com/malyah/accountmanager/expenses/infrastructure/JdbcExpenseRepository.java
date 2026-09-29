@@ -64,23 +64,9 @@ public final class JdbcExpenseRepository implements ExpenseRepository {
 
     @Override
     public StoredExpensePage findBySpace(UUID spaceId, ExpenseListQuery query) {
-        var where = new StringBuilder(" where e.space_id = ?");
-        var parameters = new java.util.ArrayList<Object>(); parameters.add(spaceId);
-        if (query.search()!=null && !query.search().isBlank()) { where.append(" and lower(e.description) like lower(?) escape '!'"); parameters.add("%"+query.search().replace("!","!!").replace("%","!%").replace("_","!_")+"%"); }
-        var dateColumn = query.dateBasis()==com.malyah.accountmanager.expenses.application.ExpenseDateBasis.PAYMENT_DATE ? "e.payment_date" : "e.reference_date";
-        if(query.dateFrom()!=null){where.append(" and ").append(dateColumn).append(" >= ?");parameters.add(query.dateFrom());}
-        if(query.dateTo()!=null){where.append(" and ").append(dateColumn).append(" <= ?");parameters.add(query.dateTo());}
-        if(query.withoutCategory())where.append(" and e.category_id is null"); else if(query.categoryId()!=null){where.append(" and e.category_id=?");parameters.add(query.categoryId());}
-        if(query.withoutResponsible())where.append(" and e.responsible_user_id is null"); else if(query.responsibleUserId()!=null){where.append(" and e.responsible_user_id=?");parameters.add(query.responsibleUserId());}
-        if(query.payerUserId()!=null){where.append(" and e.paid_by_user_id=?");parameters.add(query.payerUserId());}
-        switch(query.status()) {
-            case ACTIVE -> where.append(" and e.status <> 'CANCELLED'");
-            case PENDING -> where.append(" and e.status='PENDING'");
-            case OVERDUE -> {where.append(" and e.status='PENDING' and e.due_date < ?");parameters.add(query.today());}
-            case PAID -> where.append(" and e.status='PAID'");
-            case CANCELLED -> where.append(" and e.status='CANCELLED'");
-            case ALL -> { }
-        }
+        var predicate = ExpenseSelectionPredicate.of(spaceId, query.selection());
+        var where = predicate.where();
+        var parameters = predicate.parameters();
         var total = jdbc.queryForObject("select count(*) from expense_entries e"+where, Long.class, parameters.toArray());
         var order = switch (query.sort()) {
             case REFERENCE_DATE -> "e.reference_date";

@@ -1,0 +1,141 @@
+<section class="report-container" aria-labelledby="due-title">
+  <header class="page-header">
+    <div>
+      <h1 id="due-title">Painel por vencimento</h1>
+      <p>Quanto foi previsto, pago e ainda está pendente nas contas que vencem no mês.</p>
+    </div>
+    <nav aria-label="Outras telas"><a routerLink="/pagamentos">Pagamentos do mês</a> · <a routerLink="/despesas">Despesas</a> · <a routerLink="/recorrencias">Recorrências</a> · <a routerLink="/compras-parceladas">Compras parceladas</a></nav>
+  </header>
+
+  <mat-card appearance="outlined">
+    <mat-card-content>
+      <div class="month-bar">
+        <button matButton="outlined" type="button" (click)="previousMonth()" [disabled]="!month()" aria-label="Mês anterior">‹ Anterior</button>
+        <h2 class="month-title" aria-live="polite">{{ month() ? monthLabel(month()!) : 'Carregando mês…' }}</h2>
+        <button matButton="outlined" type="button" (click)="nextMonth()" [disabled]="!month()" aria-label="Próximo mês">Próximo ›</button>
+        <label class="inline-field">Ir para o mês
+          <input type="month" [formControl]="monthControl" (change)="chooseMonth()" />
+        </label>
+      </div>
+
+      <form class="filters" [formGroup]="filterForm" (ngSubmit)="applyFilters()" novalidate aria-label="Filtros do painel">
+        <mat-form-field appearance="outline"><mat-label>Buscar na descrição</mat-label>
+          <input matInput formControlName="search" maxlength="200" autocomplete="off" />
+        </mat-form-field>
+        <label class="select-field">Categoria
+          <select formControlName="category"><option value="">Todas</option><option [value]="none">Sem categoria</option>
+            @for (category of categories(); track category.id) { <option [value]="category.id">{{ category.name }}@if (category.archived) { (arquivada)}</option> }
+          </select>
+        </label>
+        <label class="select-field">Responsável
+          <select formControlName="responsible"><option value="">Todos</option><option [value]="none">Sem responsável</option>
+            @for (person of responsiblePeople(); track person.userId) { <option [value]="person.userId">{{ person.displayName }}@if (!person.activeMember) { (ex-membro)}</option> }
+          </select>
+        </label>
+        <label class="select-field">Pagador
+          <select formControlName="payerUserId"><option value="">Todos</option>
+            @for (person of payerPeople(); track person.userId) { <option [value]="person.userId">{{ person.displayName }}@if (!person.activeMember) { (ex-membro)}</option> }
+          </select>
+        </label>
+        <label class="select-field">Situação
+          <select formControlName="status">
+            <option value="ACTIVE">Pendentes e pagas</option><option value="PENDING">Pendentes</option>
+            <option value="OVERDUE">Atrasadas</option><option value="PAID">Pagas</option>
+            <option value="CANCELLED">Canceladas</option><option value="ALL">Todas, inclusive canceladas</option>
+          </select>
+        </label>
+        <div class="form-actions">
+          <button matButton="filled" type="submit">Aplicar filtros</button>
+          <button matButton="outlined" type="button" (click)="clearFilters()" [disabled]="!filtersActive()">Limpar filtros</button>
+        </div>
+      </form>
+    </mat-card-content>
+  </mat-card>
+
+  @if (error()) {
+    <div class="error-summary" role="alert">{{ error() }} <button matButton type="button" (click)="reload()">Tentar novamente</button></div>
+  }
+
+  @if (dashboard(); as d) {
+    <p class="basis" id="due-basis">
+      <strong>Base temporal: vencimento</strong> de {{ formatDate(d.periodStart) }} a {{ formatDate(d.periodEnd) }}.
+      Despesa paga sem vencimento entra pela data do pagamento. Atraso calculado em {{ formatDate(d.today) }} ({{ d.timeZone }}).
+      Canceladas não entram nos totais. Previsões de recorrências ainda não geradas não entram aqui; veja Recorrências.
+      @if (filtersActive()) { <strong>Filtros aplicados a todos os indicadores.</strong> }
+    </p>
+    <div class="indicators" [attr.aria-busy]="loading()" aria-describedby="due-basis" aria-live="polite">
+      <article class="indicator" aria-labelledby="planned-title">
+        <h3 id="planned-title">Previsto</h3>
+        <p class="value" data-testid="planned-total">{{ formatCurrency(d.indicators.plannedTotal) }}</p>
+        <p>{{ d.indicators.plannedCount }} conta(s) pendentes ou pagas, pelo valor da cobrança.</p>
+        @if (d.indicators.plannedEstimated !== '0.00') { <p class="estimate">Inclui {{ formatCurrency(d.indicators.plannedEstimated) }} a confirmar.</p> }
+      </article>
+      <article class="indicator" aria-labelledby="paid-title">
+        <h3 id="paid-title">Pago</h3>
+        <p class="value" data-testid="paid-total">{{ formatCurrency(d.indicators.paidTotal) }}</p>
+        <p>{{ d.indicators.paidCount }} conta(s) com quitação ativa, pelo valor efetivamente pago.</p>
+      </article>
+      <article class="indicator" aria-labelledby="pending-title">
+        <h3 id="pending-title">Pendente</h3>
+        <p class="value" data-testid="pending-total">{{ formatCurrency(d.indicators.pendingTotal) }}</p>
+        <p>{{ d.indicators.pendingCount }} conta(s) em aberto. Não é previsto menos pago.</p>
+        @if (d.indicators.pendingEstimated !== '0.00') { <p class="estimate">Inclui {{ formatCurrency(d.indicators.pendingEstimated) }} a confirmar.</p> }
+      </article>
+      <article class="indicator overdue" aria-labelledby="overdue-title">
+        <h3 id="overdue-title">Atrasado <span class="subtle">(parte do pendente)</span></h3>
+        <p class="value" data-testid="overdue-total">{{ formatCurrency(d.indicators.overdueTotal) }}</p>
+        <p>{{ d.indicators.overdueCount }} conta(s) vencida(s) antes de hoje e ainda pendente(s).</p>
+        @if (d.indicators.overdueEstimated !== '0.00') { <p class="estimate">Inclui {{ formatCurrency(d.indicators.overdueEstimated) }} a confirmar.</p> }
+      </article>
+      <article class="indicator" aria-labelledby="adjustment-title">
+        <h3 id="adjustment-title">Ajustes de quitação</h3>
+        <p class="value" data-testid="adjustment-net">{{ formatSigned(d.indicators.adjustmentNet) }}</p>
+        <p>Valor pago menos cobrança das pagas: acréscimos {{ formatSigned(d.indicators.adjustmentIncrease) }}, descontos {{ formatSigned('-' + d.indicators.adjustmentDiscount) }}.</p>
+      </article>
+    </div>
+
+    <mat-card appearance="outlined" class="previous">
+      <mat-card-header><mat-card-title>Pendências de meses anteriores</mat-card-title>
+        <mat-card-subtitle>Vencidas antes de {{ formatDate(d.previousPending.dueBefore) }} e ainda pendentes. Não somam nos totais deste mês.</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        @if (d.previousPending.count === 0) { <p data-testid="previous-empty">Nenhuma pendência anterior com estes filtros.</p> }
+        @else {
+          <p data-testid="previous-total">{{ d.previousPending.count }} conta(s) · {{ formatCurrency(d.previousPending.total) }}@if (d.previousPending.overdueCount) { · {{ formatCurrency(d.previousPending.overdueTotal) }} atrasado(s)}@if (d.previousPending.estimated !== '0.00') { · inclui {{ formatCurrency(d.previousPending.estimated) }} a confirmar}.</p>
+        }
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card appearance="outlined">
+      <mat-card-header><mat-card-title>Contas que vencem no mês</mat-card-title>
+        <mat-card-subtitle>{{ totalElements() }} lançamento(s) com os mesmos filtros; os totais acima somam todos, não só esta página.</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        @if (expenses().length === 0 && !loading()) {
+          <div class="empty-state" role="status">Nenhuma conta vence neste mês com os filtros escolhidos.</div>
+        } @else {
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">Vencimento</th><th scope="col">Descrição</th><th scope="col">Origem</th><th scope="col" class="amount">Cobrança</th><th scope="col">Situação</th><th scope="col" class="amount">Pago</th></tr></thead>
+            <tbody>
+              @for (expense of expenses(); track expense.id) {
+                <tr [class.muted]="expense.status === 'CANCELLED'" [class.overdue]="expense.overdue">
+                  <td>{{ formatDate(expense.referenceDate) }}@if (!expense.dueDate) {<span class="subtle"> (pagamento)</span>}</td>
+                  <td>{{ expense.description }}@if (expense.categoryName) {<span class="subtle"> · {{ expense.categoryName }}</span>}</td>
+                  <td>{{ origin(expense) }}</td>
+                  <td class="amount">{{ formatCurrency(expense.amount) }}@if (!expense.chargeConfirmed) {<span class="estimate"> a confirmar</span>}</td>
+                  <td>{{ situation(expense) }}</td>
+                  <td class="amount">@if (expense.paidAmount) { {{ formatCurrency(expense.paidAmount) }} em {{ formatDate(expense.paymentDate) }} } @else { — }</td>
+                </tr>
+              }
+            </tbody>
+          </table></div>
+          @if (totalPages() > 1) {
+            <div class="pagination"><button matButton type="button" (click)="previousPage()" [disabled]="page() === 0 || loading()">Anterior</button>
+              <span>Página {{ page() + 1 }} de {{ totalPages() }}</span>
+              <button matButton type="button" (click)="nextPage()" [disabled]="page() + 1 >= totalPages() || loading()">Próxima</button></div>
+          }
+        }
+      </mat-card-content>
+    </mat-card>
+  } @else if (loading()) {
+    <p class="loading" role="status">Carregando o painel…</p>
+  }
+</section>

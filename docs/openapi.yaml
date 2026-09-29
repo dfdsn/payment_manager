@@ -1340,6 +1340,81 @@ paths:
         '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
         '404': { description: '`INSTALLMENT_PURCHASE_NOT_FOUND`.' }
         '409': { description: '`INSTALLMENT_IMPACT_CHANGED`, `INSTALLMENT_NOT_PENDING` ou `IDEMPOTENCY_CONFLICT`. Nada é gravado.' }
+  /reports/due-dashboard:
+    get:
+      operationId: dueDashboard
+      summary: Indicadores do mês por vencimento, agregados no banco sobre todo o conjunto autorizado
+      description: >-
+        Base temporal DUE_DATE (data de referência: vencimento, ou data do pagamento quando a despesa paga não tem
+        vencimento). Os mesmos filtros de GET /expenses valem para todos os indicadores e para as pendências anteriores.
+        Canceladas nunca entram nos totais. Previsões de recorrência ainda não geradas e o cabeçalho de compras
+        parceladas não entram (as parcelas geradas entram uma vez cada). Leitura em transação somente leitura
+        REPEATABLE READ.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: month, in: query, description: Mês AAAA-MM; ausente usa o mês atual no fuso do espaço., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutCategory, in: query, schema: { type: boolean, default: false } }
+        - { name: responsibleUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutResponsible, in: query, schema: { type: boolean, default: false } }
+        - { name: payerUserId, in: query, schema: { type: string, format: uuid } }
+        - name: status
+          in: query
+          description: >-
+            Mesmos valores de GET /expenses. As pendências anteriores usam PENDING para ACTIVE/PENDING/ALL, OVERDUE para
+            OVERDUE e ficam vazias para PAID/CANCELLED.
+          schema: { type: string, enum: [ACTIVE, PENDING, OVERDUE, PAID, CANCELLED, ALL], default: ACTIVE }
+      responses:
+        "200":
+          description: Indicadores com dinheiro em strings decimais exatas de duas casas.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DueDashboard" }
+        "400":
+          description: Mês ou combinação de filtros inválida (REPORT_QUERY_INVALID).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /reports/payments:
+    get:
+      operationId: paymentsReport
+      summary: Quitações ativas do mês pela data efetiva do pagamento, com totais sobre toda a seleção e uma página
+      description: >-
+        Base temporal PAYMENT_DATE: somente despesas com quitação ativa cuja data de pagamento cai no mês. Quitações
+        desfeitas não aparecem; a nova quitação aparece uma vez. Correções de valor, data e pagador já estão refletidas
+        e a linha identifica a última (autor, instante, campos). Mesmos filtros de GET /expenses, sem filtro de
+        situação. Os indicadores somam toda a seleção, não a página. Não há pendente, saldo nem resultado financeiro.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: month, in: query, description: Mês AAAA-MM; ausente usa o mês atual no fuso do espaço., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutCategory, in: query, schema: { type: boolean, default: false } }
+        - { name: responsibleUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutResponsible, in: query, schema: { type: boolean, default: false } }
+        - { name: payerUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: sort, in: query, description: Desempate por descrição e id., schema: { type: string, enum: [PAYMENT_DATE, PAID_AMOUNT, DESCRIPTION], default: PAYMENT_DATE } }
+        - { name: direction, in: query, schema: { type: string, enum: [ASC, DESC], default: ASC } }
+      responses:
+        "200":
+          description: Indicadores e página com dinheiro em strings decimais exatas de duas casas.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentReport" }
+        "400":
+          description: Mês, página, ordenação ou combinação de filtros inválida (REPORT_QUERY_INVALID).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
 components:
   securitySchemes:
     sessionCookie:
@@ -2316,6 +2391,110 @@ components:
           const: pt-BR
         timeZone:
           const: America/Sao_Paulo
+    DueDashboard:
+      type: object
+      required: [month, periodStart, periodEnd, dateBasis, today, timeZone, indicators, previousPending]
+      properties:
+        month: { type: string, example: "2026-10" }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        dateBasis: { type: string, enum: [DUE_DATE] }
+        today: { type: string, format: date, description: Dia local usado para o atraso. }
+        timeZone: { type: string, example: America/Sao_Paulo }
+        indicators: { $ref: "#/components/schemas/DueIndicators" }
+        previousPending: { $ref: "#/components/schemas/PreviousPending" }
+    DueIndicators:
+      type: object
+      description: >-
+        Previsto = cobranças de pendentes e pagas (estimativas incluídas e destacadas); Pago = valores efetivamente
+        pagos das quitações ativas; Pendente = cobranças em aberto (nunca previsto − pago); Atrasado = subconjunto do
+        pendente com vencimento anterior a today; Ajustes = acréscimos e descontos (pago − cobrança) das pagas.
+      properties:
+        plannedCount: { type: integer, format: int64 }
+        plannedTotal: { type: string, example: "2792.33" }
+        plannedEstimated: { type: string, example: "180.00" }
+        paidCount: { type: integer, format: int64 }
+        paidTotal: { type: string }
+        pendingCount: { type: integer, format: int64 }
+        pendingTotal: { type: string }
+        pendingEstimated: { type: string }
+        overdueCount: { type: integer, format: int64 }
+        overdueTotal: { type: string }
+        overdueEstimated: { type: string }
+        adjustmentIncrease: { type: string }
+        adjustmentDiscount: { type: string }
+        adjustmentNet: { type: string, description: Acréscimos − descontos; pode ser negativo. }
+    PreviousPending:
+      type: object
+      description: Pendentes com vencimento anterior ao mês, com os mesmos filtros.
+      properties:
+        dueBefore: { type: string, format: date }
+        count: { type: integer, format: int64 }
+        total: { type: string }
+        estimated: { type: string }
+        overdueCount: { type: integer, format: int64 }
+        overdueTotal: { type: string }
+    PaymentReport:
+      type: object
+      required: [month, periodStart, periodEnd, dateBasis, timeZone, indicators, content, page, size, totalElements, totalPages, sort, direction]
+      properties:
+        month: { type: string, example: "2026-10" }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        dateBasis: { type: string, enum: [PAYMENT_DATE] }
+        timeZone: { type: string, example: America/Sao_Paulo }
+        indicators: { $ref: "#/components/schemas/PaymentIndicators" }
+        content: { type: array, items: { $ref: "#/components/schemas/PaymentRow" } }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        sort: { type: string, enum: [PAYMENT_DATE, PAID_AMOUNT, DESCRIPTION] }
+        direction: { type: string, enum: [ASC, DESC] }
+    PaymentIndicators:
+      type: object
+      description: Quitações ativas do mês pela data do pagamento; ajustes = pago − cobrança de cada quitação.
+      properties:
+        count: { type: integer, format: int64 }
+        paidTotal: { type: string, example: "1177.33" }
+        chargeTotal: { type: string, example: "1162.33" }
+        adjustmentIncrease: { type: string, example: "25.00" }
+        adjustmentDiscount: { type: string, example: "10.00" }
+        adjustmentNet: { type: string, example: "15.00" }
+    PaymentRow:
+      type: object
+      properties:
+        expenseId: { type: string, format: uuid }
+        description: { type: string }
+        origin: { type: string, enum: [ONE_OFF, RECURRENCE, INSTALLMENT] }
+        installment:
+          type: [object, "null"]
+          properties:
+            purchaseId: { type: string, format: uuid }
+            number: { type: integer }
+            count: { type: integer }
+        dueDate: { type: [string, "null"], format: date }
+        chargeAmount: { type: string }
+        chargeConfirmed: { type: boolean }
+        paidAmount: { type: string }
+        adjustment: { type: string, description: Pago − cobrança; negativo para desconto. }
+        paymentDate: { type: string, format: date }
+        payerUserId: { type: string, format: uuid }
+        payerDisplayName: { type: string, description: Quem pagou (pode ser corrigido). }
+        recordedByUserId: { type: string, format: uuid }
+        recordedByDisplayName: { type: string, description: Quem registrou a quitação ativa. }
+        recordedAt: { type: string, format: date-time }
+        batchPayment: { type: boolean, description: Quitação ativa registrada em lote. }
+        categoryName: { type: [string, "null"] }
+        responsibleDisplayName: { type: [string, "null"] }
+        correctionCount: { type: integer, description: Correções de cobrança, valor pago, data ou pagador desde a quitação ativa. }
+        lastCorrection:
+          type: [object, "null"]
+          properties:
+            actorUserId: { type: string, format: uuid }
+            actorDisplayName: { type: string }
+            correctedAt: { type: string, format: date-time }
+            changedFields: { type: array, items: { type: string, enum: [amount, paidAmount, paymentDate, paidByUserId] } }
     ApiError:
       type: object
       required: [code, message, fieldErrors, operationId]

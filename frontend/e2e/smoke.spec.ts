@@ -337,3 +337,106 @@ test('reviews the impact before changing following installments and cancels one 
   expect(cancel.body).toMatchObject({ installmentNumbers: [3], reason: 'Loja reduziu o saldo', impactToken: 'tok-cancel',
     replacement: { description: 'Sofá (restante)', totalAmount: '40.00', installmentCount: 2, firstDueDate: '2026-11-20' } });
 });
+
+test('H06.1 shows the due-date dashboard with filters applied to totals and list', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const indicators = (planned: string) => ({ plannedCount: 3, plannedTotal: planned, plannedEstimated: '180.00', paidCount: 1,
+    paidTotal: '155.00', pendingCount: 2, pendingTotal: '1680.00', pendingEstimated: '180.00', overdueCount: 1,
+    overdueTotal: '1500.00', overdueEstimated: '0.00', adjustmentIncrease: '5.00', adjustmentDiscount: '0.00', adjustmentNet: '5.00' });
+  const reportCalls: URL[] = [];
+  const listCalls: URL[] = [];
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([{ id: 'cat', name: 'Moradia', archived: false, version: 0, updatedAt: '' }])));
+  await page.route('**/api/v1/expenses/filter-options', route => route.fulfill(json({ responsiblePeople: [], payerPeople: [] })));
+  await page.route('**/api/v1/reports/due-dashboard?**', route => {
+    const url = new URL(route.request().url());
+    reportCalls.push(url);
+    const month = url.searchParams.get('month')!;
+    route.fulfill(json({ month, periodStart: `${month}-01`, periodEnd: `${month}-30`, dateBasis: 'DUE_DATE', today: '2026-09-29',
+      timeZone: 'America/Sao_Paulo', indicators: indicators(url.searchParams.get('categoryId') ? '1500.00' : '1835.00'),
+      previousPending: { dueBefore: `${month}-01`, count: 1, total: '800.00', estimated: '0.00', overdueCount: 1, overdueTotal: '800.00' } }));
+  });
+  await page.route('**/api/v1/expenses?**', route => {
+    listCalls.push(new URL(route.request().url()));
+    route.fulfill(json({ content: [{ id: 'rent', origin: 'ONE_OFF', installment: null, chargeConfirmed: true, description: 'Aluguel',
+      amount: '1500.00', currency: 'BRL', status: 'PENDING', dueDate: '2026-09-10', paymentDate: null, paidAmount: null,
+      paidByUserId: null, referenceDate: '2026-09-10', overdue: true, categoryName: 'Moradia', categoryId: 'cat',
+      responsibleUserId: null, responsibleDisplayName: null, notes: null, createdByDisplayName: 'Diego', paidByDisplayName: null,
+      createdAt: '2026-09-01T12:00:00Z', version: 0, history: [] }], page: 0, size: 20, totalElements: 1, totalPages: 1,
+      sort: 'REFERENCE_DATE', direction: 'ASC' }));
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/painel');
+  await expect(page.getByRole('heading', { name: 'Painel por vencimento' })).toBeVisible();
+  await expect(page.getByTestId('planned-total')).toHaveText(/R\$\s*1\.835,00/);
+  await expect(page.getByTestId('pending-total')).toHaveText(/R\$\s*1\.680,00/);
+  await expect(page.getByTestId('adjustment-net')).toHaveText(/\+R\$\s*5,00/);
+  await expect(page.getByText('Base temporal: vencimento')).toBeVisible();
+  await expect(page.getByTestId('previous-total')).toContainText('800,00');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  const firstMonth = reportCalls[0].searchParams.get('month')!;
+  expect(listCalls[0].searchParams.get('dateBasis')).toBe('DUE_DATE');
+  expect(listCalls[0].searchParams.get('dateFrom')).toBe(`${firstMonth}-01`);
+
+  await page.getByLabel('Categoria').selectOption('cat');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByTestId('planned-total')).toHaveText(/R\$\s*1\.500,00/);
+  expect(reportCalls.at(-1)!.searchParams.get('categoryId')).toBe('cat');
+  expect(listCalls.at(-1)!.searchParams.get('categoryId')).toBe('cat');
+
+  await page.getByRole('button', { name: 'Próximo mês' }).click();
+  await expect.poll(() => reportCalls.at(-1)!.searchParams.get('month')).not.toBe(firstMonth);
+  expect(listCalls.at(-1)!.searchParams.get('categoryId')).toBe('cat');
+});
+
+test('H06.2 shows active payments by payment date with payer, recorder and correction author', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const calls: URL[] = [];
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([])));
+  await page.route('**/api/v1/expenses/filter-options', route => route.fulfill(json({ responsiblePeople: [],
+    payerPeople: [{ userId: 'bia', displayName: 'Bia', activeMember: true }] })));
+  await page.route('**/api/v1/reports/payments?**', route => {
+    const url = new URL(route.request().url());
+    calls.push(url);
+    const month = url.searchParams.get('month')!;
+    const filtered = url.searchParams.get('payerUserId') === 'bia';
+    route.fulfill(json({ month, periodStart: `${month}-01`, periodEnd: `${month}-31`, dateBasis: 'PAYMENT_DATE',
+      timeZone: 'America/Sao_Paulo',
+      indicators: { count: filtered ? 1 : 2, paidTotal: filtered ? '99.00' : '254.00', chargeTotal: filtered ? '99.00' : '249.00',
+        adjustmentIncrease: filtered ? '0.00' : '5.00', adjustmentDiscount: '0.00', adjustmentNet: filtered ? '0.00' : '5.00' },
+      content: [{ expenseId: 'gym', description: 'Academia', origin: 'ONE_OFF', installment: null, dueDate: '2026-10-01',
+        chargeAmount: '99.00', chargeConfirmed: true, paidAmount: '99.00', adjustment: '0.00', paymentDate: '2026-10-01',
+        payerUserId: 'bia', payerDisplayName: 'Bia', recordedByUserId: 'ana', recordedByDisplayName: 'Ana',
+        recordedAt: '2026-09-30T15:00:00Z', batchPayment: false, categoryName: null, responsibleDisplayName: null,
+        correctionCount: 1, lastCorrection: { actorUserId: 'ana', actorDisplayName: 'Ana', correctedAt: '2026-10-01T15:00:00Z',
+          changedFields: ['paymentDate', 'paidByUserId'] } }],
+      page: 0, size: 20, totalElements: filtered ? 1 : 2, totalPages: 1, sort: url.searchParams.get('sort'),
+      direction: url.searchParams.get('direction') }));
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/pagamentos');
+  await expect(page.getByRole('heading', { name: 'Pagamentos do mês' })).toBeVisible();
+  await expect(page.getByText('Base temporal: data do pagamento')).toBeVisible();
+  await expect(page.getByTestId('payments-paid-total')).toHaveText(/R\$\s*254,00/);
+  await expect(page.getByTestId('payments-adjustment-net')).toHaveText(/\+R\$\s*5,00/);
+  await expect(page.getByText('Pago por Bia')).toBeVisible();
+  await expect(page.getByTestId('payment-correction')).toContainText('Corrigida por Ana');
+  await expect(page.getByTestId('payment-correction')).toContainText('data do pagamento, pagador');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  expect(calls[0].searchParams.get('sort')).toBe('PAYMENT_DATE');
+  expect(calls[0].searchParams.has('status')).toBe(false);
+
+  await page.getByLabel('Pagador').selectOption({ label: 'Bia' });
+  await page.getByLabel('Ordenar por').selectOption('PAID_AMOUNT');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByTestId('payments-paid-total')).toHaveText(/R\$\s*99,00/);
+  const last = calls[calls.length - 1];
+  expect(last.searchParams.get('payerUserId')).toBe('bia');
+  expect(last.searchParams.get('sort')).toBe('PAID_AMOUNT');
+  expect(last.searchParams.get('page')).toBe('0');
+});

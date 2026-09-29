@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) e H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -726,3 +726,80 @@ Testes (Windows; em Linux, `./mvnw verify -Dit.test=InstallmentAdjustmentPostgre
 ```powershell
 backend\scripts\run-integration-tests.ps1 -Tests InstallmentAdjustmentPostgresIT,InstallmentProgressPostgresIT,InstallmentPurchasePostgresIT
 ```
+
+## Painel por vencimento (H06.1)
+
+Em `/painel` (link **Painel por vencimento** em Despesas), administrador e convidado ativos veem os indicadores de um mês, sempre pela **data de vencimento** (despesa paga sem vencimento entra pela data do pagamento). O mês inicial é o mês atual no fuso do espaço; **‹ Anterior**, **Próximo ›** e **Ir para o mês** trocam o período. Os filtros (descrição, categoria ou “Sem categoria”, responsável ou “Sem responsável”, pagador e situação) valem para **todos** os indicadores, para as pendências anteriores e para a lista abaixo.
+
+- **Previsto:** soma das cobranças das despesas pendentes e pagas do mês; estimativas variáveis ainda não confirmadas entram e aparecem como “Inclui R$ … a confirmar”.
+- **Pago:** soma do valor efetivamente pago das quitações ativas. Uma quitação desfeita deixa de contar; a nova quitação conta uma vez.
+- **Pendente:** soma das cobranças em aberto (nunca “previsto − pago”). **Atrasado** é a parte do pendente com vencimento anterior a hoje no fuso do espaço.
+- **Ajustes:** acréscimos (pago acima da cobrança) e descontos (pago abaixo) das pagas, com o saldo líquido.
+- **Pendências de meses anteriores:** pendentes com vencimento antes do mês, com os mesmos filtros (vazias quando o filtro é “Pagas” ou “Canceladas”).
+- **Canceladas nunca entram nos totais**, mesmo quando listadas com o filtro “Canceladas”. Previsões de recorrências ainda não geradas não entram (ficam na tela de Recorrências e no planejamento futuro, H06.3); cada ocorrência gerada entra uma vez. De uma compra parcelada entram só as parcelas do mês, nunca o total da compra.
+
+Os totais são somados no PostgreSQL sobre todo o conjunto autorizado do espaço (não sobre a página carregada), em transação somente leitura `REPEATABLE READ`, com o mesmo predicado da lista de despesas. Dinheiro trafega como string decimal e a tela formata sem converter para número, então totais acima de R$ 99.999.999,99 continuam exatos.
+
+```text
+GET /api/v1/reports/due-dashboard?month=2026-10&categoryId=<uuid>&status=ACTIVE
+→ 200 {"month": "2026-10", "periodStart": "2026-10-01", "periodEnd": "2026-10-31", "dateBasis": "DUE_DATE",
+       "today": "2026-10-15", "timeZone": "America/Sao_Paulo",
+       "indicators": {"plannedCount": 8, "plannedTotal": "2792.33", "plannedEstimated": "180.00",
+                      "paidCount": 5, "paidTotal": "1022.33", "pendingCount": 3, "pendingTotal": "1780.00",
+                      "pendingEstimated": "180.00", "overdueCount": 1, "overdueTotal": "1500.00", "overdueEstimated": "0.00",
+                      "adjustmentIncrease": "20.00", "adjustmentDiscount": "10.00", "adjustmentNet": "10.00"},
+       "previousPending": {"dueBefore": "2026-10-01", "count": 1, "total": "800.00", "estimated": "0.00",
+                           "overdueCount": 1, "overdueTotal": "800.00"}}
+```
+
+Erros: `400 REPORT_QUERY_INVALID` (mês fora de `AAAA-MM`, busca acima de 200 caracteres, categoria junto com “sem categoria”, responsável junto com “sem responsável”, UUID ou situação inválidos), `401` sem sessão e `403 ACTIVE_SPACE_ACCESS_NOT_FOUND` sem associação ativa. Não há parâmetro de espaço: ele vem da sessão.
+
+Teste manual:
+
+1. Em Despesas, cadastre no mês atual: “Aluguel” 1.500,00 vencendo há alguns dias (fica Atrasada), “Mercado” 100,00 vencendo no fim do mês, e “Internet” 120,00 vencendo no mês; quite a Internet por 110,00. Cadastre “Cartão” 800,00 vencendo no mês anterior.
+2. Abra **Painel por vencimento**. Resultado esperado: Previsto R$ 1.720,00 (3 contas), Pago R$ 110,00, Pendente R$ 1.600,00, Atrasado R$ 1.500,00, Ajustes −R$ 10,00 (desconto R$ 10,00) e Pendências de meses anteriores R$ 800,00.
+3. Filtre “Situação: Atrasadas” → Previsto R$ 1.500,00 e anteriores R$ 800,00. Filtre uma categoria e confira que todos os cartões e a lista mudam juntos.
+4. Desfaça a quitação da Internet: Pago volta a R$ 0,00 e Pendente sobe para R$ 1.720,00. Quite de novo por 120,00: Pago R$ 120,00, sem contar duas vezes. Cancele o Mercado: ele sai do Previsto e do Pendente.
+5. Clique em **Próximo ›**: o Cartão e o Aluguel entram em “Pendências de meses anteriores”.
+
+Testes (Windows; em Linux, `./mvnw verify -Dit.test=ReportingPostgresIT`):
+
+```powershell
+backend\scripts\run-integration-tests.ps1 -Tests ReportingPostgresIT
+```
+
+## Pagamentos do mês (H06.2)
+
+Em `/pagamentos` (links **Pagamentos do mês** em Despesas e no painel) ficam as **quitações ativas cuja data efetiva de pagamento cai no mês**. É outra população, diferente do painel por vencimento: uma conta que vence em setembro e é paga em outubro aparece em setembro no painel e em outubro aqui. A tela e a resposta identificam a base `PAYMENT_DATE`.
+
+- **Indicadores** (sobre toda a seleção, não a página): quantidade de pagamentos, **pago no mês** (valores efetivamente pagos), **cobranças desses pagamentos** (valor original) e **ajustes de quitação** (pago − cobrança de cada quitação), com acréscimos, descontos e líquido. Não há pendente, saldo, receita nem resultado financeiro.
+- **Desfazer e quitar de novo:** a quitação desfeita sai da visão; a nova aparece uma vez, na nova data. Canceladas nunca aparecem.
+- **Correções:** a linha já mostra valor, data e pagador corrigidos. Corrigir a data para outro mês move o pagamento; a linha diz “Corrigida por … em …: campos” e quantas correções houve desde a quitação ativa. A trilha completa continua no histórico da despesa. Uma correção feita numa quitação que depois foi desfeita não é atribuída à quitação atual.
+- **Cada linha** mostra data do pagamento, descrição, origem (avulsa, recorrência ou parcela n/N), categoria, vencimento (ou “Sem vencimento”), cobrança, pago, ajuste, **quem pagou**, **quem registrou e quando** (no fuso do espaço) e se foi quitação **em lote**.
+- **Filtros:** descrição, categoria/sem categoria, responsável/sem responsável e pagador (sem filtro de situação). **Ordenação:** data do pagamento (padrão), valor pago ou descrição, crescente ou decrescente; 20 por página.
+
+```text
+GET /api/v1/reports/payments?month=2026-10&payerUserId=<uuid>&page=0&size=20&sort=PAYMENT_DATE&direction=ASC
+→ 200 {"month": "2026-10", "dateBasis": "PAYMENT_DATE", "timeZone": "America/Sao_Paulo",
+       "indicators": {"count": 6, "paidTotal": "1177.33", "chargeTotal": "1162.33", "adjustmentIncrease": "25.00",
+                      "adjustmentDiscount": "10.00", "adjustmentNet": "15.00"},
+       "content": [{"description": "Academia", "dueDate": "2026-10-01", "chargeAmount": "99.00", "paidAmount": "99.00",
+                    "adjustment": "0.00", "paymentDate": "2026-10-01", "payerDisplayName": "Bia",
+                    "recordedByDisplayName": "Ana", "batchPayment": false, "correctionCount": 1,
+                    "lastCorrection": {"actorDisplayName": "Ana", "correctedAt": "...",
+                                       "changedFields": ["paymentDate", "paidByUserId"]}, ...}],
+       "page": 0, "size": 20, "totalElements": 6, "totalPages": 1, "sort": "PAYMENT_DATE", "direction": "ASC"}
+```
+
+Erros: `400 REPORT_QUERY_INVALID` (mês, página negativa, tamanho fora de 1–100, ordenação desconhecida, filtros incompatíveis), `401` sem sessão e `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`.
+
+Teste manual (continua o do painel):
+
+1. Cadastre “Água” 150,00 vencendo no mês anterior e quite por 155,00 com data de hoje. Em **Pagamentos do mês**: ela aparece neste mês com ajuste +R$ 5,00; no **Painel por vencimento** ela aparece no mês anterior.
+2. Quite duas contas juntas em Despesas (**Quitar selecionadas**) escolhendo o outro membro como pagador: as duas linhas dizem “Em lote, por <você>” e “Pago por <outro membro>”.
+3. Corrija uma quitação mudando a data para o mês anterior: ela sai deste mês e aparece no anterior com “Corrigida por <você> …: data do pagamento”. Corrija o pagador: o filtro **Pagador** passa a encontrá-la pelo novo pagador.
+4. Desfaça uma quitação: ela some da visão e os totais caem. Quite de novo por outro valor: ela volta uma vez, com o novo valor e sem a correção anterior.
+5. Escolha um mês sem pagamentos: “Nenhum pagamento neste mês com os filtros escolhidos.” e todos os valores em R$ 0,00.
+
+Testes: os mesmos de H06.1 (`ReportingPostgresIT` cobre as duas visões).
+

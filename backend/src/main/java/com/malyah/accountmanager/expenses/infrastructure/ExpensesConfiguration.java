@@ -64,6 +64,11 @@ class ExpensesConfiguration {
         return new com.malyah.accountmanager.expenses.application.CategoryService(repository, contextQuery, identifiers, applicationClock);
     }
     @Bean
+    com.malyah.accountmanager.expenses.application.ExpenseReportQueries expenseReportQueries(JdbcTemplate jdbcTemplate) {
+        return new JdbcExpenseReportQueries(jdbcTemplate);
+    }
+
+    @Bean
     ExpenseRepository expenseRepository(JdbcTemplate jdbcTemplate) {
         return new JdbcExpenseRepository(jdbcTemplate);
     }
