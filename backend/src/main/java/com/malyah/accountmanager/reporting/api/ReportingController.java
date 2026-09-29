@@ -10,7 +10,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.malyah.accountmanager.expenses.application.ExpenseStatusFilter;
+import com.malyah.accountmanager.expenses.application.PaymentSort;
+import com.malyah.accountmanager.expenses.application.SortDirection;
 import com.malyah.accountmanager.reporting.application.DueDashboardView;
+import com.malyah.accountmanager.reporting.application.PaymentReportQuery;
+import com.malyah.accountmanager.reporting.application.PaymentReportView;
 import com.malyah.accountmanager.reporting.application.ReportFilters;
 import com.malyah.accountmanager.reporting.application.ReportingUseCase;
 
@@ -36,5 +40,23 @@ class ReportingController {
             @RequestParam(defaultValue = "ACTIVE") ExpenseStatusFilter status) {
         return useCase.dueDashboard(principal.getName(), new ReportFilters(month, search, categoryId,
                 withoutCategory, responsibleUserId, withoutResponsible, payerUserId, status));
+    }
+
+    @GetMapping("/payments")
+    PaymentReportView payments(Principal principal,
+            @RequestParam(required = false) String month,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) UUID categoryId,
+            @RequestParam(defaultValue = "false") boolean withoutCategory,
+            @RequestParam(required = false) UUID responsibleUserId,
+            @RequestParam(defaultValue = "false") boolean withoutResponsible,
+            @RequestParam(required = false) UUID payerUserId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "PAYMENT_DATE") PaymentSort sort,
+            @RequestParam(defaultValue = "ASC") SortDirection direction) {
+        return useCase.payments(principal.getName(), new PaymentReportQuery(new ReportFilters(month, search,
+                categoryId, withoutCategory, responsibleUserId, withoutResponsible, payerUserId, null), page, size,
+                sort, direction));
     }
 }

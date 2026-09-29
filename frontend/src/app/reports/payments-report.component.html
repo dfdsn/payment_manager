@@ -1,0 +1,119 @@
+<section class="report-container" aria-labelledby="payments-title">
+  <header class="page-header">
+    <div>
+      <h1 id="payments-title">Pagamentos do mês</h1>
+      <p>Quando as contas foram efetivamente pagas, por quanto e por quem.</p>
+    </div>
+    <nav aria-label="Outras telas"><a routerLink="/painel">Painel por vencimento</a> · <a routerLink="/despesas">Despesas</a></nav>
+  </header>
+
+  <mat-card appearance="outlined">
+    <mat-card-content>
+      <div class="month-bar">
+        <button matButton="outlined" type="button" (click)="previousMonth()" [disabled]="!month()" aria-label="Mês anterior">‹ Anterior</button>
+        <h2 class="month-title" aria-live="polite">{{ month() ? monthLabel(month()!) : 'Carregando mês…' }}</h2>
+        <button matButton="outlined" type="button" (click)="nextMonth()" [disabled]="!month()" aria-label="Próximo mês">Próximo ›</button>
+        <label class="inline-field">Ir para o mês
+          <input type="month" [formControl]="monthControl" (change)="chooseMonth()" />
+        </label>
+      </div>
+
+      <form class="filters" [formGroup]="filterForm" (ngSubmit)="applyFilters()" novalidate aria-label="Filtros dos pagamentos">
+        <mat-form-field appearance="outline"><mat-label>Buscar na descrição</mat-label>
+          <input matInput formControlName="search" maxlength="200" autocomplete="off" />
+        </mat-form-field>
+        <label class="select-field">Categoria
+          <select formControlName="category"><option value="">Todas</option><option [value]="none">Sem categoria</option>
+            @for (category of categories(); track category.id) { <option [value]="category.id">{{ category.name }}@if (category.archived) { (arquivada)}</option> }
+          </select>
+        </label>
+        <label class="select-field">Responsável
+          <select formControlName="responsible"><option value="">Todos</option><option [value]="none">Sem responsável</option>
+            @for (person of responsiblePeople(); track person.userId) { <option [value]="person.userId">{{ person.displayName }}@if (!person.activeMember) { (ex-membro)}</option> }
+          </select>
+        </label>
+        <label class="select-field">Pagador
+          <select formControlName="payerUserId"><option value="">Todos</option>
+            @for (person of payerPeople(); track person.userId) { <option [value]="person.userId">{{ person.displayName }}@if (!person.activeMember) { (ex-membro)}</option> }
+          </select>
+        </label>
+        <label class="select-field">Ordenar por
+          <select formControlName="sort"><option value="PAYMENT_DATE">Data do pagamento</option><option value="PAID_AMOUNT">Valor pago</option><option value="DESCRIPTION">Descrição</option></select>
+        </label>
+        <label class="select-field">Ordem
+          <select formControlName="direction"><option value="ASC">Crescente</option><option value="DESC">Decrescente</option></select>
+        </label>
+        <div class="form-actions">
+          <button matButton="filled" type="submit">Aplicar filtros</button>
+          <button matButton="outlined" type="button" (click)="clearFilters()" [disabled]="!filtersActive()">Limpar filtros</button>
+        </div>
+      </form>
+    </mat-card-content>
+  </mat-card>
+
+  @if (error()) {
+    <div class="error-summary" role="alert">{{ error() }} <button matButton type="button" (click)="reload()">Tentar novamente</button></div>
+  }
+
+  @if (report(); as r) {
+    <p class="basis" id="payments-basis">
+      <strong>Base temporal: data do pagamento</strong> de {{ formatDate(r.periodStart) }} a {{ formatDate(r.periodEnd) }}.
+      Somente quitações ativas: pagamentos desfeitos não aparecem e uma nova quitação conta uma vez. Esta é outra
+      população, diferente do <a routerLink="/painel">painel por vencimento</a>: uma conta que vence num mês e é paga
+      no seguinte aparece lá no mês do vencimento e aqui no mês do pagamento. Não mostra saldo nem resultado financeiro.
+      @if (filtersActive()) { <strong>Filtros aplicados a todos os indicadores.</strong> }
+    </p>
+    <div class="indicators" [attr.aria-busy]="loading()" aria-describedby="payments-basis" aria-live="polite">
+      <article class="indicator" aria-labelledby="paid-title">
+        <h3 id="paid-title">Pago no mês</h3>
+        <p class="value" data-testid="payments-paid-total">{{ formatCurrency(r.indicators.paidTotal) }}</p>
+        <p data-testid="payments-count">{{ r.indicators.count }} pagamento(s), pelo valor efetivamente pago.</p>
+      </article>
+      <article class="indicator" aria-labelledby="charge-title">
+        <h3 id="charge-title">Cobranças desses pagamentos</h3>
+        <p class="value" data-testid="payments-charge-total">{{ formatCurrency(r.indicators.chargeTotal) }}</p>
+        <p>Valor original cobrado das mesmas contas.</p>
+      </article>
+      <article class="indicator" aria-labelledby="payment-adjustment-title">
+        <h3 id="payment-adjustment-title">Ajustes de quitação</h3>
+        <p class="value" data-testid="payments-adjustment-net">{{ formatSigned(r.indicators.adjustmentNet) }}</p>
+        <p>Pago menos cobrança: acréscimos {{ formatSigned(r.indicators.adjustmentIncrease) }}, descontos {{ formatSigned('-' + r.indicators.adjustmentDiscount) }}.</p>
+      </article>
+    </div>
+
+    <mat-card appearance="outlined">
+      <mat-card-header><mat-card-title>Pagamentos</mat-card-title>
+        <mat-card-subtitle>{{ r.totalElements }} pagamento(s) com os mesmos filtros; os totais acima somam todos, não só esta página.</mat-card-subtitle></mat-card-header>
+      <mat-card-content>
+        @if (r.content.length === 0) {
+          <div class="empty-state" role="status">Nenhum pagamento neste mês com os filtros escolhidos.</div>
+        } @else {
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">Pagamento</th><th scope="col">Descrição</th><th scope="col">Vencimento</th><th scope="col" class="amount">Cobrança</th><th scope="col" class="amount">Pago</th><th scope="col" class="amount">Ajuste</th><th scope="col">Pagador e registro</th></tr></thead>
+            <tbody>
+              @for (row of r.content; track row.expenseId) {
+                <tr>
+                  <td>{{ formatDate(row.paymentDate) }}</td>
+                  <td>{{ row.description }}<span class="subtle"> · {{ origin(row) }}</span>@if (row.categoryName) {<span class="subtle"> · {{ row.categoryName }}</span>}</td>
+                  <td>{{ row.dueDate ? formatDate(row.dueDate) : 'Sem vencimento' }}</td>
+                  <td class="amount">{{ formatCurrency(row.chargeAmount) }}</td>
+                  <td class="amount">{{ formatCurrency(row.paidAmount) }}</td>
+                  <td class="amount">{{ formatSigned(row.adjustment) }}</td>
+                  <td><strong>Pago por {{ row.payerDisplayName }}</strong><br /><span class="subtle">{{ recorded(row, r.timeZone) }}</span>
+                    @if (correction(row, r.timeZone); as text) {<br /><span class="estimate" data-testid="payment-correction">{{ text }}</span>}</td>
+                </tr>
+              }
+            </tbody>
+          </table></div>
+          @if (r.totalPages > 1) {
+            <div class="pagination"><button matButton type="button" (click)="previousPage()" [disabled]="page() === 0 || loading()">Anterior</button>
+              <span>Página {{ page() + 1 }} de {{ r.totalPages }}</span>
+              <button matButton type="button" (click)="nextPage()" [disabled]="page() + 1 >= r.totalPages || loading()">Próxima</button></div>
+          }
+        }
+      </mat-card-content>
+    </mat-card>
+  } @else if (loading()) {
+    <p class="loading" role="status">Carregando os pagamentos…</p>
+  }
+</section>

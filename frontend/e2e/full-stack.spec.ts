@@ -238,6 +238,25 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await guestPage.getByRole('button', { name: 'Aplicar filtros' }).click();
   await expect(guestPage.getByText('Energia final')).toBeVisible();
   await expect(guestPage.getByTestId('planned-total')).toHaveText(/R\$\s*0,00/);
+
+  await guestPage.getByRole('link', { name: 'Pagamentos do mês' }).first().click();
+  await expect(guestPage.getByRole('heading', { name: 'Pagamentos do mês' })).toBeVisible();
+  await guestPage.getByLabel('Ir para o mês').fill('2026-09');
+  await expect(guestPage.getByRole('heading', { name: /setembro de 2026/i })).toBeVisible();
+  await expect(guestPage.getByText('Base temporal: data do pagamento')).toBeVisible();
+  await expect(guestPage.getByTestId('payments-paid-total')).toHaveText(/R\$\s*25,50/);
+  await expect(guestPage.getByTestId('payments-count')).toContainText('1 pagamento(s)');
+  await expect(guestPage.getByText('Energia final')).toHaveCount(0);
+  await guestPage.getByRole('button', { name: 'Próximo mês' }).click();
+  await expect(guestPage.getByRole('heading', { name: /outubro de 2026/i })).toBeVisible();
+  await expect(guestPage.getByTestId('payments-paid-total')).toHaveText(/R\$\s*179,90/);
+  await expect(guestPage.getByTestId('payments-count')).toContainText('2 pagamento(s)');
+  await expect(guestPage.getByText(/Em lote, por Pessoa Convidada/)).toHaveCount(2);
+  await expect(guestPage.getByText('Pago por Diego')).toHaveCount(2);
+  const anonymousPaymentsStatus = await guestPage.evaluate(async () => (await fetch('/api/v1/reports/payments?month=2026-10', {
+    credentials: 'omit',
+  })).status);
+  expect(anonymousPaymentsStatus).toBe(401);
   const anonymousContext = await browser.newContext();
   const anonymousPage = await anonymousContext.newPage();
   await anonymousPage.goto('/entrar');

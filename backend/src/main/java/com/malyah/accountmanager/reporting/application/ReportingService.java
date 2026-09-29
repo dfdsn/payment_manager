@@ -13,9 +13,12 @@ import com.malyah.accountmanager.expenses.application.ExpenseReportQueries;
 import com.malyah.accountmanager.expenses.application.ExpenseSelection;
 import com.malyah.accountmanager.expenses.application.ExpenseStatusFilter;
 import com.malyah.accountmanager.expenses.application.ExpenseTotalsBucket;
+import com.malyah.accountmanager.expenses.application.PaymentSort;
+import com.malyah.accountmanager.expenses.application.SortDirection;
 import com.malyah.accountmanager.expenses.domain.ExpenseStatus;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.reporting.domain.DueIndicators;
+import com.malyah.accountmanager.reporting.domain.PaymentIndicators;
 import com.malyah.accountmanager.reporting.domain.Situation;
 import com.malyah.accountmanager.reporting.domain.TotalsBucket;
 
@@ -58,6 +61,42 @@ public final class ReportingService implements ReportingUseCase {
                         previous.pendingCount(), previous.pendingTotal().toPlainString(),
                         previous.pendingEstimated().toPlainString(), previous.overdueCount(),
                         previous.overdueTotal().toPlainString()));
+    }
+
+    /**
+     * H06.2: active payments whose effective payment date falls in the month. The same selection feeds the totals
+     * (summed by the database over the whole selection) and the page, so both always describe one population.
+     */
+    @Override
+    public PaymentReportView payments(String actorEmail, PaymentReportQuery query) {
+        Objects.requireNonNull(query, "query");
+        var filters = Objects.requireNonNull(query.filters(), "filters");
+        if (filters.status() != null && filters.status() != ExpenseStatusFilter.PAID)
+            throw new ReportQueryValidationException("status",
+                    "A visão de pagamentos mostra somente quitações ativas.");
+        if (query.page() < 0)
+            throw new ReportQueryValidationException("page", "A página não pode ser negativa.");
+        if (query.size() < 1 || query.size() > PaymentReportQuery.MAXIMUM_SIZE)
+            throw new ReportQueryValidationException("size", "O tamanho da página deve ficar entre 1 e 100.");
+        var sort = query.sort() == null ? PaymentSort.PAYMENT_DATE : query.sort();
+        var direction = query.direction() == null ? SortDirection.ASC : query.direction();
+        var requestedMonth = parseMonth(filters.month());
+        var actor = contexts.findByEmail(actorEmail);
+        var today = LocalDate.now(clock.withZone(ZoneId.of(actor.timeZone())));
+        var month = requestedMonth == null ? YearMonth.from(today) : requestedMonth;
+        var start = month.atDay(1);
+        var end = month.atEndOfMonth();
+        var selection = new ExpenseSelection(trim(filters.search()), start, end, ExpenseDateBasis.PAYMENT_DATE,
+                filters.categoryId(), filters.withoutCategory(), filters.responsibleUserId(),
+                filters.withoutResponsible(), filters.payerUserId(), ExpenseStatusFilter.PAID, today);
+        selection.validate();
+        var indicators = PaymentIndicators.from(buckets(expenses.totals(actor.spaceId(), selection)));
+        var page = expenses.payments(actor.spaceId(), selection, query.page(), query.size(), sort, direction);
+        var totalPages = (int) ((page.totalElements() + query.size() - 1) / query.size());
+        return new PaymentReportView(month.toString(), start, end, ExpenseDateBasis.PAYMENT_DATE.name(),
+                actor.timeZone(), PaymentIndicatorsView.of(indicators),
+                page.content().stream().map(PaymentRowView::of).toList(), query.page(), query.size(),
+                page.totalElements(), totalPages, sort.name(), direction.name());
     }
 
     /**

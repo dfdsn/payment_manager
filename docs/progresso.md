@@ -64,7 +64,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H05.2 | Consultar e quitar parcelas | Concluído | Lista e detalhe de compras com progresso por situação (sem saldo bancário), quitação das selecionadas pelo lote atômico de E02 e aviso contra fatura duplicada; sem migração. 186 Java, JaCoCo 92,61%/83,81%, PIT 83%, 80 ITs em PostgreSQL 16 local, 82 frontend, build, 5 smoke e E2E full-stack local aprovados. CI `36491947112` (commit `f5d9a74`) aprovou os 80 ITs em Testcontainers 17.6. Evidência: `docs/evidencias/H05.2.md`. |
 | H05.3 | Ajustar e cancelar parcelas pendentes | Concluído | Alteração de descrição, categoria, responsável e vencimento “só esta” ou “esta e as próximas pendentes” com recálculo mensal; cancelamento das pendentes selecionadas com motivo e nova compra opcional com o restante, na mesma transação; impacto revisado protegido por token; pagas preservadas; V21. 215 Java, JaCoCo 93,43%/85,36%, PIT 85%, 88 ITs em PostgreSQL 16 local, 88 frontend, build, 6 smoke e E2E full-stack local aprovados. CI `36494395974` (commit `7483e3c`) aprovou os 88 ITs em Testcontainers 17.6. Evidência: `docs/evidencias/H05.3.md`. |
 | H06.1 | Consultar dashboard por vencimento | Concluído | Painel `/painel` e `GET /reports/due-dashboard`: previsto, pago, pendente, atrasado, ajustes e pendências anteriores somados no PostgreSQL com o mesmo predicado da lista; sem migração. 236 Java, JaCoCo 93,99%/86,76%, PIT 87%, 95 ITs em Testcontainers 17.6 (7 da matriz), 96 frontend, smoke 7/7 e E2E full-stack aprovados. Evidência: `docs/evidencias/H06.1.md`. |
-| H06.2 | Consultar pagamentos e ajustes | Não iniciado | — |
+| H06.2 | Consultar pagamentos e ajustes | Concluído | `/pagamentos` e `GET /reports/payments`: quitações ativas pela data efetiva, totais pela mesma porta do painel, pagador, autor, lote e última correção da quitação ativa; reversão retira e nova quitação conta uma vez; sem migração. 245 Java, JaCoCo 94,24%/86,98%, PIT 87%, 100 ITs em Testcontainers 17.6 (12 de relatórios), 101 frontend, smoke 8/8 e E2E full-stack aprovados; regressão H06.1 aprovada. Evidência: `docs/evidencias/H06.2.md`. |
 | H06.3 | Consultar planejamento futuro integrado | Não iniciado | — |
 | H06.4 | Exportar CSV filtrado | Não iniciado | — |
 | H07.1 | Fechar mês com resumo | Não iniciado | — |
@@ -468,6 +468,25 @@ Condição de conclusão ou desbloqueio: checkpoint das sete condições atendid
 Próximo passo: H06.2 (consultar pagamentos e ajustes).
 ```
 
+## Registro H06.2
+
+```text
+História / objetivo: H06.2 — Consultar pagamentos e ajustes.
+Estado / responsável / data: Concluído / desenvolvimento / 29/09/2026.
+Requisitos e critérios de aceite relacionados: H06.2 do backlog; RF-REL-02 e seção 11.1 do PRD; CA-05; pedido de Diego de 29/09/2026 (seguir para H06.2 se o checkpoint da H06.1 fechasse).
+Decisões e pendências aplicáveis: T25 registrada. Nenhuma decisão de Diego foi necessária.
+Branch / commit / PR: branch `claude/project-thread-yz6lth`; commit separado do da H06.1 no mesmo PR #9 para `main`. Nada foi publicado ou implantado.
+Arquivos e comportamento alterados: `ExpenseReportQueries.payments`, `PaymentRecord`, `PaymentRecordPage`, `PaymentSort` e implementação JDBC; `PaymentIndicators`, `ReportingService.payments`, `GET /reports/payments`; frontend `/pagamentos`; `DueDashboardPostgresIT` renomeado para `ReportingPostgresIT`; README, OpenAPI, decisões e evidência.
+Migrações e impacto sobre dados: nenhuma.
+Testes executados: 245 unitários/HTTP/ArchUnit; 100 ITs Failsafe em Testcontainers `postgres:17.6-alpine` (12 de `ReportingPostgresIT`, 5 novos); JaCoCo e PIT; 101 Vitest; build Angular; 8 smoke E2E; E2E full-stack local (33 s). Todos aprovados, incluindo a regressão da H06.1.
+Cobertura e mutação aplicáveis: JaCoCo 2012/2135 linhas (94,24%) e 1042/1198 branches (86,98%); PIT 819/942 (87%), força 93%, sem sobreviventes em `reporting`; limites mantidos.
+Validação manual / integração real: não depende de provedor externo.
+Limitações e cenários futuros: planejamento futuro (H06.3), CSV (H06.4) e fechamento (E07).
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H06.2.md e este arquivo.
+Condição de conclusão ou desbloqueio: CI verde no PR.
+Próximo passo: H06.3 (consultar planejamento futuro integrado), quando Diego pedir.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -532,3 +551,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 28/09/2026 | H05.2 implementou consulta de compras parceladas com progresso por situação e quitação das parcelas selecionadas pelo lote atômico de E02, sem migração. Regressão: 186 Java, 80 ITs em PostgreSQL 16 local, JaCoCo 92,61%/83,81%, PIT 83%/força 91%, 82 frontend, build, 5 smoke E2E e E2E full-stack local aprovados. CI `36491947112` aprovada; H05.2 concluída. |
 | 28/09/2026 | H05.3 implementou alteração e cancelamento de parcelas pendentes com revisão do impacto protegida por token, recálculo mensal de vencimentos, nova compra opcional com o restante na mesma transação e auditoria por parcela (V21). Regressão: 215 Java, 88 ITs em PostgreSQL 16 local, JaCoCo 93,43%/85,36%, PIT 85%/força 92%, 88 frontend, build, 6 smoke E2E e E2E full-stack local aprovados. CI `36494395974` (commit `7483e3c`) aprovada; H05.3 e E05 concluídos. |
 | 29/09/2026 | H06.1 concluída: painel por vencimento com matriz conferida em PostgreSQL 17.6, gates (JaCoCo 93,99%/86,76%, PIT 87%), frontend, smoke e E2E full-stack. Checkpoint atendido; H06.2 iniciada. |
+| 29/09/2026 | H06.2 concluída: visão de pagamentos pela data efetiva com matriz conferida em PostgreSQL 17.6, gates (JaCoCo 94,24%/86,98%, PIT 87%), frontend, smoke 8/8, E2E full-stack e regressão da H06.1. |

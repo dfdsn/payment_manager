@@ -390,3 +390,53 @@ test('H06.1 shows the due-date dashboard with filters applied to totals and list
   await expect.poll(() => reportCalls.at(-1)!.searchParams.get('month')).not.toBe(firstMonth);
   expect(listCalls.at(-1)!.searchParams.get('categoryId')).toBe('cat');
 });
+
+test('H06.2 shows active payments by payment date with payer, recorder and correction author', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const calls: URL[] = [];
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([])));
+  await page.route('**/api/v1/expenses/filter-options', route => route.fulfill(json({ responsiblePeople: [],
+    payerPeople: [{ userId: 'bia', displayName: 'Bia', activeMember: true }] })));
+  await page.route('**/api/v1/reports/payments?**', route => {
+    const url = new URL(route.request().url());
+    calls.push(url);
+    const month = url.searchParams.get('month')!;
+    const filtered = url.searchParams.get('payerUserId') === 'bia';
+    route.fulfill(json({ month, periodStart: `${month}-01`, periodEnd: `${month}-31`, dateBasis: 'PAYMENT_DATE',
+      timeZone: 'America/Sao_Paulo',
+      indicators: { count: filtered ? 1 : 2, paidTotal: filtered ? '99.00' : '254.00', chargeTotal: filtered ? '99.00' : '249.00',
+        adjustmentIncrease: filtered ? '0.00' : '5.00', adjustmentDiscount: '0.00', adjustmentNet: filtered ? '0.00' : '5.00' },
+      content: [{ expenseId: 'gym', description: 'Academia', origin: 'ONE_OFF', installment: null, dueDate: '2026-10-01',
+        chargeAmount: '99.00', chargeConfirmed: true, paidAmount: '99.00', adjustment: '0.00', paymentDate: '2026-10-01',
+        payerUserId: 'bia', payerDisplayName: 'Bia', recordedByUserId: 'ana', recordedByDisplayName: 'Ana',
+        recordedAt: '2026-09-30T15:00:00Z', batchPayment: false, categoryName: null, responsibleDisplayName: null,
+        correctionCount: 1, lastCorrection: { actorUserId: 'ana', actorDisplayName: 'Ana', correctedAt: '2026-10-01T15:00:00Z',
+          changedFields: ['paymentDate', 'paidByUserId'] } }],
+      page: 0, size: 20, totalElements: filtered ? 1 : 2, totalPages: 1, sort: url.searchParams.get('sort'),
+      direction: url.searchParams.get('direction') }));
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/pagamentos');
+  await expect(page.getByRole('heading', { name: 'Pagamentos do mês' })).toBeVisible();
+  await expect(page.getByText('Base temporal: data do pagamento')).toBeVisible();
+  await expect(page.getByTestId('payments-paid-total')).toHaveText(/R\$\s*254,00/);
+  await expect(page.getByTestId('payments-adjustment-net')).toHaveText(/\+R\$\s*5,00/);
+  await expect(page.getByText('Pago por Bia')).toBeVisible();
+  await expect(page.getByTestId('payment-correction')).toContainText('Corrigida por Ana');
+  await expect(page.getByTestId('payment-correction')).toContainText('data do pagamento, pagador');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  expect(calls[0].searchParams.get('sort')).toBe('PAYMENT_DATE');
+  expect(calls[0].searchParams.has('status')).toBe(false);
+
+  await page.getByLabel('Pagador').selectOption({ label: 'Bia' });
+  await page.getByLabel('Ordenar por').selectOption('PAID_AMOUNT');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByTestId('payments-paid-total')).toHaveText(/R\$\s*99,00/);
+  const last = calls[calls.length - 1];
+  expect(last.searchParams.get('payerUserId')).toBe('bia');
+  expect(last.searchParams.get('sort')).toBe('PAID_AMOUNT');
+  expect(last.searchParams.get('page')).toBe('0');
+});

@@ -20,6 +20,11 @@ import com.malyah.accountmanager.expenses.application.ExpenseReportQueries;
 import com.malyah.accountmanager.expenses.application.ExpenseSelection;
 import com.malyah.accountmanager.expenses.application.ExpenseStatusFilter;
 import com.malyah.accountmanager.expenses.application.ExpenseTotalsBucket;
+import com.malyah.accountmanager.expenses.application.InstallmentLink;
+import com.malyah.accountmanager.expenses.application.PaymentRecord;
+import com.malyah.accountmanager.expenses.application.PaymentRecordPage;
+import com.malyah.accountmanager.expenses.application.PaymentSort;
+import com.malyah.accountmanager.expenses.application.SortDirection;
 import com.malyah.accountmanager.expenses.domain.ExpenseStatus;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContext;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException;
@@ -38,9 +43,23 @@ class ReportingServiceTest {
 
     private record Call(UUID spaceId, ExpenseSelection selection) { }
 
-    private final ExpenseReportQueries queries = (spaceId, selection) -> {
-        calls.add(new Call(spaceId, selection));
-        return selection.dateFrom() == null ? previousRows : monthRows;
+    private PaymentRecordPage paymentPage = new PaymentRecordPage(List.of(), 0);
+    private final List<String> pageCalls = new ArrayList<>();
+
+    private final ExpenseReportQueries queries = new ExpenseReportQueries() {
+        @Override
+        public List<ExpenseTotalsBucket> totals(UUID spaceId, ExpenseSelection selection) {
+            calls.add(new Call(spaceId, selection));
+            return selection.dateFrom() == null ? previousRows : monthRows;
+        }
+
+        @Override
+        public PaymentRecordPage payments(UUID spaceId, ExpenseSelection selection, int page, int size,
+                PaymentSort sort, SortDirection direction) {
+            calls.add(new Call(spaceId, selection));
+            pageCalls.add(page + "/" + size + "/" + sort + "/" + direction);
+            return paymentPage;
+        }
     };
 
     private ReportingService service(Instant now) {
@@ -171,5 +190,113 @@ class ReportingServiceTest {
         monthRows = List.of(row(ExpenseStatus.CANCELLED, true, false, 1, "10.00", "0", "0", "0"));
         assertThatThrownBy(() -> service(NEAR_MIDNIGHT).dueDashboard("ana@example.com", ReportFilters.currentMonth()))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    private static PaymentRecord record(String charge, String paid, PaymentRecord.PaymentCorrection correction) {
+        return new PaymentRecord(UUID.randomUUID(), "Água", "INSTALLMENT", new InstallmentLink(UUID.randomUUID(), 2, 3),
+                LocalDate.of(2026, 9, 25), new BigDecimal(charge), true, new BigDecimal(paid),
+                LocalDate.of(2026, 9, 2), USER, "Ana", USER, "Ana", NEAR_MIDNIGHT, true, "Casa", null,
+                correction == null ? 0 : 1, correction);
+    }
+
+    @Test
+    void paymentsSelectActivePaymentsByPaymentDateInTheSpaceMonthAndPageThem() {
+        monthRows = List.of(row(ExpenseStatus.PAID, true, false, 3, "450.00", "455.00", "15.00", "10.00"));
+        var correction = new PaymentRecord.PaymentCorrection(USER, "Ana", NEAR_MIDNIGHT, List.of("paymentDate"));
+        paymentPage = new PaymentRecordPage(List.of(record("150.00", "155.00", correction),
+                record("120.00", "110.00", null)), 3);
+
+        var view = service(NEAR_MIDNIGHT).payments("ana@example.com", new PaymentReportQuery(
+                new ReportFilters(null, "  água ", CATEGORY, false, null, true, USER, null), 1, 2, null, null));
+
+        assertThat(view.month()).isEqualTo("2026-09");
+        assertThat(view.dateBasis()).isEqualTo("PAYMENT_DATE");
+        assertThat(view.periodEnd()).isEqualTo(LocalDate.of(2026, 9, 30));
+        assertThat(view.timeZone()).isEqualTo("America/Sao_Paulo");
+        assertThat(view.indicators()).isEqualTo(new PaymentIndicatorsView(3, "455.00", "450.00", "15.00", "10.00",
+                "5.00"));
+        assertThat(view.page()).isEqualTo(1);
+        assertThat(view.size()).isEqualTo(2);
+        assertThat(view.totalElements()).isEqualTo(3);
+        assertThat(view.totalPages()).isEqualTo(2);
+        assertThat(view.sort()).isEqualTo("PAYMENT_DATE");
+        assertThat(view.direction()).isEqualTo("ASC");
+        assertThat(pageCalls).containsExactly("1/2/PAYMENT_DATE/ASC");
+        assertThat(view.content()).extracting(PaymentRowView::adjustment).containsExactly("5.00", "-10.00");
+        var first = view.content().getFirst();
+        assertThat(first.chargeAmount()).isEqualTo("150.00");
+        assertThat(first.paidAmount()).isEqualTo("155.00");
+        assertThat(first.installment().number()).isEqualTo(2);
+        assertThat(first.batchPayment()).isTrue();
+        assertThat(first.correctionCount()).isEqualTo(1);
+        assertThat(first.lastCorrection()).isEqualTo(correction);
+        assertThat(first.categoryName()).isEqualTo("Casa");
+        // Totals and page receive exactly the same selection.
+        assertThat(calls).hasSize(2);
+        assertThat(calls.get(0)).isEqualTo(calls.get(1));
+        var selection = calls.getFirst().selection();
+        assertThat(calls.getFirst().spaceId()).isEqualTo(SPACE);
+        assertThat(selection.dateBasis()).isEqualTo(ExpenseDateBasis.PAYMENT_DATE);
+        assertThat(selection.status()).isEqualTo(ExpenseStatusFilter.PAID);
+        assertThat(selection.dateFrom()).isEqualTo(LocalDate.of(2026, 9, 1));
+        assertThat(selection.dateTo()).isEqualTo(LocalDate.of(2026, 9, 30));
+        assertThat(selection.search()).isEqualTo("água");
+        assertThat(selection.categoryId()).isEqualTo(CATEGORY);
+        assertThat(selection.withoutResponsible()).isTrue();
+        assertThat(selection.payerUserId()).isEqualTo(USER);
+        assertThat(selection.today()).isEqualTo(LocalDate.of(2026, 9, 30));
+    }
+
+    @Test
+    void paymentsKeepTheRequestedMonthOrderAndAnExactlyFullLastPage() {
+        paymentPage = new PaymentRecordPage(List.of(), 4);
+        var view = service(NEAR_MIDNIGHT).payments("ana@example.com", new PaymentReportQuery(
+                new ReportFilters("2026-12", null, null, false, null, false, null, ExpenseStatusFilter.PAID), 0, 2,
+                PaymentSort.PAID_AMOUNT, SortDirection.DESC));
+        assertThat(view.month()).isEqualTo("2026-12");
+        assertThat(view.totalPages()).isEqualTo(2);
+        assertThat(view.indicators()).isEqualTo(new PaymentIndicatorsView(0, "0.00", "0.00", "0.00", "0.00", "0.00"));
+        assertThat(pageCalls).containsExactly("0/2/PAID_AMOUNT/DESC");
+        assertThat(service(NEAR_MIDNIGHT).payments("ana@example.com", new PaymentReportQuery(
+                ReportFilters.currentMonth(), 0, 100, null, null)).size()).isEqualTo(100);
+        assertThat(service(NEAR_MIDNIGHT).payments("ana@example.com", new PaymentReportQuery(
+                ReportFilters.currentMonth(), 0, 1, null, null)).totalPages()).isEqualTo(4);
+    }
+
+    @Test
+    void paymentsRejectInvalidPagesSituationsAndMembersBeforeQuerying() {
+        var service = service(NEAR_MIDNIGHT);
+        for (var status : List.of(ExpenseStatusFilter.ACTIVE, ExpenseStatusFilter.PENDING,
+                ExpenseStatusFilter.CANCELLED)) {
+            assertThatThrownBy(() -> service.payments("ana@example.com", new PaymentReportQuery(
+                    new ReportFilters(null, null, null, false, null, false, null, status), 0, 20, null, null)))
+                    .isInstanceOfSatisfying(ReportQueryValidationException.class,
+                            error -> assertThat(error.field()).isEqualTo("status"));
+        }
+        assertThatThrownBy(() -> service.payments("ana@example.com", new PaymentReportQuery(
+                ReportFilters.currentMonth(), -1, 20, null, null))).isInstanceOfSatisfying(
+                ReportQueryValidationException.class, error -> assertThat(error.field()).isEqualTo("page"));
+        for (var size : List.of(0, 101)) {
+            assertThatThrownBy(() -> service.payments("ana@example.com", new PaymentReportQuery(
+                    ReportFilters.currentMonth(), 0, size, null, null))).isInstanceOfSatisfying(
+                    ReportQueryValidationException.class, error -> assertThat(error.field()).isEqualTo("size"));
+        }
+        assertThatThrownBy(() -> service.payments("ana@example.com", new PaymentReportQuery(
+                new ReportFilters("10/2026", null, null, false, null, false, null, null), 0, 20, null, null)))
+                .isInstanceOf(ReportQueryValidationException.class);
+        assertThatThrownBy(() -> service.payments("ana@example.com", new PaymentReportQuery(
+                new ReportFilters(null, null, CATEGORY, true, null, false, null, null), 0, 20, null, null)))
+                .isInstanceOf(ExpenseQueryValidationException.class);
+        assertThatThrownBy(() -> service.payments("other@example.com", new PaymentReportQuery(
+                ReportFilters.currentMonth(), 0, 20, null, null)))
+                .isInstanceOf(AuthenticatedUserContextNotFoundException.class);
+        assertThat(calls).isEmpty();
+    }
+
+    @Test
+    void aPendingRowReachingThePaymentTotalsIsAProgrammingError() {
+        monthRows = List.of(row(ExpenseStatus.PENDING, true, false, 1, "10.00", "0", "0", "0"));
+        assertThatThrownBy(() -> service(NEAR_MIDNIGHT).payments("ana@example.com", new PaymentReportQuery(
+                ReportFilters.currentMonth(), 0, 20, null, null))).isInstanceOf(IllegalArgumentException.class);
     }
 }

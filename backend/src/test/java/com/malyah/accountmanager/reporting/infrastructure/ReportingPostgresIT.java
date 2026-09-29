@@ -36,6 +36,7 @@ import com.malyah.accountmanager.expenses.application.ExpenseService;
 import com.malyah.accountmanager.expenses.application.ExpenseSort;
 import com.malyah.accountmanager.expenses.application.ExpenseStatusFilter;
 import com.malyah.accountmanager.expenses.application.ExpenseView;
+import com.malyah.accountmanager.expenses.application.PaymentSort;
 import com.malyah.accountmanager.expenses.application.ReversePaymentCommand;
 import com.malyah.accountmanager.expenses.application.SettleExpenseCommand;
 import com.malyah.accountmanager.expenses.application.SortDirection;
@@ -61,16 +62,20 @@ import com.malyah.accountmanager.recurrences.domain.RecurrenceFrequency;
 import com.malyah.accountmanager.recurrences.domain.RecurrenceValueType;
 import com.malyah.accountmanager.recurrences.infrastructure.RecurrenceTestFixtures;
 import com.malyah.accountmanager.reporting.application.DueDashboardView;
+import com.malyah.accountmanager.reporting.application.PaymentReportQuery;
+import com.malyah.accountmanager.reporting.application.PaymentReportView;
+import com.malyah.accountmanager.reporting.application.PaymentRowView;
 import com.malyah.accountmanager.reporting.application.ReportFilters;
 import com.malyah.accountmanager.reporting.application.ReportingService;
 import com.malyah.accountmanager.reporting.application.ReportingUseCase;
 
 /**
- * H06.1 against real PostgreSQL, with one-off expenses, recurrences and installments created through their own use
- * cases. Expected values come from the H06.1 matrix in docs/evidencias/H06.1.md and were computed by hand.
+ * H06.1 (due-date dashboard) and H06.2 (payment view) against real PostgreSQL, with one-off expenses, recurrences
+ * and installments created through their own use cases. Expected values come from the matrices in
+ * docs/evidencias/H06.1.md and docs/evidencias/H06.2.md and were computed by hand.
  */
 @Testcontainers
-class DueDashboardPostgresIT {
+class ReportingPostgresIT {
     // 12:00 in São Paulo on 15/10/2026: entries due on 14/10 or before are overdue, due today are not.
     private static final Instant NOW = Instant.parse("2026-10-15T15:00:00Z");
     private static final UUID SPACE = UUID.fromString("60000000-0000-0000-0000-000000000001");
@@ -361,6 +366,245 @@ class DueDashboardPostgresIT {
         assertThat(new BigDecimal(october.overdueTotal())).isEqualByComparingTo(expectedOverdue);
         System.out.println("H06.1 dashboard over 10,000 entries: " + elapsedMillis + " ms");
         assertThat(elapsedMillis).isLessThan(3_000);
+    }
+
+    // H06.2 — payment view (matrix P1–P15 in docs/evidencias/H06.2.md).
+
+    @Test
+    void octoberPaymentsMatchTheIndependentlyComputedMatrix() {
+        var data = matrix();
+        var october = payments(A, filters("2026-10"), 0, 20, PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+
+        assertThat(october.dateBasis()).isEqualTo("PAYMENT_DATE");
+        assertThat(october.periodStart()).isEqualTo(LocalDate.of(2026, 10, 1));
+        var i = october.indicators();
+        assertThat(i.count()).isEqualTo(6);
+        assertThat(i.paidTotal()).isEqualTo("1177.33");
+        assertThat(i.chargeTotal()).isEqualTo("1162.33");
+        assertThat(i.adjustmentIncrease()).isEqualTo("25.00");
+        assertThat(i.adjustmentDiscount()).isEqualTo("10.00");
+        assertThat(i.adjustmentNet()).isEqualTo("15.00");
+        assertThat(october.totalElements()).isEqualTo(6);
+        // Ordered by payment date, ties by description: O9, S2, O4, Gás, Notebook 1/3, O8.
+        assertThat(october.content()).extracting(PaymentRowView::paymentDate).containsExactly(
+                LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 2), LocalDate.of(2026, 10, 6),
+                LocalDate.of(2026, 10, 12), LocalDate.of(2026, 10, 12), LocalDate.of(2026, 10, 14));
+        assertThat(october.content()).extracting(PaymentRowView::expenseId).doesNotContain(data.s4, data.o7);
+
+        // P2: the September water bill paid in October is in October here and in September by due date.
+        var water = row(october, "Água set");
+        assertThat(water.dueDate()).isEqualTo(LocalDate.of(2026, 9, 25));
+        assertThat(water.chargeAmount()).isEqualTo("150.00");
+        assertThat(water.paidAmount()).isEqualTo("155.00");
+        assertThat(water.adjustment()).isEqualTo("5.00");
+        assertThat(water.payerDisplayName()).isEqualTo("Admin");
+        assertThat(water.batchPayment()).isFalse();
+        assertThat(water.lastCorrection()).isNull();
+        assertThat(dashboard(A, filters("2026-09")).indicators().paidTotal()).isEqualTo("245.00");
+
+        // P7/P8: batch and origins; the purchase header never appears, only its first installment.
+        var parcel = october.content().stream().filter(r -> r.installment() != null).toList();
+        assertThat(parcel).singleElement().satisfies(r -> {
+            assertThat(r.origin()).isEqualTo("INSTALLMENT");
+            assertThat(r.installment().number()).isEqualTo(1);
+            assertThat(r.installment().count()).isEqualTo(3);
+            assertThat(r.paidAmount()).isEqualTo("333.33");
+            assertThat(r.batchPayment()).isTrue();
+            assertThat(r.recordedByDisplayName()).isEqualTo("Convidado");
+            assertThat(r.payerDisplayName()).isEqualTo("Admin");
+        });
+        var gas = october.content().stream().filter(r -> r.expenseId().equals(data.o6)).findFirst().orElseThrow();
+        assertThat(gas.origin()).isEqualTo("RECURRENCE");
+        assertThat(gas.batchPayment()).isTrue();
+        assertThat(row(october, "Telefone out").adjustment()).isEqualTo("-10.00");
+        assertThat(row(october, "Telefone out").batchPayment()).isFalse();
+        assertThat(row(october, "Telefone out").categoryName()).isEqualTo("Casa e contas");
+
+        // P5: corrected payer and the author of the correction are shown; the recorder stays the original one.
+        var gym = row(october, "Academia out");
+        assertThat(gym.payerDisplayName()).isEqualTo("Convidado");
+        assertThat(gym.recordedByDisplayName()).isEqualTo("Admin");
+        assertThat(gym.correctionCount()).isEqualTo(1);
+        assertThat(gym.lastCorrection().actorDisplayName()).isEqualTo("Admin");
+        assertThat(gym.lastCorrection().changedFields()).containsExactly("paymentDate", "paidByUserId");
+
+        // P6: the reversed 400.00 payment of O8 is gone; the new 420.00 appears once with its +20.00.
+        var school = row(october, "Escola out");
+        assertThat(school.paidAmount()).isEqualTo("420.00");
+        assertThat(school.paymentDate()).isEqualTo(LocalDate.of(2026, 10, 14));
+        assertThat(school.lastCorrection()).isNull();
+        assertThat(october.content()).filteredOn(r -> r.expenseId().equals(data.o8)).hasSize(1);
+
+        var guestPayer = payments(A, new ReportFilters("2026-10", null, null, false, null, false, GUEST, null), 0, 20,
+                PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+        assertThat(guestPayer.indicators().count()).isEqualTo(2);
+        assertThat(guestPayer.indicators().paidTotal()).isEqualTo("209.00");
+        var adminPayer = payments(A, new ReportFilters("2026-10", null, null, false, null, false, ADMIN, null), 0, 20,
+                PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+        assertThat(adminPayer.indicators().count()).isEqualTo(4);
+        assertThat(adminPayer.indicators().paidTotal()).isEqualTo("968.33");
+        // September by payment keeps only the pharmacy paid without due date: O9 moved to October.
+        var september = payments(G, filters("2026-09"), 0, 20, PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+        assertThat(september.indicators().paidTotal()).isEqualTo("90.00");
+        assertThat(september.content()).extracting(PaymentRowView::expenseId).containsExactly(data.s4);
+        assertThat(september.content().getFirst().dueDate()).isNull();
+    }
+
+    @Test
+    void correctionsOfDateValueAndPayerMoveAndTraceThePayment() {
+        var pharmacy = create(new CreateOneOffExpenseCommand("Farmácia", "90.00", ExpenseStatus.PAID, null,
+                LocalDate.of(2026, 9, 15), null, UUID.randomUUID()));
+        var gym = pending("Academia", "99.00", LocalDate.of(2026, 10, 1), null, null);
+        settle(gym, "99.00", LocalDate.of(2026, 9, 30), ADMIN);
+        var phone = pending("Telefone", "120.00", LocalDate.of(2026, 10, 5), null, null);
+        settle(phone, "110.00", LocalDate.of(2026, 10, 6), GUEST);
+        assertThat(paymentsOf("2026-09").indicators().paidTotal()).isEqualTo("189.00");
+        assertThat(paymentsOf("2026-10").indicators().paidTotal()).isEqualTo("110.00");
+
+        // P3: correcting the payment date from 30/09 to 01/10 moves the payment across the month boundary.
+        correctPayment(gym, "99.00", LocalDate.of(2026, 10, 1), GUEST);
+        assertThat(paymentsOf("2026-09").indicators().paidTotal()).isEqualTo("90.00");
+        assertThat(paymentsOf("2026-09").content()).extracting(PaymentRowView::expenseId).containsExactly(pharmacy);
+        assertThat(paymentsOf("2026-10").indicators().paidTotal()).isEqualTo("209.00");
+
+        // P4: correcting the paid value changes the paid total and the discount, and is traced on the row.
+        correctPayment(phone, "115.00", LocalDate.of(2026, 10, 6), GUEST);
+        var october = paymentsOf("2026-10");
+        assertThat(october.indicators().paidTotal()).isEqualTo("214.00");
+        assertThat(october.indicators().adjustmentDiscount()).isEqualTo("5.00");
+        assertThat(october.indicators().adjustmentNet()).isEqualTo("-5.00");
+        var phoneRow = row(october, "Telefone");
+        assertThat(phoneRow.adjustment()).isEqualTo("-5.00");
+        assertThat(phoneRow.payerDisplayName()).isEqualTo("Convidado");
+        assertThat(phoneRow.lastCorrection().changedFields()).containsExactly("paidAmount");
+        assertThat(phoneRow.lastCorrection().actorUserId()).isEqualTo(ADMIN);
+        // A correction that does not touch the payment (description only) is not a payment correction.
+        var expense = current(phone);
+        tx.execute(status -> expenses.correct(A, new CorrectExpenseCommand(phone, expense.version(),
+                ExpenseStatus.PAID, "Telefone fixo", expense.amount(), expense.dueDate(), expense.notes(),
+                expense.paidAmount(), expense.paymentDate(), expense.paidByUserId(), null, UUID.randomUUID())));
+        assertThat(row(paymentsOf("2026-10"), "Telefone fixo").correctionCount()).isEqualTo(1);
+        // Correcting the charge of a paid entry changes its adjustment and is shown as a payment correction.
+        var renamed = current(phone);
+        tx.execute(status -> expenses.correct(A, new CorrectExpenseCommand(phone, renamed.version(),
+                ExpenseStatus.PAID, renamed.description(), "115.00", renamed.dueDate(), renamed.notes(),
+                renamed.paidAmount(), renamed.paymentDate(), renamed.paidByUserId(), null, UUID.randomUUID())));
+        var corrected = row(paymentsOf("2026-10"), "Telefone fixo");
+        assertThat(corrected.adjustment()).isEqualTo("0.00");
+        assertThat(corrected.correctionCount()).isEqualTo(2);
+        assertThat(corrected.lastCorrection().changedFields()).containsExactly("amount");
+    }
+
+    @Test
+    void aReversedPaymentLeavesTheViewAndANewPaymentCountsOnce() {
+        var school = pending("Escola", "400.00", LocalDate.of(2026, 10, 3), null, null);
+        settle(school, "400.00", LocalDate.of(2026, 10, 4), ADMIN);
+        correctPayment(school, "400.00", LocalDate.of(2026, 10, 5), ADMIN);
+        assertThat(paymentsOf("2026-10").indicators().paidTotal()).isEqualTo("400.00");
+        assertThat(row(paymentsOf("2026-10"), "Escola").correctionCount()).isEqualTo(1);
+
+        reverse(school);
+        var afterReversal = paymentsOf("2026-10");
+        assertThat(afterReversal.indicators().count()).isZero();
+        assertThat(afterReversal.indicators().paidTotal()).isEqualTo("0.00");
+        assertThat(afterReversal.content()).isEmpty();
+
+        settle(school, "420.00", LocalDate.of(2026, 10, 14), GUEST);
+        var afterNewPayment = paymentsOf("2026-10");
+        assertThat(afterNewPayment.indicators().count()).isEqualTo(1);
+        assertThat(afterNewPayment.indicators().paidTotal()).isEqualTo("420.00");
+        assertThat(afterNewPayment.indicators().adjustmentIncrease()).isEqualTo("20.00");
+        var row = afterNewPayment.content().getFirst();
+        assertThat(row.payerDisplayName()).isEqualTo("Convidado");
+        // The correction belonged to the reversed payment, not to the active one.
+        assertThat(row.correctionCount()).isZero();
+        assertThat(row.lastCorrection()).isNull();
+    }
+
+    @Test
+    void paymentFiltersPagesOrderingAndEmptyMonthsAreConsistent() {
+        matrix();
+        var housingPayments = payments(A, new ReportFilters("2026-10", null, housing, false, null, false, null, null),
+                0, 20, PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+        assertThat(housingPayments.indicators().count()).isEqualTo(1);
+        assertThat(housingPayments.indicators().paidTotal()).isEqualTo("110.00");
+        assertThat(housingPayments.indicators().adjustmentDiscount()).isEqualTo("10.00");
+        var gas = payments(A, new ReportFilters("2026-10", " GÁS ", null, false, null, false, null, null), 0, 20,
+                PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+        assertThat(gas.indicators().paidTotal()).isEqualTo("60.00");
+        assertThat(payments(A, new ReportFilters("2026-10", null, null, false, GUEST, false, null, null), 0, 20,
+                PaymentSort.PAYMENT_DATE, SortDirection.ASC).indicators().count()).isZero();
+        assertThat(payments(A, new ReportFilters("2026-10", null, null, true, null, false, null, null), 0, 20,
+                PaymentSort.PAYMENT_DATE, SortDirection.ASC).indicators().paidTotal()).isEqualTo("1067.33");
+
+        var first = payments(A, filters("2026-10"), 0, 4, PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+        var second = payments(A, filters("2026-10"), 1, 4, PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+        assertThat(first.content()).hasSize(4);
+        assertThat(second.content()).hasSize(2);
+        assertThat(first.totalPages()).isEqualTo(2);
+        assertThat(second.indicators()).isEqualTo(first.indicators());
+        var listed = new ArrayList<PaymentRowView>(first.content());
+        listed.addAll(second.content());
+        assertThat(listed).extracting(PaymentRowView::expenseId).doesNotHaveDuplicates();
+        assertThat(listed.stream().map(r -> new BigDecimal(r.paidAmount())).reduce(BigDecimal.ZERO, BigDecimal::add))
+                .isEqualByComparingTo(first.indicators().paidTotal());
+
+        var byValue = payments(A, filters("2026-10"), 0, 20, PaymentSort.PAID_AMOUNT, SortDirection.DESC);
+        assertThat(byValue.content()).extracting(PaymentRowView::paidAmount)
+                .containsExactly("420.00", "333.33", "155.00", "110.00", "99.00", "60.00");
+        var byDescription = payments(A, filters("2026-10"), 0, 20, PaymentSort.DESCRIPTION, SortDirection.ASC);
+        assertThat(byDescription.content().getFirst().description()).isEqualTo("Academia out");
+        assertThat(byDescription.sort()).isEqualTo("DESCRIPTION");
+
+        var empty = payments(A, filters("2027-01"), 0, 20, PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+        assertThat(empty.indicators().count()).isZero();
+        assertThat(empty.indicators().paidTotal()).isEqualTo("0.00");
+        assertThat(empty.indicators().adjustmentNet()).isEqualTo("0.00");
+        assertThat(empty.content()).isEmpty();
+        assertThat(empty.totalPages()).isZero();
+    }
+
+    @Test
+    void paymentTotalsAreExactAboveTheSingleLimitAndSpacesAreIsolated() {
+        for (var description : List.of("Grande 1", "Grande 2")) {
+            var id = pending(description, "99999999.99", LocalDate.of(2026, 12, 1), null, null);
+            settle(id, "99999999.99", LocalDate.of(2026, 12, 2), ADMIN);
+        }
+        assertThat(paymentsOf("2026-12").indicators().paidTotal()).isEqualTo("199999999.98");
+        jdbc.update("""
+                insert into expense_entries(id, space_id, origin, description, charge_amount, charge_confirmed, status,
+                    due_date, reference_date, payment_date, paid_amount, paid_by_user_id, payment_recorded_by_user_id,
+                    payment_recorded_at, created_by_user_id, created_at, version)
+                values (?, ?, 'ONE_OFF', 'Outro espaço', 500.00, true, 'PAID', date '2026-12-01', date '2026-12-01',
+                    date '2026-12-02', 500.00, ?, ?, ?, ?, ?, 0)
+                """, UUID.randomUUID(), OTHER, OUTSIDER, OUTSIDER, Timestamp.from(NOW), OUTSIDER, Timestamp.from(NOW));
+        assertThat(paymentsOf("2026-12").indicators().count()).isEqualTo(2);
+        var foreign = payments("other@example.com", filters("2026-12"), 0, 20, PaymentSort.PAYMENT_DATE,
+                SortDirection.ASC);
+        assertThat(foreign.indicators().paidTotal()).isEqualTo("500.00");
+        assertThat(foreign.content()).extracting(PaymentRowView::description).containsExactly("Outro espaço");
+        var foreignCategory = tx.execute(status -> categories.create("other@example.com", "Outra").id());
+        assertThat(payments(A, new ReportFilters("2026-12", null, foreignCategory, false, null, false, null, null), 0,
+                20, PaymentSort.PAYMENT_DATE, SortDirection.ASC).indicators().count()).isZero();
+        assertThatThrownBy(() -> paymentsOf("nobody@example.com", "2026-12"))
+                .isInstanceOf(AuthenticatedUserContextNotFoundException.class);
+    }
+
+    private PaymentReportView payments(String email, ReportFilters filters, int page, int size, PaymentSort sort,
+            SortDirection direction) {
+        return reports.payments(email, new PaymentReportQuery(filters, page, size, sort, direction));
+    }
+
+    private PaymentReportView paymentsOf(String month) {
+        return paymentsOf(A, month);
+    }
+
+    private PaymentReportView paymentsOf(String email, String month) {
+        return payments(email, filters(month), 0, 20, PaymentSort.PAYMENT_DATE, SortDirection.ASC);
+    }
+
+    private static PaymentRowView row(PaymentReportView view, String description) {
+        return view.content().stream().filter(r -> r.description().equals(description)).findFirst().orElseThrow();
     }
 
     private void assertIndicators(String planned, String paid, String pending, String overdue, String net) {

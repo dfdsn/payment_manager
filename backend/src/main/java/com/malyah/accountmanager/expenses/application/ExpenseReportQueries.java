@@ -11,4 +11,11 @@ import java.util.UUID;
 public interface ExpenseReportQueries {
     /** Groups every non-cancelled expense of the selection; cancelled entries never reach financial totals. */
     List<ExpenseTotalsBucket> totals(UUID spaceId, ExpenseSelection selection);
+
+    /**
+     * H06.2: one page of the active payments of the selection, which must use {@code PAYMENT_DATE} and the
+     * {@code PAID} status so that the page and {@link #totals} select the same population.
+     */
+    PaymentRecordPage payments(UUID spaceId, ExpenseSelection selection, int page, int size, PaymentSort sort,
+            SortDirection direction);
 }

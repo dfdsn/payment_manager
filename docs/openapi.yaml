@@ -1379,6 +1379,42 @@ paths:
               schema: { $ref: "#/components/schemas/ApiError" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /reports/payments:
+    get:
+      operationId: paymentsReport
+      summary: Quitações ativas do mês pela data efetiva do pagamento, com totais sobre toda a seleção e uma página
+      description: >-
+        Base temporal PAYMENT_DATE: somente despesas com quitação ativa cuja data de pagamento cai no mês. Quitações
+        desfeitas não aparecem; a nova quitação aparece uma vez. Correções de valor, data e pagador já estão refletidas
+        e a linha identifica a última (autor, instante, campos). Mesmos filtros de GET /expenses, sem filtro de
+        situação. Os indicadores somam toda a seleção, não a página. Não há pendente, saldo nem resultado financeiro.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: month, in: query, description: Mês AAAA-MM; ausente usa o mês atual no fuso do espaço., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+        - { name: search, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutCategory, in: query, schema: { type: boolean, default: false } }
+        - { name: responsibleUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: withoutResponsible, in: query, schema: { type: boolean, default: false } }
+        - { name: payerUserId, in: query, schema: { type: string, format: uuid } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: sort, in: query, description: Desempate por descrição e id., schema: { type: string, enum: [PAYMENT_DATE, PAID_AMOUNT, DESCRIPTION], default: PAYMENT_DATE } }
+        - { name: direction, in: query, schema: { type: string, enum: [ASC, DESC], default: ASC } }
+      responses:
+        "200":
+          description: Indicadores e página com dinheiro em strings decimais exatas de duas casas.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentReport" }
+        "400":
+          description: Mês, página, ordenação ou combinação de filtros inválida (REPORT_QUERY_INVALID).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
 components:
   securitySchemes:
     sessionCookie:
@@ -2398,6 +2434,67 @@ components:
         estimated: { type: string }
         overdueCount: { type: integer, format: int64 }
         overdueTotal: { type: string }
+    PaymentReport:
+      type: object
+      required: [month, periodStart, periodEnd, dateBasis, timeZone, indicators, content, page, size, totalElements, totalPages, sort, direction]
+      properties:
+        month: { type: string, example: "2026-10" }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        dateBasis: { type: string, enum: [PAYMENT_DATE] }
+        timeZone: { type: string, example: America/Sao_Paulo }
+        indicators: { $ref: "#/components/schemas/PaymentIndicators" }
+        content: { type: array, items: { $ref: "#/components/schemas/PaymentRow" } }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        sort: { type: string, enum: [PAYMENT_DATE, PAID_AMOUNT, DESCRIPTION] }
+        direction: { type: string, enum: [ASC, DESC] }
+    PaymentIndicators:
+      type: object
+      description: Quitações ativas do mês pela data do pagamento; ajustes = pago − cobrança de cada quitação.
+      properties:
+        count: { type: integer, format: int64 }
+        paidTotal: { type: string, example: "1177.33" }
+        chargeTotal: { type: string, example: "1162.33" }
+        adjustmentIncrease: { type: string, example: "25.00" }
+        adjustmentDiscount: { type: string, example: "10.00" }
+        adjustmentNet: { type: string, example: "15.00" }
+    PaymentRow:
+      type: object
+      properties:
+        expenseId: { type: string, format: uuid }
+        description: { type: string }
+        origin: { type: string, enum: [ONE_OFF, RECURRENCE, INSTALLMENT] }
+        installment:
+          type: [object, "null"]
+          properties:
+            purchaseId: { type: string, format: uuid }
+            number: { type: integer }
+            count: { type: integer }
+        dueDate: { type: [string, "null"], format: date }
+        chargeAmount: { type: string }
+        chargeConfirmed: { type: boolean }
+        paidAmount: { type: string }
+        adjustment: { type: string, description: Pago − cobrança; negativo para desconto. }
+        paymentDate: { type: string, format: date }
+        payerUserId: { type: string, format: uuid }
+        payerDisplayName: { type: string, description: Quem pagou (pode ser corrigido). }
+        recordedByUserId: { type: string, format: uuid }
+        recordedByDisplayName: { type: string, description: Quem registrou a quitação ativa. }
+        recordedAt: { type: string, format: date-time }
+        batchPayment: { type: boolean, description: Quitação ativa registrada em lote. }
+        categoryName: { type: [string, "null"] }
+        responsibleDisplayName: { type: [string, "null"] }
+        correctionCount: { type: integer, description: Correções de cobrança, valor pago, data ou pagador desde a quitação ativa. }
+        lastCorrection:
+          type: [object, "null"]
+          properties:
+            actorUserId: { type: string, format: uuid }
+            actorDisplayName: { type: string }
+            correctedAt: { type: string, format: date-time }
+            changedFields: { type: array, items: { type: string, enum: [amount, paidAmount, paymentDate, paidByUserId] } }
     ApiError:
       type: object
       required: [code, message, fieldErrors, operationId]

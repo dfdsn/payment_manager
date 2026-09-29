@@ -36,6 +36,32 @@ export interface DueDashboard {
   previousPending: PreviousPending;
 }
 
+export interface PaymentIndicators {
+  count: number; paidTotal: string; chargeTotal: string;
+  adjustmentIncrease: string; adjustmentDiscount: string; adjustmentNet: string;
+}
+
+export interface PaymentCorrection {
+  actorUserId: string; actorDisplayName: string; correctedAt: string; changedFields: string[];
+}
+
+export interface PaymentRow {
+  expenseId: string; description: string; origin: 'ONE_OFF' | 'RECURRENCE' | 'INSTALLMENT';
+  installment: { purchaseId: string; number: number; count: number } | null;
+  dueDate: string | null; chargeAmount: string; chargeConfirmed: boolean; paidAmount: string; adjustment: string;
+  paymentDate: string; payerUserId: string; payerDisplayName: string; recordedByUserId: string;
+  recordedByDisplayName: string; recordedAt: string; batchPayment: boolean; categoryName: string | null;
+  responsibleDisplayName: string | null; correctionCount: number; lastCorrection: PaymentCorrection | null;
+}
+
+export type PaymentSort = 'PAYMENT_DATE' | 'PAID_AMOUNT' | 'DESCRIPTION';
+
+export interface PaymentReport {
+  month: string; periodStart: string; periodEnd: string; dateBasis: 'PAYMENT_DATE'; timeZone: string;
+  indicators: PaymentIndicators; content: PaymentRow[]; page: number; size: number; totalElements: number;
+  totalPages: number; sort: PaymentSort; direction: 'ASC' | 'DESC';
+}
+
 @Injectable({ providedIn: 'root' })
 export class ReportService {
   private readonly http = inject(HttpClient);
@@ -43,6 +69,13 @@ export class ReportService {
 
   dueDashboard(month: string, filters: ReportFilters = {}) {
     return this.http.get<DueDashboard>(`${this.endpoint}/due-dashboard`, { params: params(month, filters) });
+  }
+
+  /** H06.2: active payments by effective payment date; the situation filter does not apply. */
+  payments(month: string, filters: Omit<ReportFilters, 'status'>, page: number, size: number, sort: PaymentSort,
+    direction: 'ASC' | 'DESC') {
+    const query = params(month, { ...filters, page, size, sort, direction });
+    return this.http.get<PaymentReport>(`${this.endpoint}/payments`, { params: query });
   }
 }
 
@@ -100,4 +133,18 @@ export function formatDate(value: string | null): string {
   if (!value) return 'Não informado';
   const [year, month, day] = value.split('-');
   return `${day}/${month}/${year}`;
+}
+
+/** Technical instants are UTC; members read them in the space time zone. */
+export function formatInstant(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('pt-BR', { timeZone, day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
+const PAYMENT_FIELD_LABELS: Record<string, string> = {
+  amount: 'valor da cobrança', paidAmount: 'valor pago', paymentDate: 'data do pagamento', paidByUserId: 'pagador',
+};
+
+export function paymentFields(fields: string[]): string {
+  return fields.map(field => PAYMENT_FIELD_LABELS[field] ?? field).join(', ');
 }
