@@ -89,6 +89,23 @@ class MetaWhatsAppProviderTest {
         assertThat(provider.classify(302, bytes(""))).isEqualTo(SendResult.of(Outcome.UNCERTAIN, "302"));
     }
 
+    /** H08.5: explicit temporary refusals may be retried, with the provider's wait; ambiguous 5xx stay uncertain. */
+    @Test
+    void temporaryRefusalsCarryTheProviderWait() {
+        var provider = new MetaWhatsAppProvider(props(true, "v23.0", ""));
+        assertThat(provider.classify(503, bytes("{\"error\":{\"code\":131016}}"), null))
+                .isEqualTo(SendResult.of(Outcome.UNAVAILABLE, "131016"));
+        assertThat(provider.classify(500, bytes("{\"error\":{\"code\":131000}}"), "30").outcome())
+                .isEqualTo(Outcome.UNCERTAIN);
+        assertThat(provider.classify(429, bytes("{\"error\":{\"code\":133016}}"), " 120 "))
+                .isEqualTo(new SendResult(Outcome.UNAVAILABLE, null, "133016", Duration.ofSeconds(120)));
+        assertThat(provider.classify(429, bytes(""), "99999").retryAfter()).isEqualTo(Duration.ofHours(1));
+        assertThat(provider.classify(429, bytes(""), "Wed, 21 Oct 2026 07:28:00 GMT").retryAfter()).isNull();
+        assertThat(provider.classify(429, bytes(""), "-5").retryAfter()).isNull();
+        assertThat(provider.classify(400, bytes("{\"error\":{\"code\":132001}}"), "60").retryAfter()).isNull();
+        assertThat(MetaWhatsAppProvider.retryAfter(null)).isNull();
+    }
+
     private static byte[] bytes(String text) {
         return text.getBytes(StandardCharsets.UTF_8);
     }

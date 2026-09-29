@@ -38,6 +38,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import com.malyah.accountmanager.expenses.application.CancelExpenseCommand;
+import com.malyah.accountmanager.expenses.application.CorrectExpenseCommand;
 import com.malyah.accountmanager.expenses.application.CreateOneOffExpenseCommand;
 import com.malyah.accountmanager.expenses.application.ExpenseService;
 import com.malyah.accountmanager.expenses.application.SettleExpenseCommand;
@@ -114,6 +115,7 @@ class WhatsAppDeliveryPostgresIT {
     private ReminderSummaryJob summaryJob;
     private WhatsAppDeliveryService deliveries;
     private WhatsAppDeliveryJob job;
+    private MetaWhatsAppProvider sender;
     private WhatsAppDeliveryUseCase tracking;
     private MetaWhatsAppWebhook webhook;
     private ListAppender<ILoggingEvent> logs;
@@ -124,7 +126,7 @@ class WhatsAppDeliveryPostgresIT {
                 POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(27);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(28);
         jdbc = new JdbcTemplate(dataSource);
         tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         insertSpace(SPACE, "Casa");
@@ -339,6 +341,9 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(delivery(summaryId(FIRST))).isEqualTo("REJECTED/PROVIDER_REJECTED");
         assertThat(jdbc.queryForObject("select provider_error_code from whatsapp_deliveries", String.class))
                 .isEqualTo("132001");
+        // H08.5: a permanent refusal suspends the channel; the administrator enables it again after the fix.
+        assertThat(settings.view(A).whatsapp().state()).isEqualTo("SUSPENDED");
+        tx.execute(s -> settings.changeChannel(A, ReminderSettingsCommand.channel(4L, true, UUID.randomUUID())));
 
         summaryAt(SECOND);
         meta.enqueue(400, """
@@ -353,9 +358,12 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(meta.requests()).hasSize(2);
     }
 
-    /** W9: provider down or throttling is a failure, never retried here. */
+    /**
+     * W9, as changed by H08.5: a provider that is down (connection refused) or throttling did not receive the request,
+     * so the same delivery waits for its next attempt; nothing is marked as failed and no notice is sent yet.
+     */
     @Test
-    void w9UnavailableProviderFailsWithoutRetry() throws Exception {
+    void w9UnavailableProviderWaitsForTheNextAttempt() throws Exception {
         int closedPort;
         try (var socket = new ServerSocket(0)) {
             closedPort = socket.getLocalPort();
@@ -366,20 +374,19 @@ class WhatsAppDeliveryPostgresIT {
         summaryAt(FIRST);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
-        assertThat(delivery(summaryId(FIRST))).isEqualTo("FAILED/PROVIDER_UNAVAILABLE");
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
+        assertThat(attemptOutcomes(summaryId(FIRST))).containsExactly("FAILED");
 
         build(properties(meta.baseUrl(), true, "teste_conexao"));
-        summaryAt(SECOND);
         meta.enqueue(429, """
                 {"error":{"message":"rate","code":130429}}
                 """);
-        clock.set(SECOND.plusSeconds(10));
+        clock.set(FIRST.plusSeconds(70));
         job.poll();
-        clock.set(SECOND.plusSeconds(70));
-        job.poll();
-        assertThat(delivery(summaryId(SECOND))).isEqualTo("FAILED/PROVIDER_UNAVAILABLE");
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
         assertThat(meta.requests()).hasSize(1);
-        assertThat(failureCodes()).containsExactly("PROVIDER_UNAVAILABLE", "PROVIDER_UNAVAILABLE");
+        assertThat(failureCodes()).isEmpty();
+        assertThat(settings.view(A).whatsapp().state()).isEqualTo("READY");
     }
 
     /** W10: timeout, 5xx and a 200 without id are uncertain and never resent; an interrupted attempt too. */
@@ -508,10 +515,12 @@ class WhatsAppDeliveryPostgresIT {
         summaryAt(FIRST);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
-        assertThat(post(failed("wamid.FAKE-1", 131026)).status()).isEqualTo(200);
+        // A failure that is not about the recipient (131049, "healthy ecosystem"): no suspension (H08.5, see R14).
+        assertThat(post(failed("wamid.FAKE-1", 131049)).status()).isEqualTo(200);
         assertThat(delivery(summaryId(FIRST))).isEqualTo("FAILED/DELIVERY_FAILED");
         assertThat(jdbc.queryForObject("select provider_error_code from whatsapp_deliveries", String.class))
-                .isEqualTo("131026");
+                .isEqualTo("131049");
+        assertThat(settings.view(A).whatsapp().state()).isEqualTo("READY");
         assertThat(failureCodes()).containsExactly("DELIVERY_FAILED");
         assertThat(recipients("WHATSAPP_DELIVERY_FAILURE")).containsExactly(ADMIN);
         var admin = inbox.list(A, null, null, null).items().stream().filter(n -> n.failure() != null).findFirst()
@@ -593,6 +602,479 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(count("whatsapp_deliveries")).isZero();
     }
 
+    // ---------------------------------------------------------------------------------------------------------
+    // H08.5 (matrix R1–R19 in docs/evidencias/H08.5.md): retries, expiry, suspension and reconciliation, with the
+    // SIMULATED Meta server answering failures on purpose. Nothing here makes Meta itself unavailable.
+    // ---------------------------------------------------------------------------------------------------------
+
+    static final String THROTTLED = """
+            {"error":{"message":"rate","code":130429}}
+            """;
+
+    /** R6 + R15 + R17: a certain transient failure is retried in the same delivery until accepted. */
+    @Test
+    void r6TransientFailuresAreRetriedInTheSameDeliveryUntilAccepted() throws Exception {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        var summaryId = summaryId();
+        meta.enqueue(429, THROTTLED);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        assertThat(delivery(summaryId)).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
+        assertThat(nextAttempt(summaryId)).isEqualTo(FIRST.plusSeconds(70));
+        var waiting = tracking.summaryDelivery(A, summaryId);
+        assertThat(waiting.state()).isEqualTo("RETRY_WAITING");
+        assertThat(waiting.nextAttemptAt()).isEqualTo(FIRST.plusSeconds(70));
+        // R15: an unavailable provider never touches the number, the consent or the channel.
+        var channel = settings.view(A).whatsapp();
+        assertThat(channel.state()).isEqualTo("READY");
+        assertThat(channel.suspension()).isNull();
+        assertThat(channel.consent().active()).isTrue();
+        assertThat(channel.recipient()).isEqualTo("+5511987654321");
+        assertThat(failureCodes()).isEmpty();
+
+        clock.set(FIRST.plusSeconds(69));
+        job.poll();
+        assertThat(meta.requests()).hasSize(1);
+        meta.enqueue(503, """
+                {"error":{"message":"Service temporarily unavailable","code":131016}}
+                """);
+        clock.set(FIRST.plusSeconds(70));
+        job.poll();
+        assertThat(delivery(summaryId)).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
+        assertThat(nextAttempt(summaryId)).isEqualTo(FIRST.plusSeconds(370));
+        clock.set(FIRST.plusSeconds(370));
+        job.poll();
+        assertThat(meta.requests()).hasSize(3);
+        assertThat(delivery(summaryId)).isEqualTo("ACCEPTED/-");
+        assertThat(attemptOutcomes(summaryId)).containsExactly("FAILED", "FAILED", "ACCEPTED");
+        assertThat(count("whatsapp_deliveries")).isOne();
+        assertThat(count("reminder_summaries")).isOne();
+        // Each attempt carries its own reference; the same template and content every time.
+        var references = meta.requests().stream().map(r -> reference(r.body())).toList();
+        assertThat(references).doesNotHaveDuplicates().containsExactlyElementsOf(jdbc.queryForList(
+                "select a.id::text from whatsapp_attempts a order by a.attempt_number", String.class));
+        for (var request : meta.requests())
+            assertThat(parameters(JSON.readTree(request.body())).get(1)).isEqualTo("1 conta, total R$ 120,00");
+        assertThat(failureCodes()).isEmpty();
+        assertThat(recipients("REMINDER_SUMMARY")).containsExactlyInAnyOrder(ADMIN, GUEST);
+        clock.set(FIRST.plusSeconds(900));
+        job.poll();
+        assertThat(meta.requests()).hasSize(3);
+    }
+
+    /** R7: the window never grows; after the last attempt that fits, the summary expires and is never sent. */
+    @Test
+    void r7RetriesExpireWithinOneHourOfTheOriginalSlot() {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        var summaryId = summaryId();
+        for (int i = 0; i < 6; i++) meta.enqueue(429, THROTTLED);
+        for (var at : List.of(10, 70, 370, 1270, 3070)) {
+            clock.set(FIRST.plusSeconds(at));
+            job.poll();
+        }
+        assertThat(meta.requests()).hasSize(5);
+        assertThat(delivery(summaryId)).isEqualTo("FAILED/NOT_SENT_IN_WINDOW");
+        assertThat(attemptOutcomes(summaryId)).containsExactly("FAILED", "FAILED", "FAILED", "FAILED", "FAILED");
+        assertThat(jdbc.queryForObject("select max(started_at) from whatsapp_attempts", Timestamp.class)
+                .toInstant()).isBefore(FIRST.plusSeconds(3600));
+        assertThat(failureCodes()).containsExactly("NOT_SENT_IN_WINDOW");
+        clock.set(FIRST.plusSeconds(3700));
+        job.poll();
+        assertThat(meta.requests()).hasSize(5);
+        assertThat(tracking.summaryDelivery(A, summaryId).reasonMessage())
+                .isEqualTo(WhatsAppFailureReason.NOT_SENT_IN_WINDOW.message());
+    }
+
+    /** R8: the provider's wait is honored, and the next slot ends the retry before its instant. */
+    @Test
+    void r8TheNextSlotClosesAPendingRetryAndOnlyTheCurrentSummaryIsSent() throws Exception {
+        enableWhatsApp();
+        tx.execute(s -> settings.changeSchedule(A, ReminderSettingsCommand.schedule(3L, "09:00", "09:30",
+                UUID.randomUUID())));
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        var firstId = summaryId();
+        meta.enqueueRetryAfter(429, THROTTLED, "1500");
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        assertThat(nextAttempt(firstId)).isEqualTo(FIRST.plusSeconds(1510));
+        clock.set(FIRST.plusSeconds(1500));
+        job.poll();
+        assertThat(meta.requests()).hasSize(1);
+        var nextSlot = FIRST.plusSeconds(1800);
+        summaryAt(nextSlot);
+        job.poll();
+        assertThat(delivery(firstId)).isEqualTo("FAILED/NOT_SENT_IN_WINDOW");
+        assertThat(delivery(summaryId(nextSlot))).isEqualTo("ACCEPTED/-");
+        assertThat(meta.requests()).hasSize(2);
+        assertThat(parameters(JSON.readTree(meta.requests().get(1).body())).getFirst())
+                .isEqualTo("05/10/2026, 09:30");
+        assertThat(attemptOutcomes(firstId)).containsExactly("FAILED");
+    }
+
+    /** R9: after a restart a retry still inside its window is resumed; one outside it is closed unsent. */
+    @Test
+    void r9RestartResumesOnlyRetriesStillInsideTheirWindow() {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        meta.enqueue(429, THROTTLED);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        build(properties(meta.baseUrl(), true, "teste_conexao"));
+        clock.set(FIRST.plusSeconds(120));
+        job.poll();
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("ACCEPTED/-");
+        assertThat(meta.requests()).hasSize(2);
+
+        summaryAt(SECOND);
+        meta.enqueue(429, THROTTLED);
+        clock.set(SECOND.plusSeconds(10));
+        job.poll();
+        assertThat(delivery(summaryId(SECOND))).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
+        build(properties(meta.baseUrl(), true, "teste_conexao"));
+        clock.set(SECOND.plusSeconds(3601));
+        job.poll();
+        assertThat(delivery(summaryId(SECOND))).isEqualTo("FAILED/NOT_SENT_IN_WINDOW");
+        assertThat(meta.requests()).hasSize(3);
+        assertThat(failureCodes()).containsExactly("NOT_SENT_IN_WINDOW");
+        assertThat(logText()).contains("whatsapp_retry_closed");
+    }
+
+    /** R10: after a long unavailability nothing old is sent: only the current slot's summary goes out. */
+    @Test
+    void r10NothingAccumulatesAfterAnUnavailability() {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        meta.enqueue(429, THROTTLED);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        // The server is down (no job runs) from 12:00:10 until after the second slot.
+        summaryAt(SECOND);
+        clock.set(SECOND.plusSeconds(10));
+        job.poll();
+        job.poll();
+        assertThat(meta.requests()).hasSize(2);
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("FAILED/NOT_SENT_IN_WINDOW");
+        assertThat(delivery(summaryId(SECOND))).isEqualTo("ACCEPTED/-");
+        assertThat(count("reminder_summaries")).isEqualTo(2);
+        assertThat(count("whatsapp_attempts")).isEqualTo(2);
+        // A whole day missed while down: the slots of the day are MISSED, nothing retroactive is generated.
+        var nextDay = Instant.parse("2026-10-07T12:00:00Z");
+        summaryAt(nextDay.plusSeconds(10));
+        clock.set(nextDay.plusSeconds(20));
+        job.poll();
+        assertThat(jdbc.queryForObject("select count(*) from reminder_slot_runs where local_date = '2026-10-06'",
+                Long.class)).isZero();
+        assertThat(meta.requests()).hasSize(3);
+    }
+
+    /** R1 + R2 + R19: each retry recomposes the content; paid, cancelled and moved bills leave, values update. */
+    @Test
+    void r1r2EachRetryRevalidatesTheBillsAndAChangedDueDateSendsNothingExtra() throws Exception {
+        enableWhatsApp();
+        var luz = pending("Luz", "120.00", d(10, 5));
+        var agua = pending("Água", "80.00", d(10, 6));
+        var gas = pending("Gás", "50.00", d(10, 7));
+        var net = pending("Internet", "99.90", d(10, 8));
+        summaryAt(FIRST);
+        var summaryId = summaryId();
+        meta.enqueue(429, THROTTLED);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        assertThat(parameters(JSON.readTree(meta.requests().getFirst().body())).get(1))
+                .isEqualTo("4 contas, total R$ 349,90");
+        clock.set(FIRST.plusSeconds(30));
+        settle(luz);
+        cancel(agua);
+        correct(gas, "55.00", d(10, 7));
+        correct(net, "99.90", d(10, 20));
+        clock.set(FIRST.plusSeconds(70));
+        job.poll();
+        assertThat(meta.requests()).hasSize(2);
+        assertThat(parameters(JSON.readTree(meta.requests().get(1).body()))).containsExactly("05/10/2026, 09:00",
+                "1 conta, total R$ 55,00", "07/10 Gás R$ 55,00",
+                "https://contas.malyah.tech/lembretes/resumos/" + summaryId);
+        assertThat(jdbc.queryForObject("select item_count from whatsapp_deliveries", Integer.class)).isOne();
+        // RF-ALT-14: moving a due date into today after the send does not trigger another message.
+        correct(net, "99.90", d(10, 5));
+        clock.set(FIRST.plusSeconds(600));
+        job.poll();
+        summaryAt(FIRST.plusSeconds(900));
+        job.poll();
+        assertThat(meta.requests()).hasSize(2);
+        assertThat(count("reminder_summaries")).isOne();
+    }
+
+    /** R3: a retry whose bills were all paid is closed without any message and without a failure notice. */
+    @Test
+    void r3ARetryWithoutEligibleBillsIsClosedWithoutSending() {
+        enableWhatsApp();
+        var luz = pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        meta.enqueue(429, THROTTLED);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        settle(luz);
+        clock.set(FIRST.plusSeconds(70));
+        job.poll();
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("SKIPPED/EMPTY");
+        assertThat(meta.requests()).hasSize(1);
+        assertThat(failureCodes()).isEmpty();
+    }
+
+    /** R4 + R5: disabling, a new administrator or a new number stop a waiting retry, even before its instant. */
+    @Test
+    void r4r5DisablingOrChangingTheRecipientStopsAWaitingRetry() {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        meta.enqueue(429, THROTTLED);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        tx.execute(s -> settings.changeChannel(A, ReminderSettingsCommand.channel(3L, false, UUID.randomUUID())));
+        clock.set(FIRST.plusSeconds(20));
+        job.poll();
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("SKIPPED/DISABLED");
+
+        tx.execute(s -> settings.changeChannel(A, ReminderSettingsCommand.channel(4L, true, UUID.randomUUID())));
+        summaryAt(SECOND);
+        meta.enqueue(429, THROTTLED);
+        clock.set(SECOND.plusSeconds(10));
+        job.poll();
+        tx.execute(s -> settings.changeRecipient(A, ReminderSettingsCommand.recipient(5L, "(21) 99876-5432",
+                UUID.randomUUID())));
+        clock.set(SECOND.plusSeconds(70));
+        job.poll();
+        // Saving another number revokes the consent of the old one, which is what the revalidation finds first.
+        assertThat(delivery(summaryId(SECOND))).isEqualTo("SKIPPED/CONSENT_REVOKED");
+
+        var nextDay = Instant.parse("2026-10-06T12:00:00Z");
+        tx.execute(s -> settings.grantConsent(A, ReminderSettingsCommand.consent(6L, "(21) 99876-5432", true,
+                UUID.randomUUID())));
+        tx.execute(s -> settings.changeChannel(A, ReminderSettingsCommand.channel(7L, true, UUID.randomUUID())));
+        summaryAt(nextDay);
+        meta.enqueue(429, THROTTLED);
+        clock.set(nextDay.plusSeconds(10));
+        job.poll();
+        memberships.transferAdministration(A, GUEST);
+        clock.set(nextDay.plusSeconds(70));
+        job.poll();
+        assertThat(delivery(summaryId(nextDay))).isEqualTo("SKIPPED/ADMINISTRATOR_CHANGED");
+        assertThat(meta.requests()).hasSize(3);
+        assertThat(failureCodes()).isEmpty();
+    }
+
+    /** R11: concurrent workers on a due retry make exactly one more request. */
+    @Test
+    void r11ConcurrentWorkersRetryOnce() throws Exception {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        var summaryId = summaryId();
+        meta.enqueue(429, THROTTLED);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        var deliveryId = deliveryId(summaryId);
+        clock.set(FIRST.plusSeconds(70));
+        meta.enqueueDelayed(200, """
+                {"messages":[{"id":"wamid.SLOW"}]}
+                """, 300);
+        race(() -> {
+            job.retry(deliveryId);
+            return null;
+        }, () -> {
+            job.retry(deliveryId);
+            return null;
+        }, () -> {
+            job.poll();
+            return null;
+        });
+        job.poll();
+        assertThat(meta.requests()).hasSize(2);
+        assertThat(attemptOutcomes(summaryId)).containsExactly("FAILED", "ACCEPTED");
+        assertThat(delivery(summaryId)).isEqualTo("ACCEPTED/-");
+    }
+
+    /** R12: a lease recovered after a possibly accepted retry is never resent; the webhook reconciles it. */
+    @Test
+    void r12ARecoveredLeaseIsNeverResentAndTheWebhookReconcilesIt() {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        var summaryId = summaryId();
+        meta.enqueue(429, THROTTLED);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        clock.set(FIRST.plusSeconds(70));
+        // The worker claims attempt 2 and Meta accepts it, but the process stops before recording the answer.
+        var ready = (WhatsAppDeliveryService.Ready) tx.execute(s -> deliveries.prepareRetry(deliveryId(summaryId),
+                clock.instant()));
+        assertThat(sender.send(ready.message()).providerMessageId()).isEqualTo("wamid.FAKE-1");
+        clock.set(FIRST.plusSeconds(70 + 601));
+        job.poll();
+        assertThat(delivery(summaryId)).isEqualTo("UNCERTAIN/RESULT_UNCERTAIN");
+        clock.set(FIRST.plusSeconds(1500));
+        job.poll();
+        assertThat(meta.requests()).hasSize(2);
+        assertThat(failureCodes()).containsExactly("RESULT_UNCERTAIN");
+
+        assertThat(post(statusesWithReference("wamid.FAKE-1", "sent", 1_791_201_700L, ready.attemptId().toString()))
+                .status()).isEqualTo(200);
+        assertThat(delivery(summaryId)).isEqualTo("SENT/-");
+        var view = tracking.summaryDelivery(A, summaryId);
+        assertThat(view.state()).isEqualTo("SENT");
+        assertThat(view.reconciledAt()).isEqualTo(FIRST.plusSeconds(1500));
+        assertThat(attemptOutcomes(summaryId)).containsExactly("FAILED", "ACCEPTED");
+        // Later statuses find the message by its id; repeated or older ones change nothing.
+        assertThat(post(statuses("wamid.FAKE-1", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
+        assertThat(post(statusesWithReference("wamid.FAKE-1", "sent", 1_791_201_700L, ready.attemptId().toString()))
+                .status()).isEqualTo(200);
+        assertThat(delivery(summaryId)).isEqualTo("DELIVERED/-");
+        assertThat(meta.requests()).hasSize(2);
+    }
+
+    /** R13: a timeout is ambiguous: no automatic resend inside the window; the echoed reference reconciles it. */
+    @Test
+    void r13AnAmbiguousTimeoutIsNotResentAndIsReconciledByItsReference() {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        var summaryId = summaryId();
+        meta.enqueueDelayed(200, """
+                {"messages":[{"id":"wamid.LATE"}]}
+                """, 1500);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        assertThat(delivery(summaryId)).isEqualTo("UNCERTAIN/RESULT_UNCERTAIN");
+        for (var at : List.of(80, 400, 1300, 3000)) {
+            clock.set(FIRST.plusSeconds(at));
+            job.poll();
+        }
+        assertThat(meta.requests()).hasSize(1);
+        // A status of an unknown id without reference is ignored; with the echoed reference it reconciles.
+        assertThat(post(statuses("wamid.LATE", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
+        assertThat(delivery(summaryId)).isEqualTo("UNCERTAIN/RESULT_UNCERTAIN");
+        var reference = reference(meta.requests().getFirst().body());
+        assertThat(post(statusesWithReference("wamid.LATE", "delivered", 1_791_201_800L, reference)).status())
+                .isEqualTo(200);
+        assertThat(delivery(summaryId)).isEqualTo("DELIVERED/-");
+        assertThat(jdbc.queryForObject("select provider_message_id from whatsapp_deliveries", String.class))
+                .isEqualTo("wamid.LATE");
+    }
+
+    /** R14 + R16: a permanent failure suspends the channel with guidance; re-enabling resumes it next slot. */
+    @Test
+    void r14APermanentFailureSuspendsUntilTheAdministratorEnablesAgain() {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        meta.enqueue(400, """
+                {"error":{"message":"Message undeliverable","code":131026}}
+                """);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("REJECTED/RECIPIENT_INVALID");
+        var channel = settings.view(A);
+        assertThat(channel.version()).isEqualTo(4);
+        assertThat(channel.whatsapp().state()).isEqualTo("SUSPENDED");
+        assertThat(channel.whatsapp().enabled()).isFalse();
+        assertThat(channel.whatsapp().consent().active()).isTrue();
+        assertThat(channel.whatsapp().recipient()).isEqualTo("+5511987654321");
+        assertThat(channel.whatsapp().suspension().reason()).isEqualTo("RECIPIENT_INVALID");
+        assertThat(channel.whatsapp().suspension().message()).contains("reative o canal");
+        var event = settings.events(A).items().getFirst();
+        assertThat(event.type()).isEqualTo("CHANNEL_SUSPENDED");
+        assertThat(event.actorDisplayName()).isEqualTo("Sistema");
+        assertThat(settings.view(G).whatsapp().recipient()).isNull();
+
+        summaryAt(SECOND);
+        clock.set(SECOND.plusSeconds(10));
+        job.poll();
+        var skipped = tracking.summaryDelivery(A, summaryId(SECOND));
+        assertThat(skipped.state()).isEqualTo("NOT_PLANNED");
+        assertThat(skipped.reason()).isEqualTo("SUSPENDED");
+        assertThat(meta.requests()).hasSize(1);
+        assertThat(failureCodes()).containsExactly("RECIPIENT_INVALID");
+        assertThat(recipients("REMINDER_SUMMARY")).containsExactlyInAnyOrder(ADMIN, GUEST, ADMIN, GUEST);
+        assertThat(inbox.list(G, null, null, null).items()).allSatisfy(n -> assertThat(n.failure()).isNull());
+
+        tx.execute(s -> settings.changeChannel(A, ReminderSettingsCommand.channel(4L, true, UUID.randomUUID())));
+        assertThat(settings.view(A).whatsapp().state()).isEqualTo("READY");
+        var nextDay = Instant.parse("2026-10-06T12:00:00Z");
+        summaryAt(nextDay);
+        clock.set(nextDay.plusSeconds(10));
+        job.poll();
+        assertThat(delivery(summaryId(nextDay))).isEqualTo("ACCEPTED/-");
+
+        // R16: Meta reports a recipient failure later by webhook: suspended again, once; out of order changes nothing.
+        assertThat(post(failed("wamid.FAKE-1", 131026)).status()).isEqualTo(200);
+        assertThat(post(failed("wamid.FAKE-1", 131026)).status()).isEqualTo(200);
+        assertThat(post(statuses("wamid.FAKE-1", "delivered", 1_791_201_999L)).status()).isEqualTo(200);
+        assertThat(delivery(summaryId(nextDay))).isEqualTo("FAILED/DELIVERY_FAILED");
+        assertThat(settings.view(A).whatsapp().suspension().reason()).isEqualTo("RECIPIENT_INVALID");
+        assertThat(jdbc.queryForObject("select count(*) from reminder_settings_events where event_type = "
+                + "'CHANNEL_SUSPENDED'", Long.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("select failure_code from member_notifications where summary_id = ? and "
+                + "type = 'WHATSAPP_DELIVERY_FAILURE'", String.class, summaryId(nextDay)))
+                .isEqualTo("RECIPIENT_UNREACHABLE");
+    }
+
+    /** R14b: a permanent refusal of the channel (template, sender, token) suspends it too; nothing is retried. */
+    @Test
+    void r14bAPermanentRefusalOfTheChannelSuspendsWithoutRetry() {
+        enableWhatsApp();
+        pending("Luz", "120.00", d(10, 5));
+        summaryAt(FIRST);
+        meta.enqueue(400, """
+                {"error":{"message":"(#132001) Template name does not exist","code":132001}}
+                """);
+        clock.set(FIRST.plusSeconds(10));
+        job.poll();
+        clock.set(FIRST.plusSeconds(600));
+        job.poll();
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("REJECTED/PROVIDER_REJECTED");
+        assertThat(meta.requests()).hasSize(1);
+        assertThat(settings.view(A).whatsapp().suspension().reason()).isEqualTo("PROVIDER_REJECTED");
+    }
+
+    private Instant nextAttempt(UUID summaryId) {
+        return jdbc.queryForObject("select next_attempt_at from whatsapp_deliveries where summary_id = ?",
+                Timestamp.class, summaryId).toInstant();
+    }
+
+    private UUID deliveryId(UUID summaryId) {
+        return jdbc.queryForObject("select id from whatsapp_deliveries where summary_id = ?", UUID.class, summaryId);
+    }
+
+    private List<String> attemptOutcomes(UUID summaryId) {
+        return jdbc.queryForList("select a.outcome from whatsapp_attempts a join whatsapp_deliveries d on "
+                + "d.id = a.delivery_id where d.summary_id = ? order by a.attempt_number", String.class, summaryId);
+    }
+
+    private static String reference(String body) {
+        return JSON.readTree(body).path("biz_opaque_callback_data").asString();
+    }
+
+    static byte[] statusesWithReference(String id, String status, long timestamp, String reference) {
+        return """
+                {"object":"whatsapp_business_account","entry":[{"id":"WABA","changes":[{"field":"messages","value":{
+                 "messaging_product":"whatsapp","metadata":{"phone_number_id":"%s"},"statuses":[{"id":"%s",
+                 "status":"%s","timestamp":"%d","recipient_id":"5511987654321","biz_opaque_callback_data":"%s"}]}}]}]}
+                """.formatted(PHONE_ID, id, status, timestamp, reference).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private void correct(UUID id, String amount, LocalDate due) {
+        var current = expenses.get(A, id);
+        tx.execute(s -> expenses.correct(A, new CorrectExpenseCommand(id, current.version(), ExpenseStatus.PENDING,
+                current.description(), amount, due, null, null, null, null, null, UUID.randomUUID())));
+    }
+
     private UUID acceptedSummary() {
         enableWhatsApp();
         pending("Luz", "120.00", d(10, 5));
@@ -612,6 +1094,7 @@ class WhatsAppDeliveryPostgresIT {
         var materializer = new JdbcRecurringExpenseMaterializer(jdbc, tx);
         var generation = new JdbcRecurrenceGenerationJob(jdbc, tx, materializer, clock, Duration.ofMinutes(2), 25);
         var provider = new MetaWhatsAppProvider(properties);
+        sender = provider;
         settingsService = new ReminderSettingsService(new JdbcReminderSettingsRepository(jdbc), context, members,
                 provider, clock, UUID::randomUUID);
         settings = new TransactionalReminderSettingsUseCase(settingsService, tx);

@@ -167,4 +167,36 @@ describe('Reminder summaries (H08.2)', () => {
     expect(byTestId(failing, 'whatsapp-delivery-error')!.textContent).toContain('Não foi possível consultar o envio');
     expect(byTestId(failing, 'summary-items')!.querySelectorAll('li').length).toBe(7);
   });
+
+  it('shows a waiting retry of the same summary and a later reconciliation (H08.5)', async () => {
+    api.summary.mockReturnValue(of(seven('s1')));
+    api.whatsapp.mockReturnValue(of({ state: 'RETRY_WAITING', stateMessage: 'A Meta não recebeu a última tentativa. Uma nova tentativa do mesmo resumo está programada.',
+      kind: 'SUMMARY', reason: 'PROVIDER_UNAVAILABLE', reasonMessage: 'O envio pelo WhatsApp não está disponível no momento.',
+      recipientMasked: '+55 ** *****-4321', itemCount: 7, createdAt: '2026-10-05T12:00:10Z', attemptedAt: '2026-10-05T12:01:10Z',
+      acceptedAt: null, sentAt: null, deliveredAt: null, readAt: null, failedAt: null,
+      attempts: [{ number: 1, startedAt: '2026-10-05T12:00:10Z', finishedAt: '2026-10-05T12:00:11Z', outcome: 'FAILED' },
+        { number: 2, startedAt: '2026-10-05T12:01:10Z', finishedAt: '2026-10-05T12:01:11Z', outcome: 'FAILED' }],
+      nextAttemptAt: '2026-10-05T12:06:11Z', reconciledAt: null }));
+    const fixture = TestBed.createComponent(ReminderSummaryComponent);
+    await render(fixture);
+    expect(byTestId(fixture, 'whatsapp-delivery')!.dataset['state']).toBe('RETRY_WAITING');
+    const steps = Array.from(byTestId(fixture, 'whatsapp-delivery-steps')!.querySelectorAll('li')).map(li => li.textContent!);
+    expect(steps.at(-1)).toContain('Próxima tentativa: 05/10/2026');
+    const attempts = Array.from(byTestId(fixture, 'whatsapp-attempts')!.querySelectorAll('li')).map(li => li.textContent!);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toContain('Tentativa 2');
+    expect(attempts[1]).toContain('não recebida pela Meta');
+    expect(text(fixture)).toContain('resultado incerto nunca é reenviado');
+
+    api.whatsapp.mockReturnValue(of({ state: 'DELIVERED', stateMessage: 'Entregue no WhatsApp do administrador.', kind: 'SUMMARY',
+      reason: null, reasonMessage: null, recipientMasked: '+55 ** *****-4321', itemCount: 7, createdAt: '2026-10-05T12:00:10Z',
+      attemptedAt: '2026-10-05T12:00:10Z', acceptedAt: null, sentAt: null, deliveredAt: '2026-10-05T12:30:00Z', readAt: null,
+      failedAt: null, attempts: [{ number: 1, startedAt: '2026-10-05T12:00:10Z', finishedAt: '2026-10-05T12:10:10Z', outcome: 'ACCEPTED' }],
+      nextAttemptAt: null, reconciledAt: '2026-10-05T12:30:00Z' }));
+    const reconciled = TestBed.createComponent(ReminderSummaryComponent);
+    await render(reconciled);
+    const labels = Array.from(byTestId(reconciled, 'whatsapp-delivery-steps')!.querySelectorAll('li')).map(li => li.textContent!.split(':')[0]);
+    expect(labels).toEqual(['Tentativa', 'Confirmado depois pelo webhook', 'Entregue']);
+    expect(byTestId(reconciled, 'whatsapp-attempts')).toBeNull();
+  });
 });

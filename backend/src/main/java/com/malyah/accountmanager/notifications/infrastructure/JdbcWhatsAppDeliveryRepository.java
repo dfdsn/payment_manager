@@ -28,7 +28,7 @@ public final class JdbcWhatsAppDeliveryRepository implements WhatsAppDeliveryRep
     private static final String SELECT = """
             select id, space_id, kind, summary_id, status, skip_reason, failure_code, provider_error_code,
                    recipient_last_digits, item_count, created_at, attempted_at, accepted_at, sent_at, delivered_at,
-                   read_at, failed_at
+                   read_at, failed_at, next_attempt_at, reconciled_at
               from whatsapp_deliveries
             """;
     private final JdbcTemplate jdbc;
@@ -120,11 +120,107 @@ public final class JdbcWhatsAppDeliveryRepository implements WhatsAppDeliveryRep
     @Override
     public Optional<DeliveryRef> lockByProviderMessageId(String providerMessageId) {
         return jdbc.query("""
-                select id, space_id, summary_id, status from whatsapp_deliveries where provider_message_id = ?
+                select id, space_id, summary_id, status, consent_id, provider_message_id is not null
+                  from whatsapp_deliveries where provider_message_id = ?
                    for update
-                """, (rs, row) -> new DeliveryRef(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
-                rs.getObject(3, UUID.class), WhatsAppDeliveryStatus.valueOf(rs.getString(4))), providerMessageId)
+                """, JdbcWhatsAppDeliveryRepository::ref, providerMessageId).stream().findFirst();
+    }
+
+    @Override
+    public Optional<DeliveryRef> lockByAttempt(UUID attemptId) {
+        return jdbc.query("""
+                select d.id, d.space_id, d.summary_id, d.status, d.consent_id, d.provider_message_id is not null
+                  from whatsapp_deliveries d join whatsapp_attempts a on a.delivery_id = d.id
+                 where a.id = ?
+                   for update of d
+                """, JdbcWhatsAppDeliveryRepository::ref, attemptId).stream().findFirst();
+    }
+
+    @Override
+    public boolean reconcile(UUID deliveryId, UUID attemptId, String providerMessageId, Instant at) {
+        var now = Timestamp.from(at);
+        if (jdbc.update("""
+                update whatsapp_deliveries
+                   set provider_message_id = ?, reconciled_at = ?, updated_at = ?, failure_code = null
+                 where id = ? and status = 'UNCERTAIN' and provider_message_id is null
+                   and not exists (select 1 from whatsapp_deliveries o where o.provider_message_id = ?)
+                """, providerMessageId, now, now, deliveryId, providerMessageId) == 0) return false;
+        jdbc.update("""
+                update whatsapp_attempts set outcome = 'ACCEPTED', finished_at = coalesce(finished_at, ?)
+                 where id = ? and delivery_id = ?
+                """, now, attemptId, deliveryId);
+        return true;
+    }
+
+    @Override
+    public boolean retryLater(UUID deliveryId, UUID attemptId, Instant nextAttemptAt, String providerErrorCode,
+            String failureCode, Instant at) {
+        var now = Timestamp.from(at);
+        if (jdbc.update("""
+                update whatsapp_deliveries
+                   set status = 'RETRY_WAITING', next_attempt_at = ?, provider_error_code = ?, failure_code = ?,
+                       updated_at = ?
+                 where id = ? and (status = 'ATTEMPTING' or (status = 'UNCERTAIN' and provider_message_id is null))
+                """, Timestamp.from(nextAttemptAt), providerErrorCode, failureCode, now, deliveryId) == 0)
+            return false;
+        jdbc.update("""
+                update whatsapp_attempts set finished_at = coalesce(finished_at, ?), outcome = 'FAILED',
+                       provider_error_code = ?
+                 where id = ? and delivery_id = ?
+                """, now, providerErrorCode, attemptId, deliveryId);
+        return true;
+    }
+
+    @Override
+    public List<UUID> retryingDeliveries(int limit) {
+        return jdbc.query("""
+                select id from whatsapp_deliveries where status = 'RETRY_WAITING' order by next_attempt_at, id limit ?
+                """, (rs, row) -> rs.getObject(1, UUID.class), limit);
+    }
+
+    @Override
+    public Optional<RetryingDelivery> retrying(UUID deliveryId, boolean lock) {
+        return jdbc.query("""
+                select d.id, s.id, s.space_id, d.recipient_user_id, s.local_date, s.slot, s.scheduled_time,
+                       s.time_zone, s.scheduled_at, d.next_attempt_at,
+                       (select max(a.attempt_number) from whatsapp_attempts a where a.delivery_id = d.id)
+                  from whatsapp_deliveries d join reminder_summaries s on s.id = d.summary_id
+                 where d.id = ? and d.status = 'RETRY_WAITING'
+                """ + (lock ? " for update of d" : ""), (rs, row) -> new RetryingDelivery(rs.getObject(1, UUID.class),
+                new PlannedSummary(rs.getObject(2, UUID.class), rs.getObject(3, UUID.class),
+                        rs.getObject(4, UUID.class), rs.getObject(5, LocalDate.class),
+                        ReminderSlot.valueOf(rs.getString(6)), rs.getObject(7, LocalTime.class), rs.getString(8),
+                        rs.getTimestamp(9).toInstant()), rs.getInt(11), rs.getTimestamp(10).toInstant()), deliveryId)
                 .stream().findFirst();
+    }
+
+    @Override
+    public boolean startRetry(UUID deliveryId, UUID consentId, String recipientLastDigits, int itemCount,
+            Instant at) {
+        var now = Timestamp.from(at);
+        return jdbc.update("""
+                update whatsapp_deliveries
+                   set status = 'ATTEMPTING', next_attempt_at = null, failure_code = null, provider_error_code = null,
+                       consent_id = ?, recipient_last_digits = ?, item_count = ?, attempted_at = ?, updated_at = ?
+                 where id = ? and status = 'RETRY_WAITING'
+                """, consentId, recipientLastDigits, itemCount, now, now, deliveryId) == 1;
+    }
+
+    @Override
+    public boolean closeRetry(UUID deliveryId, WhatsAppDeliveryStatus status, String skipReason, String failureCode,
+            Instant at) {
+        var now = Timestamp.from(at);
+        return jdbc.update("""
+                update whatsapp_deliveries
+                   set status = ?, skip_reason = ?, failure_code = coalesce(?, failure_code), next_attempt_at = null,
+                       updated_at = ?, failed_at = case when ? = 'FAILED' then ? else failed_at end
+                 where id = ? and status = 'RETRY_WAITING'
+                """, status.name(), skipReason, failureCode, now, status.name(), now, deliveryId) == 1;
+    }
+
+    private static DeliveryRef ref(ResultSet rs, int row) throws SQLException {
+        return new DeliveryRef(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class),
+                WhatsAppDeliveryStatus.valueOf(rs.getString(4)), rs.getObject(5, UUID.class), rs.getBoolean(6));
     }
 
     @Override
@@ -203,7 +299,7 @@ public final class JdbcWhatsAppDeliveryRepository implements WhatsAppDeliveryRep
                 rs.getObject(4, UUID.class), WhatsAppDeliveryStatus.valueOf(rs.getString(5)), rs.getString(6),
                 rs.getString(7), rs.getString(8), rs.getString(9), rs.getObject(10, Integer.class), instant(rs, 11),
                 instant(rs, 12), instant(rs, 13), instant(rs, 14), instant(rs, 15), instant(rs, 16), instant(rs, 17),
-                attempts);
+                attempts, instant(rs, 18), instant(rs, 19));
     }
 
     private static Instant instant(ResultSet rs, int column) throws SQLException {

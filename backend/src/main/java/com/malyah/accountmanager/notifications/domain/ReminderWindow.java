@@ -21,6 +21,18 @@ public record ReminderWindow(LocalDate date, ReminderSlot slot, Instant schedule
         return new ReminderWindow(date, slot, scheduledAt, next.isBefore(limit) ? next : limit);
     }
 
+    /**
+     * H08.5: the end of the window of a summary already generated at {@code scheduledAt}, under the schedule as it is
+     * now. It never goes past one hour after the original instant, whatever happened since (failure, restart,
+     * retry), and it closes earlier when the next slot of the current schedule comes first.
+     */
+    public static Instant deadlineOf(ReminderSchedule current, ZoneId zone, LocalDate date, ReminderSlot slot,
+            Instant scheduledAt) {
+        var window = of(current, zone, date, slot);
+        var limit = scheduledAt.plus(MAXIMUM_DELAY);
+        return window.deadline().isBefore(limit) && window.deadline().isAfter(scheduledAt) ? window.deadline() : limit;
+    }
+
     public boolean started(Instant now) {
         return !now.isBefore(scheduledAt);
     }

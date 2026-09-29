@@ -8,6 +8,7 @@ import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.channels.UnresolvedAddressException;
+import java.time.Duration;
 import java.util.Set;
 
 import tools.jackson.core.JacksonException;
@@ -31,7 +32,14 @@ final class MetaWhatsAppProvider implements WhatsAppProviderStatus, WhatsAppSend
     /** Error codes that point at the recipient (to confirm against the current Meta reference, P03). */
     static final Set<Long> RECIPIENT_CODES = Set.of(131026L, 131030L);
     /** Rate and capacity limits: the request was not accepted and may be tried later (H08.5). */
-    static final Set<Long> THROTTLE_CODES = Set.of(130429L, 131048L, 131056L, 80007L);
+    static final Set<Long> THROTTLE_CODES = Set.of(130429L, 131048L, 131056L, 80007L, 133016L);
+    /**
+     * H08.5: "service temporarily unavailable" answered with an explicit error (HTTP 503): Meta refused to process
+     * the request, so it may be tried again. A 5xx without this code stays uncertain.
+     */
+    static final Set<Long> UNAVAILABLE_CODES = Set.of(131016L);
+    /** Longest provider wait taken into account; anything longer ends the window anyway. */
+    static final Duration MAX_RETRY_AFTER = Duration.ofHours(1);
     private static final int MAX_ID_LENGTH = 128;
 
     private final MetaWhatsAppProperties properties;
@@ -84,10 +92,16 @@ final class MetaWhatsAppProvider implements WhatsAppProviderStatus, WhatsAppSend
             Thread.currentThread().interrupt();
             return SendResult.of(Outcome.UNCERTAIN, null);
         }
-        return classify(response.statusCode(), response.body());
+        return classify(response.statusCode(), response.body(),
+                response.headers().firstValue("Retry-After").orElse(null));
     }
 
     SendResult classify(int status, byte[] body) {
+        return classify(status, body, null);
+    }
+
+    /** H08.5: a {@code Retry-After} in seconds is kept for a refusal that may be retried; other forms are ignored. */
+    SendResult classify(int status, byte[] body, String retryAfterHeader) {
         if (status >= 200 && status < 300) {
             var id = read(body).path("messages").path(0).path("id");
             var value = id.isString() ? id.stringValue().strip() : "";
@@ -97,12 +111,19 @@ final class MetaWhatsAppProvider implements WhatsAppProviderStatus, WhatsAppSend
         var code = read(body).path("error").path("code");
         var errorCode = code.canConvertToLong() && code.isNumber() ? code.asLong() : null;
         var reported = errorCode == null ? String.valueOf(status) : String.valueOf(errorCode);
-        if (status == 429 || (errorCode != null && THROTTLE_CODES.contains(errorCode)))
-            return SendResult.of(Outcome.UNAVAILABLE, reported);
+        if (status == 429 || (errorCode != null && (THROTTLE_CODES.contains(errorCode)
+                || UNAVAILABLE_CODES.contains(errorCode))))
+            return new SendResult(Outcome.UNAVAILABLE, null, reported, retryAfter(retryAfterHeader));
         if (status >= 400 && status < 500)
             return SendResult.of(errorCode != null && RECIPIENT_CODES.contains(errorCode) ? Outcome.RECIPIENT_INVALID
                     : Outcome.REJECTED, reported);
         return SendResult.of(Outcome.UNCERTAIN, reported);
+    }
+
+    static Duration retryAfter(String header) {
+        if (header == null || !header.strip().matches("[0-9]{1,6}")) return null;
+        var seconds = Duration.ofSeconds(Long.parseLong(header.strip()));
+        return seconds.compareTo(MAX_RETRY_AFTER) > 0 ? MAX_RETRY_AFTER : seconds;
     }
 
     private byte[] body(Message message, boolean summary) {
@@ -111,6 +132,8 @@ final class MetaWhatsAppProvider implements WhatsAppProviderStatus, WhatsAppSend
         root.put("recipient_type", "individual");
         root.put("to", message.recipientE164().replace("+", ""));
         root.put("type", "template");
+        // H08.5: echoed by Meta in the status events of this message, to reconcile an uncertain attempt.
+        if (message.reference() != null) root.put("biz_opaque_callback_data", message.reference());
         var template = root.putObject("template");
         template.put("name", summary ? properties.summaryTemplate() : properties.testTemplate());
         template.putObject("language").put("code",

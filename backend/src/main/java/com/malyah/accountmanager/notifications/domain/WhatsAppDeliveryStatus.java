@@ -7,10 +7,11 @@ import java.util.Optional;
  * acceptance ({@link #ACCEPTED}) and the confirmations reported by the webhook ({@link #SENT}, {@link #DELIVERED},
  * {@link #READ}) are distinct: acceptance is never a delivery. {@link #UNCERTAIN} means there is no proof either
  * way and nothing is resent automatically. Confirmations only move forward, so a repeated or late event never
- * takes a delivery back.
+ * takes a delivery back. H08.5: {@link #RETRY_WAITING} is a delivery whose last attempt certainly did not reach the
+ * provider and that waits for the next attempt of the same logical summary inside its window.
  */
 public enum WhatsAppDeliveryStatus {
-    ATTEMPTING(0, false), UNCERTAIN(0, false), ACCEPTED(1, false), SENT(2, false), DELIVERED(3, false),
+    ATTEMPTING(0, false), RETRY_WAITING(0, false), UNCERTAIN(0, false), ACCEPTED(1, false), SENT(2, false), DELIVERED(3, false),
     READ(4, true), FAILED(5, true), REJECTED(5, true), SKIPPED(5, true);
 
     private final int rank;
@@ -26,7 +27,7 @@ public enum WhatsAppDeliveryStatus {
      * reported failure never overrides a confirmed delivery or read.
      */
     public boolean canAdvanceTo(WhatsAppDeliveryStatus next) {
-        if (terminal || this == ATTEMPTING) return false;
+        if (terminal || this == ATTEMPTING || this == RETRY_WAITING) return false;
         if (next == FAILED) return rank < DELIVERED.rank;
         return next.webhook() && next.rank > rank;
     }

@@ -55,6 +55,9 @@
         <div class="status-card" [class.ok]="s.whatsapp.state === 'READY'" [class.attention]="s.whatsapp.state !== 'READY'" data-testid="whatsapp-state" [attr.data-state]="s.whatsapp.state">
           <p><strong>{{ stateLabels[s.whatsapp.state] }}</strong></p>
           @if (!s.whatsapp.provider.available) { <p data-testid="provider-status">{{ s.whatsapp.provider.message }}</p> }
+          @if (s.whatsapp.suspension; as suspension) {
+            <p data-testid="suspension" role="alert">Suspenso em {{ formatInstant(suspension.suspendedAt) }}. {{ suspension.message }}</p>
+          }
         </div>
 
         @if (s.canManage) {
@@ -62,7 +65,7 @@
             <dt>Número</dt><dd data-testid="recipient">{{ s.whatsapp.recipientFormatted ?? 'Não cadastrado' }}</dd>
             <dt>Consentimento</dt>
             <dd data-testid="consent-status">@if (s.whatsapp.consent.active) { Registrado por {{ s.whatsapp.consent.grantedByDisplayName }} em {{ formatInstant(s.whatsapp.consent.grantedAt!) }} } @else { Não registrado }</dd>
-            <dt>Canal</dt><dd data-testid="channel-status">{{ s.whatsapp.enabled ? 'Ativado' : 'Desativado' }}</dd>
+            <dt>Canal</dt><dd data-testid="channel-status">{{ s.whatsapp.enabled ? 'Ativado' : s.whatsapp.suspension ? 'Suspenso' : 'Desativado' }}</dd>
           </dl>
 
           <form [formGroup]="recipientForm" (ngSubmit)="saveRecipient()" novalidate aria-label="Número receptor">
@@ -90,7 +93,7 @@
             </form>
           }
           <div class="actions">
-            @if (s.whatsapp.consent.active && !s.whatsapp.enabled) { <button matButton="filled" type="button" (click)="setChannel(true)" [disabled]="busy() !== null" data-testid="enable-channel">Ativar canal</button> }
+            @if (s.whatsapp.consent.active && !s.whatsapp.enabled) { <button matButton="filled" type="button" (click)="setChannel(true)" [disabled]="busy() !== null" data-testid="enable-channel">{{ s.whatsapp.suspension ? 'Reativar canal' : 'Ativar canal' }}</button> }
             @if (s.whatsapp.enabled) { <button matButton="outlined" type="button" (click)="setChannel(false)" [disabled]="busy() !== null" data-testid="disable-channel">Desativar canal</button> }
             @if (s.whatsapp.consent.active) { <button matButton="outlined" type="button" (click)="revokeConsent()" [disabled]="busy() !== null" data-testid="revoke-consent">Revogar consentimento</button> }
           </div>
@@ -103,7 +106,7 @@
               }
             </div>
           }
-          <p class="hint">Credenciais da Meta ficam somente na configuração do servidor; esta tela não as exibe. Ao transferir a administração, o número e o consentimento deixam de valer e o novo administrador precisa cadastrar os seus.</p>
+          <p class="hint">Se a Meta não receber um resumo por indisponibilidade, ele é tentado de novo com intervalos crescentes, no máximo até uma hora depois do horário (ou até o próximo horário). Resultado incerto nunca é reenviado. Recusa permanente do número ou do remetente suspende o canal até você reativá-lo. Credenciais da Meta ficam somente na configuração do servidor; esta tela não as exibe. Ao transferir a administração, o número e o consentimento deixam de valer e o novo administrador precisa cadastrar os seus.</p>
         } @else {
           <p data-testid="guest-whatsapp">@if (s.whatsapp.hasRecipient) { O administrador cadastrou um número terminado em {{ s.whatsapp.recipientLastDigits }}. } @else { O administrador ainda não cadastrou um número. }
             Você recebe os avisos somente no aplicativo; não é possível habilitar o WhatsApp para o convidado.</p>

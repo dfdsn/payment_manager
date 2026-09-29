@@ -13,6 +13,7 @@ const settings = (overrides: Partial<ReminderSettings> = {}, whatsapp: Partial<R
     consent: { active: false, grantedAt: null, grantedByDisplayName: null, recipientLastDigits: null },
     provider: { available: false, code: 'PROVIDER_DISABLED', message: 'O envio real pela Meta está desligado na configuração do servidor.' },
     state: 'RECIPIENT_REQUIRED', consentTextVersion: 'WHATSAPP-RESUMOS-V1', consentText: 'Autorizo o account_Manager a enviar resumos.',
+    suspension: null,
     ...whatsapp,
   },
   ...overrides,
@@ -211,5 +212,31 @@ describe('ReminderSettingsComponent', () => {
       provider: { available: true, code: 'PROVIDER_READY', message: 'ok' }, state: 'READY' }));
     expect(byTestId('whatsapp-test')).toBeNull();
     expect(byTestId('send-test')).toBeNull();
+  });
+
+  it('shows a suspension with what to correct and lets the administrator reactivate the channel (H08.5)', async () => {
+    const suspended = settings({ version: 4 }, {
+      hasRecipient: true, recipient: '+5511987654321', recipientFormatted: '+55 11 98765-4321', recipientLastDigits: '4321',
+      enabled: false, consent: { active: true, grantedAt: '2026-09-29T12:00:00Z', grantedByDisplayName: 'Admin', recipientLastDigits: '4321' },
+      provider: { available: true, code: 'PROVIDER_READY', message: 'ok' }, state: 'SUSPENDED',
+      suspension: { reason: 'RECIPIENT_INVALID', suspendedAt: '2026-10-05T12:00:10Z', message: 'Confira o número; se ele estiver certo, reative o canal.' },
+    });
+    api.events.mockReturnValue(of({ items: [
+      { type: 'CHANNEL_SUSPENDED', actorDisplayName: 'Sistema', occurredAt: '2026-10-05T12:00:10Z', fromVersion: 3, toVersion: 4, detail: 'RECIPIENT_INVALID' },
+    ] }));
+    await start(suspended);
+    expect(byTestId('whatsapp-state')!.dataset['state']).toBe('SUSPENDED');
+    expect(byTestId('whatsapp-state')!.textContent).toContain('suspenso por uma falha permanente');
+    expect(byTestId('suspension')!.textContent).toContain('05/10/2026');
+    expect(byTestId('suspension')!.textContent).toContain('Confira o número');
+    expect(byTestId('channel-status')!.textContent).toContain('Suspenso');
+    expect(byTestId('settings-events')!.textContent).toContain('Canal suspenso automaticamente por Sistema');
+    expect(byTestId('enable-channel')!.textContent).toContain('Reativar canal');
+    expect(text()).toContain('Resultado incerto nunca é reenviado');
+    api.changeChannel.mockReturnValue(of(settings({ version: 5 }, { ...suspended.whatsapp, enabled: true, state: 'READY', suspension: null })));
+    await click('enable-channel');
+    expect(api.changeChannel).toHaveBeenCalledWith(4, true, 'key-1');
+    expect(byTestId('suspension')).toBeNull();
+    expect(byTestId('channel-status')!.textContent).toContain('Ativado');
   });
 });

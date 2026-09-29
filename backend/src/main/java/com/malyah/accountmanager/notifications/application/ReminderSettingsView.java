@@ -5,7 +5,8 @@ import java.util.List;
 
 /**
  * H08.1 view. {@code recipient} (full number) is only present for the administrator; the guest sees whether a
- * number exists and its last four digits. There is no field for provider credentials.
+ * number exists and its last four digits. There is no field for provider credentials. {@code suspension} is
+ * {@code null} unless a permanent failure suspended the channel (H08.5).
  */
 public record ReminderSettingsView(boolean canManage, String timeZone, long version, Instant updatedAt,
         Schedule schedule, WhatsApp whatsapp) {
@@ -14,7 +15,10 @@ public record ReminderSettingsView(boolean canManage, String timeZone, long vers
 
     public record WhatsApp(boolean hasRecipient, String recipient, String recipientFormatted, String recipientLastDigits,
             boolean enabled, Consent consent, Provider provider, String state, String consentTextVersion,
-            String consentText) { }
+            String consentText, Suspension suspension) { }
+
+    /** H08.5: a channel suspended by a permanent failure and what the administrator has to correct. */
+    public record Suspension(String reason, Instant suspendedAt, String message) { }
 
     public record Consent(boolean active, Instant grantedAt, String grantedByDisplayName, String recipientLastDigits) { }
 

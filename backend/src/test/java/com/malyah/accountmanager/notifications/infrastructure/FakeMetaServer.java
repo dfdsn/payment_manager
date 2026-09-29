@@ -19,7 +19,7 @@ import com.sun.net.httpserver.HttpServer;
 final class FakeMetaServer implements AutoCloseable {
     record Request(String method, String path, String authorization, String body) { }
 
-    record Response(int status, String body, long delayMillis) { }
+    record Response(int status, String body, long delayMillis, String retryAfter) { }
 
     private final HttpServer server;
     private final ConcurrentLinkedDeque<Response> responses = new ConcurrentLinkedDeque<>();
@@ -37,11 +37,12 @@ final class FakeMetaServer implements AutoCloseable {
             if (response == null) response = new Response(200, """
                     {"messaging_product":"whatsapp","contacts":[{"input":"x","wa_id":"x"}],
                      "messages":[{"id":"wamid.FAKE-%d","message_status":"accepted"}]}
-                    """.formatted(ids.incrementAndGet()), 0);
+                    """.formatted(ids.incrementAndGet()), 0, null);
             try {
                 if (response.delayMillis() > 0) Thread.sleep(response.delayMillis());
                 var bytes = response.body().getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json");
+                if (response.retryAfter() != null) exchange.getResponseHeaders().add("Retry-After", response.retryAfter());
                 exchange.sendResponseHeaders(response.status(), bytes.length == 0 ? -1 : bytes.length);
                 if (bytes.length > 0) exchange.getResponseBody().write(bytes);
             } catch (InterruptedException | IOException ignored) {
@@ -58,11 +59,16 @@ final class FakeMetaServer implements AutoCloseable {
     }
 
     void enqueue(int status, String body) {
-        responses.addLast(new Response(status, body, 0));
+        responses.addLast(new Response(status, body, 0, null));
     }
 
     void enqueueDelayed(int status, String body, long delayMillis) {
-        responses.addLast(new Response(status, body, delayMillis));
+        responses.addLast(new Response(status, body, delayMillis, null));
+    }
+
+    /** H08.5: a refusal carrying a {@code Retry-After} header (seconds). */
+    void enqueueRetryAfter(int status, String body, String retryAfter) {
+        responses.addLast(new Response(status, body, 0, retryAfter));
     }
 
     List<Request> requests() {

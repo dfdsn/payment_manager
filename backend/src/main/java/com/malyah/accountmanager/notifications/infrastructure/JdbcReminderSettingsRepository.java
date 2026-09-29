@@ -20,6 +20,7 @@ import com.malyah.accountmanager.notifications.application.port.ReminderSettings
 import com.malyah.accountmanager.notifications.domain.ConsentRevocationReason;
 import com.malyah.accountmanager.notifications.domain.ReminderSchedule;
 import com.malyah.accountmanager.notifications.domain.WhatsAppRecipient;
+import com.malyah.accountmanager.notifications.domain.WhatsAppSuspensionReason;
 
 /** H08.1 persistence; display names come from a read projection of the identity users, never written here. */
 public final class JdbcReminderSettingsRepository implements ReminderSettingsRepository {
@@ -48,10 +49,13 @@ public final class JdbcReminderSettingsRepository implements ReminderSettingsRep
         var recipient = settings.recipient() == null ? null : settings.recipient().e164();
         return jdbc.update("""
                 update reminder_settings set first_time = ?, second_time = ?, whatsapp_recipient = ?,
-                       whatsapp_enabled = ?, version = ?, updated_at = ?, updated_by_user_id = ?
+                       whatsapp_enabled = ?, version = ?, updated_at = ?, updated_by_user_id = ?,
+                       whatsapp_suspension_reason = ?, whatsapp_suspended_at = ?
                  where space_id = ? and version = ?
                 """, settings.schedule().first(), settings.schedule().second(), recipient, settings.enabled(),
-                settings.version(), Timestamp.from(settings.updatedAt()), actorId, settings.spaceId(),
+                settings.version(), Timestamp.from(settings.updatedAt()), actorId,
+                settings.suspension() == null ? null : settings.suspension().name(),
+                settings.suspendedAt() == null ? null : Timestamp.from(settings.suspendedAt()), settings.spaceId(),
                 settings.version() - 1) == 1;
     }
 
@@ -96,9 +100,9 @@ public final class JdbcReminderSettingsRepository implements ReminderSettingsRep
     @Override
     public List<SettingsEvent> events(UUID spaceId, int limit) {
         return jdbc.query("""
-                select e.id, e.space_id, e.actor_user_id, u.display_name, e.event_type, e.from_version, e.to_version,
-                       e.detail, e.occurred_at
-                  from reminder_settings_events e join identity_users u on u.id = e.actor_user_id
+                select e.id, e.space_id, e.actor_user_id, coalesce(u.display_name, 'Sistema'), e.event_type,
+                       e.from_version, e.to_version, e.detail, e.occurred_at
+                  from reminder_settings_events e left join identity_users u on u.id = e.actor_user_id
                  where e.space_id = ? order by e.occurred_at desc, e.to_version desc, e.event_type, e.id limit ?
                 """, (rs, row) -> new SettingsEvent(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
                 rs.getObject(3, UUID.class), rs.getString(4), SettingsEvent.Type.valueOf(rs.getString(5)),
@@ -133,7 +137,8 @@ public final class JdbcReminderSettingsRepository implements ReminderSettingsRep
     }
 
     private static final String SELECT = """
-            select space_id, first_time, second_time, whatsapp_recipient, whatsapp_enabled, version, updated_at
+            select space_id, first_time, second_time, whatsapp_recipient, whatsapp_enabled, version, updated_at,
+                   whatsapp_suspension_reason, whatsapp_suspended_at
               from reminder_settings""";
 
     private StoredReminderSettings settings(ResultSet rs, int row) throws SQLException {
@@ -141,6 +146,8 @@ public final class JdbcReminderSettingsRepository implements ReminderSettingsRep
         return new StoredReminderSettings(rs.getObject(1, UUID.class),
                 new ReminderSchedule(rs.getObject(2, LocalTime.class), rs.getObject(3, LocalTime.class)),
                 recipient == null ? null : new WhatsAppRecipient(recipient), rs.getBoolean(5), rs.getLong(6),
-                rs.getTimestamp(7).toInstant());
+                rs.getTimestamp(7).toInstant(), rs.getString(8) == null ? null
+                        : WhatsAppSuspensionReason.valueOf(rs.getString(8)),
+                rs.getTimestamp(9) == null ? null : rs.getTimestamp(9).toInstant());
     }
 }

@@ -120,7 +120,7 @@ class MemberNotificationPostgresIT {
                 POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(27);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(28);
         jdbc = new JdbcTemplate(dataSource);
         tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         insertSpace(SPACE, "Casa");

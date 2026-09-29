@@ -33,8 +33,10 @@ import com.malyah.accountmanager.notifications.domain.ReminderSummary;
 import com.malyah.accountmanager.notifications.domain.ReminderWindow;
 import com.malyah.accountmanager.notifications.domain.WhatsAppDeliveryStatus;
 import com.malyah.accountmanager.notifications.domain.WhatsAppFailureReason;
+import com.malyah.accountmanager.notifications.domain.WhatsAppRetryPolicy;
 import com.malyah.accountmanager.notifications.domain.WhatsAppSkipReason;
 import com.malyah.accountmanager.notifications.domain.WhatsAppSummaryTemplate;
+import com.malyah.accountmanager.notifications.domain.WhatsAppSuspensionReason;
 
 /**
  * H08.4 (RF-ALT-01, RF-ALT-13, RF-ALT-15 to RF-ALT-18, RF-ALT-20). Each step runs in the caller's short
@@ -47,6 +49,11 @@ import com.malyah.accountmanager.notifications.domain.WhatsAppSummaryTemplate;
  * application. Nothing is ever resent here: an uncertain result waits for the H08.5 reconciliation.</li>
  * <li>{@link #applyStatuses} applies webhook confirmations of known messages, once and only forward.</li>
  * </ul>
+ * H08.5 (RF-ALT-13, RF-ALT-16 to RF-ALT-19): an attempt that certainly did not reach the provider waits for the
+ * next attempt of the same delivery ({@link #prepareRetry}), revalidated like the first one, with progressive
+ * spacing and never past the window of the original slot. Uncertain results are never retried: the attempt id
+ * travels as a reference and the webhook reconciles the message when the provider reports it. A permanent failure
+ * of the recipient or of the channel suspends the channel; an unavailable provider never does.
  */
 public final class WhatsAppDeliveryService {
     /** A delivery still attempting after this long was interrupted; the provider may have received it. */
@@ -58,6 +65,7 @@ public final class WhatsAppDeliveryService {
             WhatsAppSkipReason.CONSENT_REVOKED.name(), "O consentimento não estava ativo no momento do envio.",
             WhatsAppSkipReason.RECIPIENT_CHANGED.name(), "O número foi alterado antes do envio.",
             WhatsAppSkipReason.DISABLED.name(), "O canal foi desativado antes do envio.",
+            WhatsAppSkipReason.SUSPENDED.name(), "O canal estava suspenso por uma falha permanente; nada foi enviado.",
             WhatsAppSkipReason.PROVIDER_UNAVAILABLE.name(), "O envio pela Meta estava indisponível.",
             WhatsAppSkipReason.WINDOW_CLOSED.name(), "O horário terminou antes do envio; nada é enviado depois.",
             WhatsAppSkipReason.EMPTY.name(),
@@ -66,11 +74,15 @@ public final class WhatsAppDeliveryService {
             "RECIPIENT_REQUIRED", "Sem número cadastrado quando o resumo foi gerado.",
             "CONSENT_REQUIRED", "Sem consentimento do administrador quando o resumo foi gerado.",
             "DISABLED", "Canal desativado quando o resumo foi gerado.",
+            "SUSPENDED", "Canal suspenso por uma falha permanente quando o resumo foi gerado.",
             "PROVIDER_UNAVAILABLE", "Envio pela Meta indisponível quando o resumo foi gerado.");
     static final Map<String, String> STATE_MESSAGES = Map.ofEntries(
             Map.entry("NOT_PLANNED", "Este resumo não foi planejado para o WhatsApp."),
             Map.entry("WAITING", "Aguardando o envio pelo WhatsApp."),
             Map.entry(WhatsAppDeliveryStatus.ATTEMPTING.name(), "Enviando para a Meta."),
+            Map.entry(WhatsAppDeliveryStatus.RETRY_WAITING.name(),
+                    "A Meta não recebeu a última tentativa. Uma nova tentativa do mesmo resumo está programada, "
+                            + "no máximo até uma hora depois do horário original."),
             Map.entry(WhatsAppDeliveryStatus.ACCEPTED.name(), "Aceito pela Meta. A entrega ainda não foi confirmada."),
             Map.entry(WhatsAppDeliveryStatus.SENT.name(), "Enviado pela Meta. A entrega ainda não foi confirmada."),
             Map.entry(WhatsAppDeliveryStatus.DELIVERED.name(), "Entregue no WhatsApp do administrador."),
@@ -106,16 +118,27 @@ public final class WhatsAppDeliveryService {
         this.identifiers = Objects.requireNonNull(identifiers);
     }
 
-    public sealed interface Preparation permits NotPlanned, Skipped, Ready { }
+    public sealed interface Preparation permits NotPlanned, Skipped, Ready, NotDue { }
+
+    /** H08.5: a waiting retry still valid whose next attempt has not come yet. */
+    public record NotDue(Instant nextAttemptAt) implements Preparation { }
 
     /** The summary already has a delivery (another worker or an earlier run) or no planned WhatsApp channel. */
     public record NotPlanned() implements Preparation { }
 
     public record Skipped(WhatsAppSkipReason reason) implements Preparation { }
 
-    /** Claimed: send {@code message} now, outside the transaction, then {@link #record} the result. */
-    public record Ready(UUID deliveryId, UUID attemptId, UUID spaceId, UUID summaryId, WhatsAppSender.Message message)
-            implements Preparation, TestPreparation { }
+    /**
+     * Claimed: send {@code message} now, outside the transaction, then {@link #record} the result. {@code summary}
+     * (absent for a test) and {@code attemptNumber} let a transient failure schedule the next attempt;
+     * {@code consentId} is the consent this attempt used.
+     */
+    public record Ready(UUID deliveryId, UUID attemptId, UUID spaceId, UUID summaryId, WhatsAppSender.Message message,
+            int attemptNumber, UUID consentId, PlannedSummary summary) implements Preparation, TestPreparation {
+        public Ready(UUID deliveryId, UUID attemptId, UUID spaceId, UUID summaryId, WhatsAppSender.Message message) {
+            this(deliveryId, attemptId, spaceId, summaryId, message, 1, null, null);
+        }
+    }
 
     public List<UUID> pending(int limit) {
         return deliveries.plannedSummaries(limit);
@@ -127,25 +150,11 @@ public final class WhatsAppDeliveryService {
         if (planned.isEmpty()) return new NotPlanned();
         var summary = planned.get();
         var current = settings.lock(summary.spaceId(), now);
-        var administrator = summaries.activeAdministrator(summary.spaceId());
         var consent = settings.activeConsent(summary.spaceId());
-        WhatsAppSkipReason reason = null;
-        Optional<ReminderSummary> content = Optional.empty();
-        if (administrator.isEmpty() || !administrator.get().equals(summary.recipientUserId()))
-            reason = WhatsAppSkipReason.ADMINISTRATOR_CHANGED;
-        else if (consent.isEmpty() || !consent.get().userId().equals(summary.recipientUserId()))
-            reason = WhatsAppSkipReason.CONSENT_REVOKED;
-        else if (current.recipient() == null || !consent.get().recipient().equals(current.recipient()))
-            reason = WhatsAppSkipReason.RECIPIENT_CHANGED;
-        else if (!current.enabled()) reason = WhatsAppSkipReason.DISABLED;
-        else if (!provider.availability().available()) reason = WhatsAppSkipReason.PROVIDER_UNAVAILABLE;
-        else if (!windowOpen(summary, current, now)) reason = WhatsAppSkipReason.WINDOW_CLOSED;
-        else {
-            content = revalidatedContent(summary);
-            if (content.isEmpty()) reason = WhatsAppSkipReason.EMPTY;
-        }
+        var check = revalidate(summary, current, consent, now, true);
         var deliveryId = identifiers.get();
-        if (reason != null) {
+        if (check.reason() != null) {
+            var reason = check.reason();
             if (!deliveries.insert(new NewDelivery(deliveryId, summary.spaceId(), Kind.SUMMARY, summaryId, null,
                     summary.recipientUserId(), null, null, WhatsAppDeliveryStatus.SKIPPED, reason.name(), null, null,
                     now))) return new NotPlanned();
@@ -158,24 +167,118 @@ public final class WhatsAppDeliveryService {
             return new Skipped(reason);
         }
         var recipient = consent.get().recipient();
-        var message = content.get();
+        var content = check.content();
         if (!deliveries.insert(new NewDelivery(deliveryId, summary.spaceId(), Kind.SUMMARY, summaryId, null,
                 summary.recipientUserId(), consent.get().id(), recipient.lastDigits(),
-                WhatsAppDeliveryStatus.ATTEMPTING, null, null, message.count(), now))) return new NotPlanned();
+                WhatsAppDeliveryStatus.ATTEMPTING, null, null, content.count(), now))) return new NotPlanned();
         var attemptId = identifiers.get();
         deliveries.insertAttempt(attemptId, deliveryId, 1, now);
-        return new Ready(deliveryId, attemptId, summary.spaceId(), summaryId, new WhatsAppSender.Message(Kind.SUMMARY,
-                recipient.e164(), WhatsAppSummaryTemplate.parameters(message, summary.scheduledTime(),
-                        composer.link(summaryId))));
+        return ready(deliveryId, attemptId, 1, consent.get(), summary, content);
     }
 
-    /** Stores the provider result and, for a summary, tells the administrator about anything but acceptance. */
+    /** H08.5: deliveries waiting for a retry, the earliest first. */
+    public List<UUID> retrying(int limit) {
+        return deliveries.retryingDeliveries(limit);
+    }
+
+    /**
+     * H08.5 (RF-ALT-13/17/18): a waiting retry, revalidated from the current state under the settings lock. It is
+     * closed without any call when the window ended (the next slot came or one hour passed), the channel was
+     * disabled, suspended or lost its recipient, administrator or consent, or no bill is eligible any more. Before
+     * its instant it only stays waiting; when due it becomes the next numbered attempt of the same delivery, with
+     * the content recomposed now.
+     */
+    public Preparation prepareRetry(UUID deliveryId, Instant now) {
+        var peek = deliveries.retrying(deliveryId, false);
+        if (peek.isEmpty()) return new NotPlanned();
+        var current = settings.lock(peek.get().summary().spaceId(), now);
+        var locked = deliveries.retrying(deliveryId, true);
+        if (locked.isEmpty()) return new NotPlanned();
+        var retry = locked.get();
+        var summary = retry.summary();
+        var consent = settings.activeConsent(summary.spaceId());
+        var due = !now.isBefore(retry.nextAttemptAt());
+        var check = revalidate(summary, current, consent, now, due);
+        if (check.reason() != null) {
+            var reason = check.reason();
+            if (reason == WhatsAppSkipReason.WINDOW_CLOSED) {
+                // Attempts were made and failed for sure: expired, never sent late (RF-ALT-18).
+                if (deliveries.closeRetry(deliveryId, WhatsAppDeliveryStatus.FAILED, null,
+                        WhatsAppFailureReason.NOT_SENT_IN_WINDOW.name(), now))
+                    notifications.recordWhatsAppFailure(summary.spaceId(), summary.summaryId(),
+                            WhatsAppFailureReason.NOT_SENT_IN_WINDOW, now);
+            } else if (deliveries.closeRetry(deliveryId, WhatsAppDeliveryStatus.SKIPPED, reason.name(), null, now)
+                    && reason == WhatsAppSkipReason.PROVIDER_UNAVAILABLE)
+                notifications.recordWhatsAppFailure(summary.spaceId(), summary.summaryId(),
+                        WhatsAppFailureReason.PROVIDER_UNAVAILABLE, now);
+            return new Skipped(reason);
+        }
+        if (!due) return new NotDue(retry.nextAttemptAt());
+        var recipient = consent.get().recipient();
+        var content = check.content();
+        if (!deliveries.startRetry(deliveryId, consent.get().id(), recipient.lastDigits(), content.count(), now))
+            return new NotPlanned();
+        var attemptId = identifiers.get();
+        var number = retry.lastAttempt() + 1;
+        deliveries.insertAttempt(attemptId, deliveryId, number, now);
+        return ready(deliveryId, attemptId, number, consent.get(), summary, content);
+    }
+
+    private Ready ready(UUID deliveryId, UUID attemptId, int number, StoredConsent consent, PlannedSummary summary,
+            ReminderSummary content) {
+        return new Ready(deliveryId, attemptId, summary.spaceId(), summary.summaryId(), new WhatsAppSender.Message(
+                Kind.SUMMARY, consent.recipient().e164(), WhatsAppSummaryTemplate.parameters(content,
+                        summary.scheduledTime(), composer.link(summary.summaryId())), attemptId.toString()),
+                number, consent.id(), summary);
+    }
+
+    private record Check(WhatsAppSkipReason reason, ReminderSummary content) { }
+
+    /**
+     * Everything that must still hold for an attempt, read now: the planned recipient is the current administrator,
+     * whose consent covers the current number, the channel is enabled and not suspended, the provider can send, the
+     * window of the original slot is open and (when {@code withContent}) some bill of the summary is still eligible.
+     */
+    private Check revalidate(PlannedSummary summary, StoredReminderSettings current, Optional<StoredConsent> consent,
+            Instant now, boolean withContent) {
+        var administrator = summaries.activeAdministrator(summary.spaceId());
+        if (administrator.isEmpty() || !administrator.get().equals(summary.recipientUserId()))
+            return new Check(WhatsAppSkipReason.ADMINISTRATOR_CHANGED, null);
+        if (consent.isEmpty() || !consent.get().userId().equals(summary.recipientUserId()))
+            return new Check(WhatsAppSkipReason.CONSENT_REVOKED, null);
+        if (current.recipient() == null || !consent.get().recipient().equals(current.recipient()))
+            return new Check(WhatsAppSkipReason.RECIPIENT_CHANGED, null);
+        if (current.suspended()) return new Check(WhatsAppSkipReason.SUSPENDED, null);
+        if (!current.enabled()) return new Check(WhatsAppSkipReason.DISABLED, null);
+        if (!provider.availability().available()) return new Check(WhatsAppSkipReason.PROVIDER_UNAVAILABLE, null);
+        if (!windowOpen(summary, current, now)) return new Check(WhatsAppSkipReason.WINDOW_CLOSED, null);
+        if (!withContent) return new Check(null, null);
+        var content = revalidatedContent(summary);
+        return content.map(value -> new Check(null, value))
+                .orElseGet(() -> new Check(WhatsAppSkipReason.EMPTY, null));
+    }
+
+    /**
+     * Stores the provider result and, for a summary, tells the administrator about anything but acceptance. H08.5: a
+     * summary attempt that certainly did not reach the provider waits for the next attempt when one still fits in
+     * the window; otherwise it expires. A permanent refusal suspends the channel of the configuration that failed.
+     */
     public WhatsAppDeliveryStatus record(Ready ready, SendResult result, Instant now) {
         var accepted = result.outcome() == WhatsAppSender.Outcome.ACCEPTED && result.providerMessageId() != null
                 && !result.providerMessageId().isBlank();
         var outcome = accepted ? WhatsAppSender.Outcome.ACCEPTED
                 : result.outcome() == WhatsAppSender.Outcome.ACCEPTED ? WhatsAppSender.Outcome.UNCERTAIN
                         : result.outcome();
+        var retryable = outcome == WhatsAppSender.Outcome.UNAVAILABLE && ready.summary() != null;
+        if (retryable) {
+            var next = WhatsAppRetryPolicy.next(ready.attemptNumber(), now, result.retryAfter(),
+                    deadline(ready.summary()));
+            if (next.isPresent()) {
+                deliveries.retryLater(ready.deliveryId(), ready.attemptId(), next.get(), result.errorCode(),
+                        WhatsAppFailureReason.PROVIDER_UNAVAILABLE.name(), now);
+                return WhatsAppDeliveryStatus.RETRY_WAITING;
+            }
+        }
         var status = switch (outcome) {
             case ACCEPTED -> WhatsAppDeliveryStatus.ACCEPTED;
             case REJECTED, RECIPIENT_INVALID -> WhatsAppDeliveryStatus.REJECTED;
@@ -186,15 +289,40 @@ public final class WhatsAppDeliveryService {
             case ACCEPTED -> null;
             case REJECTED -> WhatsAppFailureReason.PROVIDER_REJECTED;
             case RECIPIENT_INVALID -> WhatsAppFailureReason.RECIPIENT_INVALID;
-            case UNAVAILABLE -> WhatsAppFailureReason.PROVIDER_UNAVAILABLE;
+            case UNAVAILABLE -> retryable ? WhatsAppFailureReason.NOT_SENT_IN_WINDOW
+                    : WhatsAppFailureReason.PROVIDER_UNAVAILABLE;
             case UNCERTAIN -> WhatsAppFailureReason.RESULT_UNCERTAIN;
         };
         var finished = deliveries.finish(ready.deliveryId(), ready.attemptId(), status,
                 accepted ? result.providerMessageId() : null, result.errorCode(),
                 failure == null ? null : failure.name(), now);
-        if (finished && failure != null && ready.summaryId() != null)
+        if (finished && failure != null && ready.summaryId() != null) {
             notifications.recordWhatsAppFailure(ready.spaceId(), ready.summaryId(), failure, now);
+            if (outcome == WhatsAppSender.Outcome.RECIPIENT_INVALID)
+                suspend(ready.spaceId(), ready.consentId(), WhatsAppSuspensionReason.RECIPIENT_INVALID, now);
+            if (outcome == WhatsAppSender.Outcome.REJECTED)
+                suspend(ready.spaceId(), ready.consentId(), WhatsAppSuspensionReason.PROVIDER_REJECTED, now);
+        }
         return status;
+    }
+
+    /**
+     * RF-ALT-19: turns the channel off with the reason, keeping number and consent, only when the configuration in
+     * force is still the one that failed (same consent, same number); a channel already corrected is left alone.
+     */
+    private boolean suspend(UUID spaceId, UUID consentId, WhatsAppSuspensionReason reason, Instant now) {
+        if (consentId == null) return false;
+        var current = settings.lock(spaceId, now);
+        var consent = settings.activeConsent(spaceId);
+        if (current.suspended() || current.recipient() == null || consent.isEmpty()
+                || !consent.get().id().equals(consentId) || !consent.get().recipient().equals(current.recipient()))
+            return false;
+        var next = current.suspend(reason, now);
+        if (!settings.update(next, null))
+            throw new IllegalStateException("The locked reminder settings changed during the suspension.");
+        settings.appendEvent(new SettingsEvent(identifiers.get(), spaceId, null, null,
+                SettingsEvent.Type.CHANNEL_SUSPENDED, current.version(), next.version(), reason.name(), now));
+        return true;
     }
 
     /** RF-ALT-16: an interrupted attempt becomes uncertain; it is never resent blindly. */
@@ -208,14 +336,28 @@ public final class WhatsAppDeliveryService {
         return stale.size();
     }
 
-    /** One status of a webhook, as the provider reported it (only its code when it failed). */
-    public record StatusUpdate(String providerMessageId, String status, Instant occurredAt, String errorCode) { }
+    /**
+     * One status of a webhook, as the provider reported it (only its code when it failed). H08.5: {@code reference}
+     * is the attempt reference sent with the request, when the provider echoed it; {@code recipientFailure} says
+     * the reported failure is a permanent one of the recipient (classified by the adapter).
+     */
+    public record StatusUpdate(String providerMessageId, String status, Instant occurredAt, String errorCode,
+            String reference, boolean recipientFailure) {
+        public StatusUpdate(String providerMessageId, String status, Instant occurredAt, String errorCode) {
+            this(providerMessageId, status, occurredAt, errorCode, null, false);
+        }
+    }
 
     /**
      * {@code retryLater}: a status named a message still unknown while some delivery waits for the provider's
      * answer, so its id may simply not be recorded yet; the provider should deliver the event again.
      */
-    public record WebhookOutcome(int applied, int duplicated, int stale, int ignored, boolean retryLater) { }
+    public record WebhookOutcome(int applied, int duplicated, int stale, int ignored, boolean retryLater,
+            int reconciled) {
+        public WebhookOutcome(int applied, int duplicated, int stale, int ignored, boolean retryLater) {
+            this(applied, duplicated, stale, ignored, retryLater, 0);
+        }
+    }
 
     /** Applies webhook statuses of known messages, each once, never moving a delivery backwards. */
     public WebhookOutcome applyStatuses(List<StatusUpdate> updates, Instant now) {
@@ -224,6 +366,7 @@ public final class WhatsAppDeliveryService {
         int stale = 0;
         int ignored = 0;
         var retry = false;
+        int reconciled = 0;
         for (var update : updates) {
             var status = WhatsAppDeliveryStatus.fromWebhook(update.status());
             if (status.isEmpty() || update.providerMessageId() == null || update.providerMessageId().isBlank()) {
@@ -231,6 +374,22 @@ public final class WhatsAppDeliveryService {
                 continue;
             }
             var delivery = deliveries.lockByProviderMessageId(update.providerMessageId());
+            var reference = reference(update.reference());
+            if (delivery.isEmpty() && reference.isPresent()) {
+                // H08.5: the message of an attempt whose answer was lost or not recorded yet.
+                var attempt = deliveries.lockByAttempt(reference.get());
+                if (attempt.isPresent() && attempt.get().status() == WhatsAppDeliveryStatus.ATTEMPTING) {
+                    ignored++;
+                    retry = true;
+                    continue;
+                }
+                if (attempt.isPresent() && attempt.get().status() == WhatsAppDeliveryStatus.UNCERTAIN
+                        && !attempt.get().hasProviderMessageId() && deliveries.reconcile(attempt.get().id(),
+                                reference.get(), update.providerMessageId(), now)) {
+                    reconciled++;
+                    delivery = attempt;
+                }
+            }
             if (delivery.isEmpty()) {
                 ignored++;
                 retry = retry || deliveries.anyAttempting();
@@ -252,11 +411,23 @@ public final class WhatsAppDeliveryService {
                 continue;
             }
             applied++;
-            if (status.get() == WhatsAppDeliveryStatus.FAILED && ref.summaryId() != null)
-                notifications.recordWhatsAppFailure(ref.spaceId(), ref.summaryId(),
-                        WhatsAppFailureReason.DELIVERY_FAILED, now);
+            if (status.get() == WhatsAppDeliveryStatus.FAILED && ref.summaryId() != null) {
+                notifications.recordWhatsAppFailure(ref.spaceId(), ref.summaryId(), update.recipientFailure()
+                        ? WhatsAppFailureReason.RECIPIENT_UNREACHABLE : WhatsAppFailureReason.DELIVERY_FAILED, now);
+                if (update.recipientFailure())
+                    suspend(ref.spaceId(), ref.consentId(), WhatsAppSuspensionReason.RECIPIENT_INVALID, now);
+            }
         }
-        return new WebhookOutcome(applied, duplicated, stale, ignored, retry);
+        return new WebhookOutcome(applied, duplicated, stale, ignored, retry, reconciled);
+    }
+
+    private static Optional<UUID> reference(String value) {
+        if (value == null || value.length() != 36) return Optional.empty();
+        try {
+            return Optional.of(UUID.fromString(value));
+        } catch (IllegalArgumentException invalid) {
+            return Optional.empty();
+        }
     }
 
     private static boolean confirmed(WhatsAppDeliveryStatus status) {
@@ -334,12 +505,18 @@ public final class WhatsAppDeliveryService {
 
     /** From the scheduled instant until one hour later or the next slot of the current schedule. */
     private static boolean windowOpen(PlannedSummary summary, StoredReminderSettings current, Instant now) {
-        var window = ReminderWindow.of(current.schedule(), ZoneId.of(summary.timeZone()), summary.date(),
-                summary.slot());
-        var limit = summary.scheduledAt().plus(ReminderWindow.MAXIMUM_DELAY);
-        var deadline = window.deadline().isBefore(limit) && window.deadline().isAfter(summary.scheduledAt())
-                ? window.deadline() : limit;
-        return !now.isBefore(summary.scheduledAt()) && now.isBefore(deadline);
+        return !now.isBefore(summary.scheduledAt()) && now.isBefore(deadline(summary, current));
+    }
+
+    private static Instant deadline(PlannedSummary summary, StoredReminderSettings current) {
+        return ReminderWindow.deadlineOf(current.schedule(), ZoneId.of(summary.timeZone()), summary.date(),
+                summary.slot(), summary.scheduledAt());
+    }
+
+    /** The window end under the schedule stored now (defaults when never written). */
+    private Instant deadline(PlannedSummary summary) {
+        return deadline(summary, settings.find(summary.spaceId())
+                .orElseGet(() -> StoredReminderSettings.defaults(summary.spaceId())));
     }
 
     /**
@@ -368,7 +545,8 @@ public final class WhatsAppDeliveryService {
                 delivery.itemCount(), delivery.createdAt(), delivery.attemptedAt(), delivery.acceptedAt(),
                 delivery.sentAt(), delivery.deliveredAt(), delivery.readAt(), delivery.failedAt(),
                 delivery.attempts().stream().map(attempt -> new WhatsAppDeliveryView.Attempt(attempt.number(),
-                        attempt.startedAt(), attempt.finishedAt(), attempt.outcome())).toList());
+                        attempt.startedAt(), attempt.finishedAt(), attempt.outcome())).toList(),
+                delivery.nextAttemptAt(), delivery.reconciledAt());
     }
 
     private static WhatsAppDeliveryView empty(String state, String reason, String reasonMessage) {

@@ -56,7 +56,7 @@ class ReminderSettingsHttpTest {
                 new ReminderSettingsView.WhatsApp(true, "+5511987654321", "+55 11 98765-4321", "4321", true,
                         new ReminderSettingsView.Consent(true, Instant.parse("2026-09-29T12:00:00Z"), "Admin", "4321"),
                         new ReminderSettingsView.Provider(false, "PROVIDER_DISABLED", "indisponível"),
-                        "PROVIDER_UNAVAILABLE", "WHATSAPP-RESUMOS-V1", "Autorizo..."));
+                        "PROVIDER_UNAVAILABLE", "WHATSAPP-RESUMOS-V1", "Autorizo...", null));
     }
 
     @Test

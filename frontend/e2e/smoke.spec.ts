@@ -974,3 +974,62 @@ test('H08.4 sends the administrator test and tracks a summary on WhatsApp withou
   overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test('H08.5 shows a suspended channel with its correction and a summary waiting for its next attempt', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const whatsapp = { hasRecipient: true, recipient: '+5511987654321', recipientFormatted: '+55 11 98765-4321', recipientLastDigits: '4321',
+    enabled: false, consent: { active: true, grantedAt: '2026-10-05T10:00:00Z', grantedByDisplayName: 'Admin', recipientLastDigits: '4321' },
+    provider: { available: true, code: 'PROVIDER_READY', message: 'Envio pela Meta configurado.' }, state: 'SUSPENDED',
+    suspension: { reason: 'RECIPIENT_INVALID', suspendedAt: '2026-10-05T12:00:12Z',
+      message: 'O número não pôde receber mensagens. Confira o número com o administrador e reative o canal.' },
+    consentTextVersion: 'WHATSAPP-RESUMOS-V1', consentText: 'Autorizo.' };
+  let settings: Record<string, unknown> = { canManage: true, timeZone: 'America/Sao_Paulo', version: 4, updatedAt: '2026-10-05T12:00:12Z',
+    schedule: { firstTime: '09:00', secondTime: '18:00', defaultFirstTime: '09:00', defaultSecondTime: '18:00' }, whatsapp };
+  const writes: string[] = [];
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ token: 't' })));
+  await page.route('**/api/v1/notifications/settings**', route => {
+    if (route.request().method() !== 'GET') {
+      writes.push(new URL(route.request().url()).pathname);
+      settings = { ...settings, version: 5, whatsapp: { ...whatsapp, enabled: true, state: 'READY', suspension: null } };
+    }
+    return route.fulfill(json(settings));
+  });
+  await page.route('**/api/v1/notifications/settings/events', route => route.fulfill(json({ items: [{ type: 'CHANNEL_SUSPENDED',
+    actorDisplayName: 'Sistema', occurredAt: '2026-10-05T12:00:12Z', fromVersion: 3, toVersion: 4, detail: 'Canal suspenso' }] })));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/lembretes');
+  await expect(page.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'SUSPENDED');
+  await expect(page.getByTestId('suspension')).toContainText('reative o canal');
+  await expect(page.getByTestId('channel-status')).toHaveText('Suspenso');
+  await expect(page.getByTestId('recipient')).toHaveText('+55 11 98765-4321');
+  await page.getByTestId('enable-channel').filter({ hasText: 'Reativar canal' }).click();
+  await expect(page.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'READY');
+  await expect(page.getByTestId('suspension')).toHaveCount(0);
+  expect(writes).toEqual(['/api/v1/notifications/settings/whatsapp/channel']);
+  let overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+
+  await page.route('**/api/v1/notifications/reminders/summaries/**', route => route.request().url().endsWith('/whatsapp')
+    ? route.fulfill(json({ state: 'RETRY_WAITING', stateMessage: 'A Meta não recebeu a mensagem. Uma nova tentativa está marcada.',
+      kind: 'SUMMARY', reason: 'PROVIDER_UNAVAILABLE', reasonMessage: null, recipientMasked: '+55 ** *****-4321', itemCount: 1,
+      createdAt: '2026-10-05T12:00:05Z', attemptedAt: '2026-10-05T12:01:10Z', acceptedAt: null, sentAt: null, deliveredAt: null,
+      readAt: null, failedAt: null, nextAttemptAt: '2026-10-05T12:06:10Z', reconciledAt: null,
+      attempts: [{ number: 1, startedAt: '2026-10-05T12:00:10Z', finishedAt: '2026-10-05T12:00:11Z', outcome: 'FAILED' },
+        { number: 2, startedAt: '2026-10-05T12:01:10Z', finishedAt: '2026-10-05T12:01:11Z', outcome: 'FAILED' }] }))
+    : route.fulfill(json({ id: 's1', date: '2026-10-05', slot: 'FIRST', scheduledTime: '09:00', timeZone: 'America/Sao_Paulo',
+      generatedAt: '2026-10-05T12:00:05Z', count: 1, total: '10.00', estimatedCount: 0, estimatedTotal: '0.00', overdueCount: 0,
+      detailCount: 1, remaining: 0, items: [{ position: 1, expenseId: 'e1', recurrenceId: null, description: 'Luz', label: 'Luz',
+        amount: '10.00', dueDate: '2026-10-05', estimated: false, overdue: false, forecast: false, origin: 'ONE_OFF',
+        installmentNumber: null, installmentCount: null, currentStatus: 'PENDING', currentDueDate: '2026-10-05' }],
+      link: 'http://localhost/lembretes/resumos/s1', text: 'Contas a pagar', channels: [{ channel: 'IN_APP', status: 'PLANNED', reason: null },
+        { channel: 'WHATSAPP', status: 'PLANNED', reason: null }] })));
+  await page.goto('/lembretes/resumos/s1');
+  await expect(page.getByTestId('whatsapp-delivery')).toHaveAttribute('data-state', 'RETRY_WAITING');
+  await expect(page.getByTestId('whatsapp-delivery-steps')).toContainText('Próxima tentativa');
+  await expect(page.getByTestId('whatsapp-attempts').locator('li')).toHaveCount(2);
+  await expect(page.getByTestId('whatsapp-attempts')).toContainText('Tentativa 2');
+  await expect(page.getByTestId('whatsapp-attempts')).toContainText('não recebida pela Meta');
+  await expect(page.getByRole('button', { name: /reenviar/i })).toHaveCount(0);
+  overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
