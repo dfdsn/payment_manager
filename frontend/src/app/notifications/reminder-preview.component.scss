@@ -1,0 +1,13 @@
+:host { display: block; }
+.page { width: min(100%, 60rem); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+.page > *, mat-card-content { min-width: 0; }
+.page-header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap; }
+.page-header h1 { margin: 0; }
+h2 { margin: 0 0 .5rem; font-size: 1.25rem; }
+p { line-height: 1.5; }
+.explain { padding: .75rem 1rem; background: #eef3f9; border-left: .25rem solid #52677d; }
+.explain ul { margin: .25rem 0 0; padding-left: 1.25rem; line-height: 1.6; }
+.query { display: flex; flex-wrap: wrap; gap: .75rem 1rem; align-items: center; }
+fieldset { border: 0; padding: 0; margin: 0; display: flex; gap: 1rem; align-items: center; }
+legend { float: left; margin-right: .5rem; font-weight: 600; }
+.error-summary { padding: .75rem 1rem; border-left: .25rem solid #ba1a1a; background: #ffdad6; }

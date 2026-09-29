@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 29/09/2026.
 
-**Estado atual: E08 em andamento (H08.1 concluída).** E07 concluído (H07.1–H07.3). H07.1 (fechar mês com retrato imutável), H07.2 (sinalizar alterações posteriores, calculada a cada consulta) e H07.3 (gerar e consultar versões) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04, E05, E06 e E07 estão concluídos; H03.3 mantém validação independente.
+**Estado atual: E08 em andamento (H08.1 e H08.2 concluídas).** E07 concluído (H07.1–H07.3). H07.1 (fechar mês com retrato imutável), H07.2 (sinalizar alterações posteriores, calculada a cada consulta) e H07.3 (gerar e consultar versões) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04, E05, E06 e E07 estão concluídos; H03.3 mantém validação independente.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 29/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 28 de 46 concluídas; E01, E02, E04, E05, E06 e E07 concluídos; E03 depende da validação final de H03.3. |
+| Histórias | 29 de 46 concluídas; E01, E02, E04, E05, E06 e E07 concluídos; E03 depende da validação final de H03.3. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | H08.2 (elegibilidade e resumo) em andamento no mesmo PR da H08.1; depois, revisão do PR por Diego. H08.3–H08.5 não iniciadas. |
+| Próxima ação | Revisão do PR da H08.2 por Diego (H08.1 integrada pelo PR #12). Depois, H08.3 (entrega interna do resumo). H08.3–H08.5 não iniciadas; envio real depende de P03. |
 
 ## Estados permitidos
 
@@ -71,7 +71,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H07.2 | Sinalizar alterações posteriores | Concluído | Situação do fechamento (`NOT_CLOSED`, `UP_TO_DATE`, `OUTDATED`) e diferenças por lançamento calculadas no backend a cada consulta, comparando o retrato salvo com os dados atuais pela mesma leitura e chave de conteúdo (sem marcador gravado); mudanças entre meses nos dois meses; lista anual `GET /reports/closings?year=`; tela com retrato salvo e dados atuais lado a lado (T29). 306 Java, JaCoCo 98,01%/92,54%, PIT 89%, 145 ITs em Testcontainers 17.6 (17 da matriz D1–D17), 121 frontend, smoke 12/12 e E2E full-stack aprovados. Evidência: `docs/evidencias/H07.2.md`. |
 | H07.3 | Gerar e consultar versões | Concluído | **Gerar nova versão…** e `POST/GET /reports/closings/{month}/versions`, `GET .../versions/{n}`: nova versão dos dados atuais pelos dois papéis, sem motivo e mesmo sem diferenças, com `expectedVersion`, idempotência, bloqueio do cabeçalho e do espaço, troca atômica da vigente e evento `VERSION_GENERATED` (V23, T30); versões anteriores imutáveis e consultáveis. 311 Java, JaCoCo 98,06%/92,61%, PIT 89%, 157 ITs em Testcontainers 17.6 (12 da matriz V1–V13 e regressões H07.1/H07.2), 123 frontend, smoke 13/13 e E2E full-stack aprovados. Evidência: `docs/evidencias/H07.3.md`. |
 | H08.1 | Configurar canal, consentimento e horários | Concluído | Tela **Lembretes e WhatsApp** e `/notifications/settings`: horários 09:00/18:00 no fuso do espaço, número E.164 brasileiro, consentimento explícito com versão do texto e instante UTC, ativação só com consentimento do administrador atual, canal separado da disponibilidade do provedor (`PROVIDER_UNAVAILABLE` até a H08.4), revogação na troca de número e na transferência de administração (mesma transação), versão, idempotência e auditoria sem número completo (V24, T31). 380 Java, JaCoCo 95,83%/90,57%, PIT 90%, 171 ITs em Testcontainers 17.6 (14 da matriz C1–C16), 130 frontend, smoke 14/14 e E2E full-stack aprovados. Evidência: `docs/evidencias/H08.1.md`. |
-| H08.2 | Calcular elegibilidade e resumo | Não iniciado | — |
+| H08.2 | Calcular elegibilidade e resumo | Concluído | Job de horários no fuso do espaço: primeiro horário com atrasadas e vencimentos até cinco dias, segundo com hoje e amanhã; janela de uma hora com `MISSED`/`EMPTY`; resumo único por espaço/data/horário com quantidade e total de todas as elegíveis, até cinco detalhes (atrasadas primeiro), excedente, estimativas e link autenticado; avulsas, parcelas e recorrências com materialização antecipada pela fila da H04.2; canais `IN_APP`/`WHATSAPP` planejados ou ignorados sem envio; prévia e página do resumo (V25, T32). 418 Java, JaCoCo 96,22%/91,29%, PIT 91%, 187 ITs em Testcontainers 17.6 (16 da matriz E1–E16), 135 frontend, smoke 15/15 e E2E full-stack aprovados. Evidência: `docs/evidencias/H08.2.md`. |
 | H08.3 | Disponibilizar notificações internas | Não iniciado | — |
 | H08.4 | Enviar e acompanhar WhatsApp real | Não iniciado | — |
 | H08.5 | Revalidar e tratar falhas sem acúmulo | Não iniciado | — |
@@ -507,6 +507,25 @@ Condição de conclusão ou desbloqueio: checkpoint das sete condições aprovad
 Próximo passo: H08.2 (calcular elegibilidade e resumo), na mesma execução.
 ```
 
+## Registro H08.2
+
+```text
+História / objetivo: H08.2 — Calcular elegibilidade e resumo.
+Estado / responsável / data: Concluído / desenvolvimento / 29/09/2026. E08 continua em andamento (H08.3–H08.5 não iniciadas).
+Requisitos e critérios de aceite relacionados: H08.2 do backlog; PRD 10.2, RF-ALT-06 a RF-ALT-11, RF-ALT-13 a RF-ALT-15, RF-ALT-18, RF-ALT-20, RF-REC-07 e CA-09; pedido de Diego de 29/09/2026.
+Decisões e pendências aplicáveis: T32 registrada; T17, T18 e T31 aplicadas. P03 (Meta) continua aberta e bloqueia só o envio real. Nenhuma decisão de Diego foi necessária.
+Branch / commit / PR: branch `claude/h08-1-h08-2-lembretes-84n4dp`; commit próprio da H08.2 em PR novo para `main` (o PR #12, só com a H08.1, foi integrado por Diego em 29/09/2026). Nada foi publicado, implantado ou enviado.
+Arquivos e comportamento alterados: módulo `notifications` (domínio do calendário/resumo, serviço, job, JDBC, API); contratos `expenses.application.ExpenseReminderQueries` e `recurrences.application.UpcomingOccurrenceGeneration`; frontend `/lembretes/previa` e `/lembretes/resumos/:id`; README, OpenAPI, especificação 6.2.2, decisões e evidência.
+Migrações e impacto sobre dados: V25 cria quatro tabelas novas; nenhuma tabela existente é alterada. A geração periódica de recorrências (T17) não muda.
+Testes executados: 418 unitários/HTTP/ArchUnit; 187 ITs Failsafe em Testcontainers `postgres:17.6-alpine` (16 de `ReminderSummaryPostgresIT`, regressões da H08.1 e de E04 incluídas); JaCoCo e PIT; 135 Vitest; build Angular; 15 smoke E2E; E2E full-stack local com o job real ativo. Todos aprovados. Primeira execução do IT teve 1 falha de asserção do teste (contagem entre espaços), corrigida sem mudar o resultado esperado.
+Cobertura e mutação aplicáveis: JaCoCo 3179/3304 linhas (96,22%) e 1729/1894 branches (91,29%); PIT 1399/1545 (91%), força 94%; limites mantidos.
+Validação manual / integração real: datas controladas por relógio de teste e pela prévia; sem envio real (proibido nesta tarefa e dependente de P03/H08.4).
+Limitações e cenários futuros: entrega interna (H08.3), envio WhatsApp (H08.4), confirmação, falhas e retomada (H08.5).
+Documentação atualizada: README.md, docs/openapi.yaml, docs/especificacao-tecnica.md, docs/decisoes-pendentes.md, docs/evidencias/H08.2.md e este arquivo.
+Condição de conclusão ou desbloqueio: critérios de aceite e matriz E1–E17 conferidos (evidência H08.2).
+Próximo passo: revisão do PR por Diego; depois H08.3.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -578,3 +597,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 29/09/2026 | H07.2 concluída: sinalização derivada de alterações posteriores com matriz D1–D17 conferida em PostgreSQL 17.6 (concorrência, entre meses), gates (JaCoCo 98,01%/92,54%, PIT 89%), 121 frontend, smoke 12/12, E2E full-stack e regressão H07.1. Checkpoint atendido; H07.3 iniciada. |
 | 29/09/2026 | H07.3 concluída: versões do fechamento com matriz V1–V13 conferida em PostgreSQL 17.6 (concorrência, repetição, falha), gates (JaCoCo 98,06%/92,61%, PIT 89%), 123 frontend, smoke 13/13, E2E full-stack e regressões H07.1/H07.2. E07 concluído. |
 | 29/09/2026 | H08.1 concluída: horários, número, consentimento explícito e ativação do WhatsApp do administrador, separados da disponibilidade do provedor, com revogação na transferência; matriz C1–C17 conferida em PostgreSQL 17.6, gates (JaCoCo 95,83%/90,57%, PIT 90%), 130 frontend, smoke 14/14 e E2E full-stack. Checkpoint atendido; H08.2 iniciada. |
+| 29/09/2026 | H08.2 concluída: calendário de elegibilidade por horário, resumo único por espaço/data/horário com totais, detalhes, estimativas e link autenticado, materialização antecipada de recorrências e canais planejados sem envio; matriz E1–E17 conferida em PostgreSQL 17.6, gates (JaCoCo 96,22%/91,29%, PIT 91%), 135 frontend, smoke 15/15 e E2E full-stack. E08 continua em andamento. |

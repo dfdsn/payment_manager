@@ -1,0 +1,43 @@
+@let s = summary();
+<div class="totals" data-testid="summary-totals">
+  <p class="headline"><strong>{{ plural(s.count, 'conta', 'contas') }}</strong>, total <strong data-testid="summary-total">{{ money(s.total) }}</strong></p>
+  @if (s.overdueCount) { <p class="overdue">{{ plural(s.overdueCount, 'atrasada', 'atrasadas') }}</p> }
+  @if (s.estimatedCount) { <p data-testid="summary-estimates">{{ plural(s.estimatedCount, 'estimada', 'estimadas') }}: {{ money(s.estimatedTotal) }} (o valor pode mudar)</p> }
+</div>
+
+<h3>Na mensagem</h3>
+<ol class="details" data-testid="summary-details">
+  @for (item of details(); track item.position) {
+    <li>
+      @if (item.overdue) { <span class="tag overdue">Atrasada</span> }
+      <span class="due">{{ date(item.dueDate) }}</span> {{ item.label }} — {{ money(item.amount) }}
+      @if (item.estimated) { <span class="tag">Estimada</span> }
+      @if (item.forecast) { <span class="tag">Previsão</span> }
+    </li>
+  }
+</ol>
+@if (s.remaining) { <p data-testid="summary-remaining">e mais {{ plural(s.remaining, 'conta', 'contas') }}</p> }
+
+@if (s.items.length > s.detailCount) {
+  <h3>Lista completa</h3>
+  <ol class="details" data-testid="summary-items">
+    @for (item of s.items; track item.position) {
+      <li>
+        @if (item.overdue) { <span class="tag overdue">Atrasada</span> }
+        <span class="due">{{ date(item.dueDate) }}</span> {{ item.label }} — {{ money(item.amount) }}
+        @if (item.estimated) { <span class="tag">Estimada</span> }
+        @if (item.forecast) { <span class="tag">Previsão</span> }
+      </li>
+    }
+  </ol>
+}
+
+<h3>Canais</h3>
+<ul class="channels" data-testid="summary-channels">
+  @for (channel of s.channels; track channel.channel) { <li>{{ channelText(channel) }}</li> }
+</ul>
+
+<details>
+  <summary>Texto da mensagem</summary>
+  <pre data-testid="summary-text">{{ s.text }}</pre>
+</details>

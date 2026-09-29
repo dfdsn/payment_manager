@@ -1,0 +1,46 @@
+<section class="page" aria-labelledby="preview-title">
+  <header class="page-header">
+    <div>
+      <h1 id="preview-title">Prévia dos resumos</h1>
+      <p>O que cada horário traria com os dados de agora. Nada é salvo nem enviado.</p>
+    </div>
+    <nav aria-label="Outras telas"><a routerLink="/lembretes">Lembretes e WhatsApp</a> · <a routerLink="/despesas">Despesas</a></nav>
+  </header>
+
+  <div class="explain" data-testid="calendar-explain">
+    <strong>Quais contas entram</strong>
+    <ul>
+      <li><strong>Primeiro horário:</strong> atrasadas e as que vencem de hoje até daqui a cinco dias.</li>
+      <li><strong>Segundo horário:</strong> só as que vencem hoje e amanhã.</li>
+      <li>Pagas e canceladas nunca entram. Sem contas, nenhum resumo é gerado.</li>
+    </ul>
+  </div>
+
+  <form [formGroup]="form" (ngSubmit)="simulate()" class="query" aria-label="Simular resumo" novalidate>
+    <mat-form-field appearance="outline">
+      <mat-label>Data</mat-label>
+      <input matInput type="date" formControlName="date" data-testid="preview-date" />
+    </mat-form-field>
+    <fieldset>
+      <legend>Horário</legend>
+      <label><input type="radio" formControlName="slot" value="FIRST" data-testid="preview-first" /> Primeiro</label>
+      <label><input type="radio" formControlName="slot" value="SECOND" data-testid="preview-second" /> Segundo</label>
+    </fieldset>
+    <button matButton="filled" type="submit" [disabled]="loading()" data-testid="preview-submit">{{ loading() ? 'Calculando…' : 'Simular' }}</button>
+  </form>
+
+  @if (error()) { <div class="error-summary" role="alert" data-testid="preview-error">{{ error() }}</div> }
+
+  @if (preview(); as p) {
+    <mat-card appearance="outlined">
+      <mat-card-content>
+        <h2 data-testid="preview-heading">{{ slotLabels[p.slot] }} de {{ date(p.date) }}, {{ p.scheduledTime }} ({{ p.timeZone }})</h2>
+        @if (p.summary; as s) {
+          <app-reminder-summary-card [summary]="s" />
+        } @else {
+          <p data-testid="preview-empty">Nenhuma conta elegível: nesse horário nenhum resumo seria gerado.</p>
+        }
+      </mat-card-content>
+    </mat-card>
+  }
+</section>

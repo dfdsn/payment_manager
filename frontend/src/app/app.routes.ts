@@ -18,6 +18,8 @@ export const routes: Routes = [
   { path: 'categorias', loadComponent: () => import('./expenses/category.component').then(module => module.CategoryComponent) },
   { path: 'recorrencias', loadComponent: () => import('./recurrences/recurrence.component').then(module => module.RecurrenceComponent) },
   { path: 'compras-parceladas', loadComponent: () => import('./installments/installment-purchase.component').then(module => module.InstallmentPurchaseComponent) },
+  { path: 'lembretes/previa', loadComponent: () => import('./notifications/reminder-preview.component').then(module => module.ReminderPreviewComponent) },
+  { path: 'lembretes/resumos/:id', loadComponent: () => import('./notifications/reminder-summary.component').then(module => module.ReminderSummaryComponent) },
   { path: 'lembretes', loadComponent: () => import('./notifications/reminder-settings.component').then(module => module.ReminderSettingsComponent) },
   { path: 'aceitar-convite', component: InvitationComponent, data: { mode: 'accept' } },
   { path: 'configuracao-inicial', component: InitialSetupComponent },

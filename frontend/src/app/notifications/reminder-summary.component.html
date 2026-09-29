@@ -1,0 +1,24 @@
+<section class="page" aria-labelledby="summary-title">
+  <header class="page-header">
+    <div>
+      <h1 id="summary-title">Resumo de contas</h1>
+      <p>A lista completa do resumo, como foi montada no horário. Pague ou corrija as contas em Despesas.</p>
+    </div>
+    <nav aria-label="Outras telas"><a routerLink="/despesas">Despesas</a> · <a routerLink="/lembretes/previa">Prévia dos resumos</a></nav>
+  </header>
+
+  @if (error()) {
+    <div class="error-summary" role="alert" data-testid="summary-error">{{ error() }} @if (unauthenticated()) { <a routerLink="/entrar">Entrar</a> }</div>
+  }
+  @if (!summary() && !error()) { <p role="status">Carregando resumo…</p> }
+
+  @if (summary(); as s) {
+    <mat-card appearance="outlined">
+      <mat-card-content>
+        <h2 data-testid="summary-heading">{{ slotLabels[s.slot] }} de {{ date(s.date) }}, {{ s.scheduledTime }}</h2>
+        <p class="generated">Gerado em {{ generatedAt(s) }}. Contas pagas ou alteradas depois continuam aqui como estavam.</p>
+        <app-reminder-summary-card [summary]="s" />
+      </mat-card-content>
+    </mat-card>
+  }
+</section>

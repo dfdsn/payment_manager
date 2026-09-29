@@ -74,6 +74,13 @@ class ExpensesConfiguration {
         return new JdbcExpensePlanningQueries(jdbcTemplate);
     }
 
+    /** H08.2: pending expenses a reminder may mention; runs in the caller's transaction. */
+    @Bean
+    com.malyah.accountmanager.expenses.application.ExpenseReminderQueries expenseReminderQueries(
+            JdbcTemplate jdbcTemplate) {
+        return new JdbcExpenseReminderQueries(jdbcTemplate);
+    }
+
     @Bean
     com.malyah.accountmanager.expenses.application.ExpenseExportQueries expenseExportQueries(
             JdbcTemplate jdbcTemplate) {
