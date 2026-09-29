@@ -227,17 +227,11 @@ public final class ExpenseService {
         validate(query);
         var actor = contextQuery.findByEmail(actorEmail);
         var today = LocalDate.now(clock.withZone(ZoneId.of(actor.timeZone())));
-        var from = query.dateFrom();
-        var to = query.dateTo();
-        if (from == null && to == null) {
-            from = today.withDayOfMonth(1);
-            to = today.withDayOfMonth(today.lengthOfMonth());
-        }
+        var selection = query.selection().effective(today);
         var effective = new ExpenseListQuery(query.page(), query.size(), query.sort(), query.direction(),
-                query.search() == null ? null : query.search().trim(), from, to,
-                query.dateBasis() == null ? ExpenseDateBasis.DUE_DATE : query.dateBasis(),
-                query.categoryId(), query.withoutCategory(), query.responsibleUserId(), query.withoutResponsible(),
-                query.payerUserId(), query.status() == null ? ExpenseStatusFilter.ACTIVE : query.status(), today);
+                selection.search(), selection.dateFrom(), selection.dateTo(), selection.dateBasis(),
+                selection.categoryId(), selection.withoutCategory(), selection.responsibleUserId(),
+                selection.withoutResponsible(), selection.payerUserId(), selection.status(), today);
         var stored = repository.findBySpace(actor.spaceId(), effective);
         var totalPages = stored.totalElements() == 0 ? 0
                 : Math.toIntExact((stored.totalElements() + effective.size() - 1) / effective.size());

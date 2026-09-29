@@ -503,3 +503,53 @@ test('H06.3 shows the integrated planning with forecasts marked, month drill-dow
   expect(last.searchParams.get('categoryId')).toBe('casa');
   expect(last.searchParams.get('page')).toBe('0');
 });
+
+test('H06.4 downloads the CSV of the selection on screen and explains a refused export', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const exportCalls: URL[] = [];
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/identity/members', route => route.fulfill(json([{ userId: 'actor', displayName: 'Diego', currentUser: true }])));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([])));
+  await page.route('**/api/v1/expenses/filter-options', route => route.fulfill(json({ responsiblePeople: [], payerPeople: [] })));
+  await page.route('**/api/v1/expenses?**', route => route.fulfill(json({ content: [], page: 0, size: 20, totalElements: 0,
+    totalPages: 0, sort: 'REFERENCE_DATE', direction: 'ASC' })));
+  const csv = '﻿"Descrição";"Categoria"\r\n"Água; luz";"Casa"\r\n';
+  await page.route('**/api/v1/reports/expenses/export**', route => {
+    const url = new URL(route.request().url());
+    exportCalls.push(url);
+    if (url.searchParams.get('status') === 'ALL') {
+      route.fulfill(json({ code: 'EXPORT_LIMIT_EXCEEDED', message: 'A seleção tem 10.001 registros e a exportação aceita até '
+        + '10.000. Reduza o período ou aplique filtros e exporte em partes.', fieldErrors: [], operationId: 'op' }, 422));
+      return;
+    }
+    route.fulfill({ status: 200, body: csv, headers: { 'Content-Type': 'text/csv;charset=UTF-8', 'X-Export-Rows': '1',
+      'Content-Disposition': 'attachment; filename="despesas_vencimento_2026-09-01_a_2026-09-30.csv"' } });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/despesas');
+  await page.getByLabel('Buscar na descrição').fill('água');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exportar CSV' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('despesas_vencimento_2026-09-01_a_2026-09-30.csv');
+  const saved = await download.path();
+  const bytes = (await import('node:fs')).readFileSync(saved!);
+  expect(bytes.subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+  expect(bytes.toString('utf8')).toBe(csv);
+  await expect(page.getByTestId('csv-export-message')).toHaveText(
+    'Arquivo despesas_vencimento_2026-09-01_a_2026-09-30.csv baixado com 1 registro.');
+  expect(exportCalls[0].searchParams.get('search')).toBe('água');
+  expect(exportCalls[0].searchParams.get('sort')).toBe('REFERENCE_DATE');
+  expect(exportCalls[0].searchParams.has('page')).toBe(false);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+
+  await page.locator('select[formcontrolname="status"]').last().selectOption('ALL');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await page.getByRole('button', { name: 'Exportar CSV' }).click();
+  await expect(page.getByTestId('csv-export-error')).toContainText('A seleção tem 10.001 registros');
+  await expect(page.getByTestId('csv-export-message')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Exportar CSV' })).toBeEnabled();
+});

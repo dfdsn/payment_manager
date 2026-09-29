@@ -38,3 +38,5 @@ tr[aria-current='true'] th, tr[aria-current='true'] td { background: #eef3f9; }
   .filters { grid-template-columns: 1fr; }
   .month-title { min-width: 0; flex: 1 1 100%; order: -1; text-align: left; }
 }
+.csv-export-row { display: grid; gap: .25rem; min-width: 0; }
+.csv-export-row p { margin: 0; }

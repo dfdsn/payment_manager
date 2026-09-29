@@ -67,6 +67,13 @@
       </article>
     </div>
 
+    <div class="csv-export-row">
+      <app-csv-export-button label="Exportar previsões (CSV)" [request]="exportForecasts" fallbackName="previsoes.csv"
+        statusId="forecast-export-status"
+        emptyMessage="Nenhuma previsão com os filtros atuais; nenhum arquivo foi baixado." />
+      <p class="subtle">Arquivo separado só com as previsões de recorrência ainda não lançadas no horizonte, com os filtros aplicados. Os lançamentos são exportados em Despesas.</p>
+    </div>
+
     <mat-card appearance="outlined">
       <mat-card-header><mat-card-title>Mês a mês</mat-card-title>
         <mat-card-subtitle>Escolha um mês para ver os valores que o compõem.</mat-card-subtitle></mat-card-header>

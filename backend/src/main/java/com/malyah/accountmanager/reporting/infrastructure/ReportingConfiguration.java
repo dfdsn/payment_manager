@@ -8,10 +8,13 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.malyah.accountmanager.expenses.application.ExpenseExportQueries;
 import com.malyah.accountmanager.expenses.application.ExpensePlanningQueries;
 import com.malyah.accountmanager.expenses.application.ExpenseReportQueries;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.recurrences.application.RecurrenceForecastQueries;
+import com.malyah.accountmanager.reporting.application.ExportService;
+import com.malyah.accountmanager.reporting.application.ExportUseCase;
 import com.malyah.accountmanager.reporting.application.PlanningService;
 import com.malyah.accountmanager.reporting.application.PlanningUseCase;
 import com.malyah.accountmanager.reporting.application.ReportingService;
@@ -33,6 +36,14 @@ class ReportingConfiguration {
             AuthenticatedUserContextQuery contexts, Clock applicationClock,
             PlatformTransactionManager transactionManager) {
         return new TransactionalPlanningUseCase(new PlanningService(expenses, forecasts, contexts, applicationClock),
+                new TransactionTemplate(transactionManager));
+    }
+
+    @Bean
+    ExportUseCase exportUseCase(ExpenseExportQueries expenses, RecurrenceForecastQueries forecasts,
+            AuthenticatedUserContextQuery contexts, Clock applicationClock,
+            PlatformTransactionManager transactionManager) {
+        return new TransactionalExportUseCase(new ExportService(expenses, forecasts, contexts, applicationClock),
                 new TransactionTemplate(transactionManager));
     }
 }

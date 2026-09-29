@@ -11,8 +11,10 @@ import { ApiError } from '../identity/initial-setup.service';
 import { AccountAccessService, SpaceMember } from '../identity/account-access.service';
 import { Category, CategoryService } from './category.service';
 import {
-  Expense, ExpenseService, ExpenseSort, ExpenseStatus, SortDirection,
+  Expense, ExpenseFilters, ExpenseService, ExpenseSort, ExpenseStatus, SortDirection,
 } from './expense.service';
+import { CsvExportButtonComponent } from '../reports/csv-export-button.component';
+import { CsvExportService } from '../reports/csv-export.service';
 
 const MONEY = /^\d{1,8}([.,]\d{1,2})?$/;
 const positiveAmount = (control: AbstractControl<string>): ValidationErrors | null =>
@@ -22,7 +24,7 @@ const positiveAmount = (control: AbstractControl<string>): ValidationErrors | nu
   selector: 'app-expense',
   imports: [
     ReactiveFormsModule, RouterLink, MatButtonModule, MatCardModule,
-    MatFormFieldModule, MatInputModule,
+    MatFormFieldModule, MatInputModule, CsvExportButtonComponent,
   ],
   templateUrl: './expense.component.html',
   styleUrl: './expense.component.scss',
@@ -32,6 +34,7 @@ export class ExpenseComponent implements OnInit {
   private readonly expensesApi = inject(ExpenseService);
   private readonly identity = inject(AccountAccessService);
   private readonly categoryApi = inject(CategoryService);
+  private readonly csvExports = inject(CsvExportService);
   readonly categories = signal<Category[]>([]);
   readonly members = signal<SpaceMember[]>([]);
   readonly responsibleFilterPeople = signal<import('./expense.service').ExpenseFilterPerson[]>([]);
@@ -531,6 +534,11 @@ export class ExpenseComponent implements OnInit {
     this.load();
   }
 
+  /** H06.4: exports the selection on screen (filters and order of the last list shown), every page. */
+  readonly exportRequest = () => this.csvExports.expenses(this.shown.filters, this.shown.sort, this.shown.direction);
+  private shown: { filters: ExpenseFilters; sort: ExpenseSort; direction: SortDirection } =
+    { filters: {}, sort: 'REFERENCE_DATE', direction: 'ASC' };
+
   applyFilters(): void {
     if (this.filterForm.invalid) { this.filterForm.markAllAsTouched(); return; }
     const value=this.filterForm.getRawValue();
@@ -589,16 +597,19 @@ export class ExpenseComponent implements OnInit {
     this.loading.set(true);
     if (clearError) this.errorMessage.set(null);
     const f=this.filterForm.getRawValue();
-    this.expensesApi.list(this.page(), 20, this.sort(), this.direction(), {
+    const filters: ExpenseFilters = {
       search:f.search.trim()||undefined,dateFrom:f.dateFrom||undefined,dateTo:f.dateTo||undefined,dateBasis:f.dateBasis,
       categoryId:f.category && f.category!=='NONE'?f.category:undefined,withoutCategory:f.category==='NONE',
       responsibleUserId:f.responsible&&f.responsible!=='NONE'?f.responsible:undefined,withoutResponsible:f.responsible==='NONE',
       payerUserId:f.payerUserId||undefined,status:f.status,
-    }).pipe(finalize(() => { if(sequence===this.loadSequence)this.loading.set(false); }))
+    };
+    const sort=this.sort(), direction=this.direction();
+    this.expensesApi.list(this.page(), 20, sort, direction, filters).pipe(finalize(() => { if(sequence===this.loadSequence)this.loading.set(false); }))
       .subscribe({
         next: result => {
           if(sequence!==this.loadSequence)return;
           this.expenses.set(result.content);
+          this.shown = { filters, sort, direction };
           this.page.set(result.page);
           this.totalPages.set(result.totalPages);
           this.totalElements.set(result.totalElements);

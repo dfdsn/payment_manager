@@ -4,6 +4,7 @@ import { provideRouter } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
 import { CategoryService } from '../expenses/category.service';
 import { ExpenseService } from '../expenses/expense.service';
+import { CsvExportService } from './csv-export.service';
 import { PlanningComponent } from './planning.component';
 import { Planning, PlanningItem, PlanningTotals, ReportService } from './report.service';
 
@@ -32,6 +33,7 @@ const planning = (month = '2026-10', page = 0, content: PlanningItem[] = [], tot
 describe('PlanningComponent', () => {
   let fixture: ComponentFixture<PlanningComponent>;
   const reports = { planning: vi.fn() };
+  const csv = { expenses: vi.fn(), forecasts: vi.fn(() => new Subject<any>()) };
   const text = () => (fixture.nativeElement as HTMLElement).textContent!.replace(/\s+/g, ' ');
   const byTestId = (id: string) => (fixture.nativeElement as HTMLElement).querySelector(`[data-testid="${id}"]`)?.textContent?.trim();
   const button = (label: string) => Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'))
@@ -50,7 +52,7 @@ describe('PlanningComponent', () => {
     ])));
     await TestBed.configureTestingModule({
       imports: [PlanningComponent],
-      providers: [provideRouter([]), { provide: ReportService, useValue: reports },
+      providers: [provideRouter([]), { provide: ReportService, useValue: reports }, { provide: CsvExportService, useValue: csv },
         { provide: ExpenseService, useValue: { filterOptions: () => of({ responsiblePeople: [{ userId: 'u1', displayName: 'Ana', activeMember: false }], payerPeople: [] }) } },
         { provide: CategoryService, useValue: { list: () => of([{ id: 'cat', name: 'Moradia', archived: true, version: 0, updatedAt: '' }]) } }],
     }).compileComponents();
@@ -99,6 +101,8 @@ describe('PlanningComponent', () => {
     expect(reports.planning).toHaveBeenLastCalledWith('2027-01',
       { search: 'luz', withoutCategory: true, responsibleUserId: 'u1' }, 0, 20);
     expect(text()).toContain('Filtros aplicados a todos os valores.');
+    button('Exportar previsões (CSV)').click();
+    expect(csv.forecasts).toHaveBeenLastCalledWith({ search: 'luz', withoutCategory: true, responsibleUserId: 'u1' });
     fixture.componentInstance.clearFilters();
     expect(reports.planning).toHaveBeenLastCalledWith('2027-01', {}, 0, 20);
   });

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, request as playwrightRequest, test } from '@playwright/test';
 
 const email = 'admin@example.com';
@@ -484,6 +485,42 @@ test('runs setup, email confirmation, login, reset and session revocation agains
     credentials: 'omit',
   })).status);
   expect(anonymousPlanningStatus).toBe(401);
+
+  // H06.4: forecasts go to their own file; January (already an entry) is not a forecast.
+  const forecastDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exportar previsões (CSV)' }).click();
+  const forecastCsv = readFileSync((await (await forecastDownload).path())!).toString('utf8');
+  const forecastLines = forecastCsv.split('\r\n').filter(line => line !== '');
+  expect(forecastCsv.startsWith('\uFEFF"Descrição";"Categoria";"Vencimento previsto";"Valor previsto"')).toBe(true);
+  expect(forecastLines[1]).toMatch(/^"Condomínio recorrente";;28\/02\/2027;500,00;Não;;Previsão de recorrência;[0-9a-f-]{36}$/);
+  expect(forecastCsv).not.toContain('31/01/2027');
+  await expect(page.getByTestId('csv-export-message')).toContainText(`baixado com ${forecastLines.length - 1} registro`);
+
+  // H06.4: the expense CSV has every entry of the applied selection, cancelled included when asked.
+  await page.goto('/despesas');
+  await page.getByLabel('Buscar na descrição').fill('Sofá parcelado');
+  await page.getByLabel('Data inicial').fill('2027-01-01');
+  await page.getByLabel('Data final').fill('2027-04-30');
+  await page.locator('select[formcontrolname="status"]').last().selectOption('ALL');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByText('5 despesas')).toBeVisible();
+  const expenseDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exportar CSV' }).click();
+  const download = await expenseDownload;
+  expect(download.suggestedFilename()).toBe('despesas_vencimento_2027-01-01_a_2027-04-30.csv');
+  const expenseCsv = readFileSync((await download.path())!).toString('utf8');
+  const rows = expenseCsv.split('\r\n').filter(line => line !== '').slice(1);
+  expect(rows).toHaveLength(5);
+  expect(rows[0]).toMatch(/^"Sofá parcelado";;31\/01\/2027;33,33;Não;Paga;33,33;\d{2}\/\d{2}\/\d{4};;"Diego";Parcela;1 de 3;/);
+  expect(rows[1]).toMatch(/^"Sofá parcelado";;10\/02\/2027;33,33;Não;Pendente;;;;;Parcela;2 de 3;/);
+  expect(rows.filter(row => row.includes(';Cancelada;'))).toHaveLength(1);
+  expect(rows.filter(row => row.startsWith('"Sofá parcelado (restante)";;'))).toHaveLength(2);
+  await expect(page.getByTestId('csv-export-message')).toHaveText(
+    'Arquivo despesas_vencimento_2027-01-01_a_2027-04-30.csv baixado com 5 registros.');
+  const anonymousExportStatus = await page.evaluate(async () => (await fetch('/api/v1/reports/expenses/export', {
+    credentials: 'omit',
+  })).status);
+  expect(anonymousExportStatus).toBe(401);
 
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);

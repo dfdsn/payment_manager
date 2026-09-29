@@ -25,6 +25,23 @@ public record ExpenseSelection(String search, LocalDate dateFrom, LocalDate date
             throw new ExpenseQueryValidationException("responsible", "Escolha um responsável ou Sem responsável.");
     }
 
+    /**
+     * The defaults of the list (H03.4) applied once, so the list and the CSV export select the same population:
+     * trimmed search, due-date basis, active status and, when neither date is given, the current local month.
+     */
+    public ExpenseSelection effective(LocalDate localToday) {
+        var from = dateFrom;
+        var to = dateTo;
+        if (from == null && to == null) {
+            from = localToday.withDayOfMonth(1);
+            to = localToday.withDayOfMonth(localToday.lengthOfMonth());
+        }
+        return new ExpenseSelection(search == null ? null : search.trim(), from, to,
+                dateBasis == null ? ExpenseDateBasis.DUE_DATE : dateBasis, categoryId, withoutCategory,
+                responsibleUserId, withoutResponsible, payerUserId,
+                status == null ? ExpenseStatusFilter.ACTIVE : status, localToday);
+    }
+
     public ExpenseSelection withPeriod(LocalDate from, LocalDate to) {
         return new ExpenseSelection(search, from, to, dateBasis, categoryId, withoutCategory, responsibleUserId,
                 withoutResponsible, payerUserId, status, today);

@@ -9,6 +9,8 @@ import { RouterLink } from '@angular/router';
 import { Category, CategoryService } from '../expenses/category.service';
 import { ExpenseFilterPerson, ExpenseService } from '../expenses/expense.service';
 import { ApiError } from '../identity/initial-setup.service';
+import { CsvExportButtonComponent } from './csv-export-button.component';
+import { CsvExportService } from './csv-export.service';
 import {
   Planning, PlanningFilters, PlanningItem, ReportService, formatCurrency, formatDate, monthLabel,
 } from './report.service';
@@ -23,7 +25,8 @@ const NONE = '__none__';
  */
 @Component({
   selector: 'app-planning',
-  imports: [ReactiveFormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule],
+  imports: [ReactiveFormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule,
+    CsvExportButtonComponent],
   templateUrl: './planning.component.html',
   styleUrl: './due-dashboard.component.scss',
 })
@@ -32,6 +35,10 @@ export class PlanningComponent implements OnInit {
   private readonly reports = inject(ReportService);
   private readonly expensesApi = inject(ExpenseService);
   private readonly categoryApi = inject(CategoryService);
+  private readonly csvExports = inject(CsvExportService);
+  private shownFilters: PlanningFilters = {};
+  /** H06.4: forecasts only, in their own file, with the filters of the planning on screen. */
+  readonly exportForecasts = () => this.csvExports.forecasts(this.shownFilters);
   readonly none = NONE;
   readonly pageSize = 20;
   readonly month = signal<string | null>(null);
@@ -114,10 +121,12 @@ export class PlanningComponent implements OnInit {
     const sequence = ++this.sequence;
     this.loading.set(true);
     this.error.set(null);
-    this.reports.planning(this.month(), this.filters(), this.page(), this.pageSize).subscribe({
+    const filters = this.filters();
+    this.reports.planning(this.month(), filters, this.page(), this.pageSize).subscribe({
       next: planning => {
         if (sequence !== this.sequence) return;
         this.planning.set(planning);
+        this.shownFilters = filters;
         this.month.set(planning.month);
         this.loading.set(false);
       },

@@ -11,9 +11,10 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import com.malyah.accountmanager.expenses.application.ExpenseQueryValidationException;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException;
+import com.malyah.accountmanager.reporting.application.ExportLimitExceededException;
 import com.malyah.accountmanager.reporting.application.ReportQueryValidationException;
 
-@RestControllerAdvice(assignableTypes = ReportingController.class)
+@RestControllerAdvice(assignableTypes = {ReportingController.class, ReportExportController.class})
 class ReportingApiExceptionHandler {
     @ExceptionHandler(ReportQueryValidationException.class)
     ResponseEntity<ApiError> reportValidation(ReportQueryValidationException exception) {
@@ -23,6 +24,11 @@ class ReportingApiExceptionHandler {
     @ExceptionHandler(ExpenseQueryValidationException.class)
     ResponseEntity<ApiError> filterValidation(ExpenseQueryValidationException exception) {
         return invalid(exception.field(), exception.getMessage());
+    }
+
+    @ExceptionHandler(ExportLimitExceededException.class)
+    ResponseEntity<ApiError> exportLimit(ExportLimitExceededException exception) {
+        return response(HttpStatus.UNPROCESSABLE_CONTENT, "EXPORT_LIMIT_EXCEEDED", exception.getMessage(), List.of());
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
