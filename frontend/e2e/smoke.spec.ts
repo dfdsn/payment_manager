@@ -809,3 +809,54 @@ test('H08.1 registers the number, an explicit consent and activation, and separa
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test('H08.2 simulates a slot with the calendar of the server and opens a summary by its link', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const item = (position: number, label: string, amount: string, dueDate: string, extra: Record<string, unknown> = {}) => ({
+    position, expenseId: `e${position}`, recurrenceId: null, description: label, label, amount, dueDate, estimated: false,
+    overdue: false, forecast: false, origin: 'ONE_OFF', installmentNumber: null, installmentCount: null, ...extra });
+  const items = [item(1, 'Aluguel', '1500.00', '2026-10-01', { overdue: true }),
+    item(2, 'Luz', '90.00', '2026-10-06', { estimated: true, origin: 'RECURRENCE' }),
+    item(3, 'Geladeira (3/10)', '300.00', '2026-10-07', { origin: 'INSTALLMENT', installmentNumber: 3, installmentCount: 10 }),
+    item(4, 'Internet', '120.00', '2026-10-08', { forecast: true, expenseId: null, recurrenceId: 'r1', origin: 'RECURRENCE_FORECAST' }),
+    item(5, 'Água', '80.00', '2026-10-09'), item(6, 'Gás', '60.00', '2026-10-10'), item(7, 'Escola', '900.00', '2026-10-10')];
+  const summary = (id: string | null) => ({ id, date: '2026-10-05', slot: 'FIRST', scheduledTime: '09:00', timeZone: 'America/Sao_Paulo',
+    generatedAt: id ? '2026-10-05T12:00:05Z' : null, count: 7, total: '3050.00', estimatedCount: 1, estimatedTotal: '90.00',
+    overdueCount: 1, detailCount: 5, remaining: 2, items, link: id ? `http://localhost/lembretes/resumos/${id}` : null,
+    text: 'Contas a pagar — 05/10/2026, 09:00\n7 contas, total R$ 3.050,00', channels: [
+      { channel: 'IN_APP', status: 'PLANNED', reason: null }, { channel: 'WHATSAPP', status: 'SKIPPED', reason: 'PROVIDER_UNAVAILABLE' }] });
+  const requests: string[] = [];
+  await page.route('**/api/v1/notifications/reminders/preview**', route => {
+    const url = new URL(route.request().url());
+    requests.push(`${url.searchParams.get('date') ?? ''}/${url.searchParams.get('slot')}`);
+    if (url.searchParams.get('slot') === 'SECOND') return route.fulfill(json({ date: '2026-10-12', slot: 'SECOND',
+      scheduledTime: '18:00', timeZone: 'America/Sao_Paulo', today: '2026-10-05', summary: null }));
+    return route.fulfill(json({ date: '2026-10-05', slot: 'FIRST', scheduledTime: '09:00', timeZone: 'America/Sao_Paulo',
+      today: '2026-10-05', summary: summary(null) }));
+  });
+  await page.route('**/api/v1/notifications/reminders/summaries/**', route => route.fulfill(json(summary('s1'))));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/lembretes/previa');
+  await expect(page.getByTestId('calendar-explain')).toContainText('até daqui a cinco dias');
+  await expect(page.getByTestId('preview-heading')).toContainText('Primeiro horário de 05/10/2026, 09:00');
+  await expect(page.getByTestId('summary-total')).toContainText('3.050,00');
+  await expect(page.getByTestId('summary-details').locator('li')).toHaveCount(5);
+  await expect(page.getByTestId('summary-details').locator('li').first()).toContainText('Atrasada');
+  await expect(page.getByTestId('summary-remaining')).toHaveText('e mais 2 contas');
+  await expect(page.getByTestId('summary-items').locator('li')).toHaveCount(7);
+  await expect(page.getByTestId('summary-channels')).toContainText('envio real ainda indisponível');
+  await page.getByTestId('preview-date').fill('2026-10-12');
+  await page.getByTestId('preview-second').check();
+  await page.getByTestId('preview-submit').click();
+  await expect(page.getByTestId('preview-empty')).toContainText('nenhum resumo seria gerado');
+  expect(requests).toEqual(['/FIRST', '2026-10-12/SECOND']);
+  let overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+
+  await page.goto('/lembretes/resumos/s1');
+  await expect(page.getByTestId('summary-heading')).toContainText('Primeiro horário de 05/10/2026, 09:00');
+  await expect(page.getByTestId('summary-items')).toContainText('Escola');
+  overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});

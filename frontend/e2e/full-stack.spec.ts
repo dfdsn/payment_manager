@@ -615,6 +615,37 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByTestId('closing-status')).toContainText('versão 2 (vigente)');
   await expect(page.getByTestId(`closing-item-${closedMonth}`)).toContainText('Atualizado');
 
+  // H08.2: a bill due in two days is in today's first slot, not in today's second, and in the second slot of its due
+  // date; the server computes the calendar in the space time zone and nothing is saved by the simulation.
+  const localDay = (offset: number) => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const date = new Date(`${today}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + offset);
+    return date.toISOString().slice(0, 10);
+  };
+  await page.goto('/despesas');
+  await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Lembrete E2E');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('42,50');
+  await page.getByLabel('Vencimento', { exact: true }).fill(localDay(2));
+  await page.getByRole('button', { name: 'Salvar despesa' }).click();
+  await expect(page.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
+  await page.goto('/lembretes');
+  await page.getByTestId('preview-link').click();
+  await expect(page.getByTestId('preview-heading')).toContainText('Primeiro horário');
+  await expect(page.locator('app-reminder-summary-card')).toContainText('Lembrete E2E — R$\u00a042,50');
+  await page.getByTestId('preview-second').check();
+  await page.getByTestId('preview-submit').click();
+  await expect(page.getByTestId('preview-heading')).toContainText('Segundo horário');
+  await expect(page.locator('body')).not.toContainText('Lembrete E2E');
+  await page.getByTestId('preview-date').fill(localDay(2));
+  await page.getByTestId('preview-submit').click();
+  await expect(page.locator('app-reminder-summary-card')).toContainText('Lembrete E2E');
+  await expect(page.getByTestId('summary-channels')).toContainText('WhatsApp do administrador: não será enviado');
+  const anonymousPreview = await page.evaluate(async () => (await fetch('/api/v1/notifications/reminders/preview?slot=FIRST', {
+    credentials: 'omit',
+  })).status);
+  expect(anonymousPreview).toBe(401);
+
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);

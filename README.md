@@ -973,7 +973,7 @@ Testes: `MonthClosingVersionsPostgresIT` (matriz V1–V13 em PostgreSQL real, co
 
 ## Lembretes e WhatsApp (E08)
 
-O E08 está em andamento. As histórias abaixo estão entregues; o envio real pelo WhatsApp (H08.4) não existe nesta versão e nenhum lembrete sai do sistema.
+O E08 está em andamento: H08.1 e H08.2 estão entregues; H08.3 (avisos no aplicativo), H08.4 (envio real pelo WhatsApp) e H08.5 (falhas e retomada) não existem nesta versão, e nenhum lembrete sai do sistema.
 
 ### Configurar canal, consentimento e horários (H08.1)
 
@@ -1009,3 +1009,49 @@ Teste manual (use um número fictício, por exemplo `(11) 98765-4321`):
 5. Em **Membros e acesso**, transfira a administração ao convidado. Na tela de lembretes do novo administrador: número e consentimento vazios, horários 08:30/20:00 mantidos, evento “Consentimento revogado” em “Alterações recentes”.
 
 Testes: `ReminderSettingsPostgresIT` (matriz C1–C16 em PostgreSQL real, com transferência, concorrência e repetição), `ReminderSettingsDomainTest`, `ReminderSettingsServiceTest`, `ReminderSettingsHttpTest`, `MembershipManagementServiceTest`, `reminder-settings.component.spec.ts`, smoke E2E e E2E full-stack. Evidência: `docs/evidencias/H08.1.md`.
+
+### Calcular elegibilidade e resumo (H08.2)
+
+O backend decide, no fuso do espaço, quais contas cada horário menciona e grava **um resumo lógico por espaço, data e horário**. Nada é enviado nesta versão: o resumo fica disponível no aplicativo (pelo link) e o registro do WhatsApp só é marcado como previsto quando o canal está pronto (H08.4 fará o envio).
+
+**Calendário** (distância até o vencimento, como no PRD 10.2):
+
+| Vencimento em relação a hoje | Primeiro horário | Segundo horário |
+|---|---|---|
+| Seis dias ou mais à frente | não | não |
+| De cinco a dois dias à frente | sim | não |
+| Amanhã | sim | sim |
+| Hoje | sim | sim |
+| Vencida (pendente) | sim, todos os dias | não |
+| Paga ou cancelada | não | não |
+
+Exemplo com hoje = 05/10/2026 e horários 09:00/18:00: contas pendentes vencendo em 04/10, 05/10, 06/10, 07/10, 10/10 e 11/10. O resumo das 09:00 traz 04/10 (atrasada), 05/10, 06/10, 07/10 e 10/10; o das 18:00 traz 05/10 e 06/10; 11/10 só entra no primeiro horário de 06/10.
+
+**Composição:** quantidade e total exato de **todas** as elegíveis, quantidade e total das estimativas e quantidade de atrasadas; até cinco detalhes (descrição, parcela n/N, valor, vencimento, “estimada”), atrasadas primeiro, depois o vencimento mais próximo, empate pela descrição; excedente “e mais X contas”; link `APP_BASE_URL/lembretes/resumos/{id}` para a lista completa (exige sessão; outro espaço recebe `404`). Sem conta elegível, nenhum resumo é gerado.
+
+**Execução:** o job `ReminderSummaryJob` roda a cada minuto (`app.jobs.reminders.fixed-delay-ms`, padrão 60000; desligue com `APP_JOBS_REMINDERS_ENABLED=false`). Um horário é processado do instante programado até uma hora depois ou até o próximo horário; perdido esse prazo, fica registrado como `MISSED` e não é enviado atrasado. Cada horário é registrado uma vez (`GENERATED`, `EMPTY` ou `MISSED`), mesmo com reexecução ou dois processos. O conteúdo é lido no momento do processamento: quitação, cancelamento e mudança de vencimento valem a partir do próximo horário, e um horário já processado não é refeito.
+
+**Recorrências:** antes de montar um horário, as ocorrências que vencem no alcance dele são materializadas pela mesma fila e pelo mesmo materializador da H04.2, mesmo quando são do mês seguinte (vence 03/10, gerada até 28/09). Se a geração falhar ou estiver desligada, a ocorrência aparece uma vez como previsão. Parcelas aparecem cada uma como n/N.
+
+**Canais:** o registro `IN_APP` existe sempre (os dois membros). O `WHATSAPP` fica `PLANNED` (destinatário: o administrador que consentiu) só com número, consentimento do administrador atual, canal ativo e provedor disponível; senão fica `SKIPPED` com o motivo (`RECIPIENT_REQUIRED`, `CONSENT_REQUIRED`, `DISABLED`, `PROVIDER_UNAVAILABLE`). Nesta versão o motivo é sempre um desses, porque o provedor está indisponível.
+
+```text
+GET /api/v1/notifications/reminders/preview?date=2026-10-05&slot=FIRST  → 200 { date, slot, scheduledTime, today, summary: {count, total, items, text, channels} | null }
+GET /api/v1/notifications/reminders/summaries/{id}                      → 200 { id, link, generatedAt, items, ... }  (404 fora do espaço)
+```
+
+Erros: `400 REMINDER_QUERY_INVALID` (data fora de hoje…+60 dias, formato, horário), `404 REMINDER_SUMMARY_NOT_FOUND`, `401` e `403`.
+
+**Contratos preparados para as próximas histórias (não implementadas):** H08.3 lê `reminder_summaries`/`reminder_summary_items` e o canal `IN_APP` para listar os avisos; H08.4 envia os registros `WHATSAPP` com `PLANNED` usando `ReminderSummaryText` (mensagem única), revalida consentimento e conteúdo antes de cada tentativa e substitui `UnavailableWhatsAppProvider` pelo adapter da Meta; H08.5 usa a identidade espaço + data + horário + canal e a janela de `ReminderWindow` para não acumular tentativas. Nenhuma tabela de tentativa, aceite ou entrega foi criada.
+
+Teste manual com datas controladas (não depende do relógio do servidor):
+
+1. Em **Despesas**, cadastre pendentes com vencimento hoje, amanhã, daqui a dois dias, daqui a seis dias e uma vencida ontem.
+2. Em **Lembretes e WhatsApp**, abra **Prévia dos resumos**: o primeiro horário de hoje lista a vencida (Atrasada), hoje, amanhã e daqui a dois dias; não lista a de seis dias.
+3. Escolha **Segundo** e **Simular**: só hoje e amanhã.
+4. Escolha a data de daqui a um dia e o **Primeiro**: a de seis dias agora está a cinco e entra; a de hoje aparece como atrasada.
+5. Quite uma delas e simule de novo: ela sai. Com mais de cinco contas aparece “e mais X contas” e a lista completa abaixo.
+
+Os resumos gravados pelo job (com relógio real) abrem pelo link `/lembretes/resumos/{id}`; a listagem de avisos no aplicativo é da H08.3.
+
+Testes: `ReminderSummaryPostgresIT` (matriz E1–E16 em PostgreSQL real, com relógio controlado, materialização concorrente e isolamento), `ReminderSummaryDomainTest`, `ReminderSummaryServiceTest`, `ReminderSummaryHttpTest`, `reminder-summary.component.spec.ts`, smoke E2E e E2E full-stack (prévia de uma conta real em dois horários e em outra data). Evidência: `docs/evidencias/H08.2.md`.

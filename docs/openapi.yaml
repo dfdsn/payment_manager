@@ -1896,6 +1896,51 @@ paths:
         "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED, ACTIVE_SPACE_ACCESS_NOT_FOUND ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "409": { $ref: "#/components/responses/ReminderSettingsConflict" }
         "422": { description: WHATSAPP_RECIPIENT_REQUIRED ou WHATSAPP_CONSENT_REQUIRED., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/reminders/preview:
+    get:
+      operationId: reminderPreview
+      summary: Simula o resumo de um horário com os dados atuais (H08.2)
+      description: >-
+        Os dois papéis consultam. Calcula no servidor, no fuso do espaço, as contas elegíveis do horário na data
+        pedida como se fosse hoje: primeiro horário = atrasadas e vencimentos de hoje até cinco dias à frente;
+        segundo = hoje e amanhã; pagas e canceladas nunca entram. Não grava, não materializa e não envia nada.
+        Previsões de recorrência ainda não geradas aparecem uma vez, marcadas como previsão. summary null significa
+        que nenhum resumo seria gerado.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: date, in: query, required: false, description: Data local AAAA-MM-DD de hoje até 60 dias à frente; padrão hoje., schema: { type: string, format: date } }
+        - { name: slot, in: query, required: true, schema: { type: string, enum: [FIRST, SECOND] } }
+      responses:
+        "200":
+          description: Simulação.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReminderPreview" }
+        "400": { description: REMINDER_QUERY_INVALID (data fora do intervalo ou mal formada, horário inválido)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/reminders/summaries/{id}:
+    get:
+      operationId: reminderSummary
+      summary: Resumo gerado, destino do link autenticado (H08.2)
+      description: >-
+        Os dois membros do espaço consultam a lista completa do resumo como foi montada no horário. Resumo de outro
+        espaço responde 404, igual a um inexistente.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Resumo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReminderSummary" }
+        "400": { description: REMINDER_QUERY_INVALID (identificador mal formado)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: REMINDER_SUMMARY_NOT_FOUND., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
 components:
   securitySchemes:
     sessionCookie:
@@ -3006,6 +3051,64 @@ components:
               fromVersion: { type: integer }
               toVersion: { type: integer }
               detail: { type: string, description: Resumo sem número completo. }
+    ReminderPreview:
+      type: object
+      required: [date, slot, scheduledTime, timeZone, today]
+      properties:
+        date: { type: string, format: date }
+        slot: { type: string, enum: [FIRST, SECOND] }
+        scheduledTime: { type: string, example: "09:00" }
+        timeZone: { type: string, example: America/Sao_Paulo }
+        today: { type: string, format: date, description: Data local de hoje no fuso do espaço. }
+        summary: { oneOf: [{ $ref: "#/components/schemas/ReminderSummary" }, { type: 'null' }] }
+    ReminderSummary:
+      type: object
+      required: [date, slot, scheduledTime, timeZone, count, total, estimatedCount, estimatedTotal, overdueCount, detailCount, remaining, items, text, channels]
+      properties:
+        id: { type: [string, 'null'], format: uuid, description: null na simulação. }
+        date: { type: string, format: date }
+        slot: { type: string, enum: [FIRST, SECOND] }
+        scheduledTime: { type: string, example: "09:00" }
+        timeZone: { type: string }
+        generatedAt: { type: [string, 'null'], format: date-time }
+        count: { type: integer, description: Quantidade de todas as contas elegíveis. }
+        total: { type: string, description: Soma exata de todas as elegíveis, inclusive as não detalhadas., example: "1349.91" }
+        estimatedCount: { type: integer }
+        estimatedTotal: { type: string }
+        overdueCount: { type: integer }
+        detailCount: { type: integer, description: Quantas vão detalhadas na mensagem (até 5). }
+        remaining: { type: integer, description: O “e mais X contas”. }
+        link: { type: [string, 'null'], description: "APP_BASE_URL/lembretes/resumos/{id}; null na simulação." }
+        text: { type: string, description: Mensagem única pronta para o canal. }
+        items:
+          type: array
+          description: Todas as elegíveis na ordem do resumo (atrasadas, vencimento, descrição, identidade).
+          items:
+            type: object
+            required: [position, description, label, amount, dueDate, estimated, overdue, forecast, origin]
+            properties:
+              position: { type: integer }
+              expenseId: { type: [string, 'null'], format: uuid }
+              recurrenceId: { type: [string, 'null'], format: uuid, description: Só em previsão ainda não materializada. }
+              description: { type: string }
+              label: { type: string, description: Descrição com a parcela n/N. }
+              amount: { type: string }
+              dueDate: { type: string, format: date }
+              estimated: { type: boolean }
+              overdue: { type: boolean }
+              forecast: { type: boolean }
+              origin: { type: string, enum: [ONE_OFF, RECURRENCE, INSTALLMENT, RECURRENCE_FORECAST] }
+              installmentNumber: { type: [integer, 'null'] }
+              installmentCount: { type: [integer, 'null'] }
+        channels:
+          type: array
+          items:
+            type: object
+            required: [channel, status]
+            properties:
+              channel: { type: string, enum: [IN_APP, WHATSAPP] }
+              status: { type: string, enum: [PLANNED, SKIPPED] }
+              reason: { type: [string, 'null'], enum: [RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, PROVIDER_UNAVAILABLE, null] }
     ClosingVersionList:
       type: object
       required: [month, versions]
