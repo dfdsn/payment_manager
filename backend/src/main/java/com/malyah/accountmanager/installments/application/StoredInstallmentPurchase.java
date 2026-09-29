@@ -7,4 +7,11 @@ import java.util.UUID;
 
 public record StoredInstallmentPurchase(UUID id, UUID spaceId, String description, BigDecimal totalAmount,
         int installmentCount, LocalDate firstDueDate, UUID categoryId, String categoryName, UUID responsibleUserId,
-        String responsibleDisplayName, UUID createdByUserId, String createdByDisplayName, Instant createdAt) { }
+        String responsibleDisplayName, UUID createdByUserId, String createdByDisplayName, Instant createdAt, UUID replacesPurchaseId) {
+    public StoredInstallmentPurchase(UUID id, UUID spaceId, String description, BigDecimal totalAmount,
+            int installmentCount, LocalDate firstDueDate, UUID categoryId, String categoryName, UUID responsibleUserId,
+            String responsibleDisplayName, UUID createdByUserId, String createdByDisplayName, Instant createdAt) {
+        this(id, spaceId, description, totalAmount, installmentCount, firstDueDate, categoryId, categoryName,
+                responsibleUserId, responsibleDisplayName, createdByUserId, createdByDisplayName, createdAt, null);
+    }
+}

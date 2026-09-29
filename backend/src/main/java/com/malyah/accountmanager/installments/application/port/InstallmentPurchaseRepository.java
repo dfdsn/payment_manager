@@ -1,6 +1,8 @@
 package com.malyah.accountmanager.installments.application.port;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import com.malyah.accountmanager.installments.application.PurchaseClaim;
 import com.malyah.accountmanager.installments.application.StoredInstallmentPurchase;
@@ -15,5 +17,10 @@ public interface InstallmentPurchaseRepository {
 
     void complete(UUID spaceId, UUID actorId, UUID key, UUID purchaseId, Instant at);
 
-    StoredInstallmentPurchase find(UUID spaceId, UUID purchaseId);
+    Optional<StoredInstallmentPurchase> find(UUID spaceId, UUID purchaseId);
+
+    /** Newest purchases first. */
+    List<StoredInstallmentPurchase> list(UUID spaceId, int offset, int limit);
+
+    long count(UUID spaceId);
 }

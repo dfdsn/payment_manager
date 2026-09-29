@@ -1,0 +1,46 @@
+<mat-card appearance="outlined" aria-labelledby="purchases-title"><mat-card-header><mat-card-title id="purchases-title">Compras cadastradas</mat-card-title><mat-card-subtitle>O progresso vem da situação de cada parcela; não é saldo bancário nem limite do cartão.</mat-card-subtitle></mat-card-header><mat-card-content>
+  <p class="hint">As parcelas já estão em Despesas. Não cadastre a fatura completa do cartão como outra despesa: isso contaria as mesmas compras duas vezes.</p>
+  @if(error()){<p class="error" role="alert">{{error()}}</p>}
+  @if(message()){<p class="success" role="status">{{message()}}</p>}
+  @if(page(); as p){
+    @if(p.items.length===0){<p>Nenhuma compra parcelada cadastrada ainda.</p>}
+    <ul class="purchases">
+      @for(s of p.items;track s.id){
+      <li [class.current]="selected()?.id===s.id">
+        <div class="title"><strong>{{s.description}}</strong><span>R$ {{s.totalAmount}} em {{s.installmentCount}}×</span></div>
+        <progress [value]="s.progress.paidCount" [max]="s.installmentCount" [attr.aria-label]="'Parcelas pagas de '+s.description"></progress>
+        <p class="counts">{{s.progress.paidCount}} de {{s.installmentCount}} pagas · {{s.progress.pendingCount}} pendentes@if(s.progress.overdueCount){ ({{s.progress.overdueCount}} atrasadas)}@if(s.progress.cancelledCount){ · {{s.progress.cancelledCount}} canceladas}</p>
+        <p class="counts">Falta pagar R$ {{s.progress.pendingAmount}}@if(s.progress.nextDueDate){ · próximo vencimento {{s.progress.nextDueDate}}}</p>
+        <button matButton="outlined" type="button" (click)="open(s)">Ver parcelas de {{s.description}}</button>
+      </li>}
+    </ul>
+    @if(p.page>0||hasNext(p)){<div class="actions"><button matButton type="button" [disabled]="p.page===0||loading()" (click)="load(p.page-1)">Anteriores</button><span>Página {{p.page+1}}</span><button matButton type="button" [disabled]="!hasNext(p)||loading()" (click)="load(p.page+1)">Próximas</button></div>}
+  } @else if(loading()){<p>Carregando compras…</p>}
+</mat-card-content></mat-card>
+
+@if(selected(); as d){
+<mat-card appearance="outlined" aria-labelledby="detail-title"><mat-card-header><mat-card-title id="detail-title">Parcelas de {{d.description}}</mat-card-title><mat-card-subtitle>Total R$ {{d.totalAmount}} · soma das parcelas R$ {{d.installmentsSum}}@if(d.replacesPurchaseId){ · substitui o restante de uma compra anterior}</mat-card-subtitle></mat-card-header><mat-card-content>
+  @if(d.progress; as pr){<dl class="summary">
+    <div><dt>Pagas</dt><dd>{{pr.paidCount}} · R$ {{pr.paidAmount}}</dd></div>
+    <div><dt>Pendentes</dt><dd>{{pr.pendingCount}} · R$ {{pr.pendingAmount}}</dd></div>
+    <div><dt>Atrasadas</dt><dd>{{pr.overdueCount}} · R$ {{pr.overdueAmount}}</dd></div>
+    <div><dt>Canceladas</dt><dd>{{pr.cancelledCount}} · R$ {{pr.cancelledAmount}}</dd></div>
+  </dl>}
+  <div class="table-wrap"><table><caption class="hint">Selecione parcelas pendentes para quitá-las de uma vez. Pagas e canceladas não podem ser selecionadas.</caption>
+    <thead><tr><th scope="col">Selecionar</th><th scope="col">Parcela</th><th scope="col">Vencimento</th><th scope="col" class="amount">Valor</th><th scope="col">Situação</th><th scope="col">Descrição</th></tr></thead><tbody>
+    @for(i of d.installments;track i.number){<tr [class.overdue]="i.overdue" [class.muted]="i.status!=='PENDING'">
+      <td>@if(i.status==='PENDING'){<input type="checkbox" [checked]="isSelected(i)" (change)="toggle(i)" [attr.aria-label]="'Selecionar parcela '+i.number+'/'+i.count">}</td>
+      <td>{{i.number}}/{{i.count}}</td><td>{{i.dueDate}}</td><td class="amount">R$ {{i.amount}}</td><td>{{situation(i)}}</td>
+      <td>{{i.description}}@if(i.categoryName){ · {{i.categoryName}}}@if(i.responsibleDisplayName){ · {{i.responsibleDisplayName}}}</td></tr>}
+  </tbody></table></div>
+  <div class="actions"><button matButton="filled" type="button" [disabled]="selection().size===0||submitting()" (click)="openPayment()">Quitar selecionadas ({{selection().size}})</button><button matButton type="button" (click)="close()">Fechar</button></div>
+  @if(paying()){
+  <form class="pay" [formGroup]="payForm" (ngSubmit)="confirmPayment()" novalidate aria-label="Quitar parcelas selecionadas">
+    <mat-form-field appearance="outline"><mat-label>Data do pagamento</mat-label><input matInput type="date" formControlName="paymentDate"><mat-error>Informe a data do pagamento.</mat-error></mat-form-field>
+    <label>Pagador<select formControlName="paidByUserId"><option value="">Selecione</option>@for(m of members();track m.userId){<option [value]="m.userId">{{m.displayName}}</option>}</select></label>
+    <label class="wide confirm"><input type="checkbox" formControlName="confirmed"> Confirmo a quitação integral {{installmentsLabel(selection().size)}}, no total de R$ {{selectedTotal()}}.</label>
+    @if(payForm.controls.confirmed.invalid&&payForm.controls.confirmed.touched){<p class="error wide" role="alert">Confirme a quitação para continuar.</p>}
+    <div class="actions wide"><button matButton="filled" type="submit" [disabled]="submitting()">{{submitting()?'Quitando…':'Confirmar quitação'}}</button><button matButton="outlined" type="button" [disabled]="submitting()" (click)="paying.set(false)">Voltar e revisar seleção</button></div>
+  </form>}
+  <app-installment-adjustments [purchase]="d" [selected]="selectedItems()" (changed)="afterAdjustment($event)" />
+</mat-card-content></mat-card>}

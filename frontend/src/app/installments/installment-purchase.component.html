@@ -34,4 +34,6 @@
 
   @if(created(); as c){
   <p class="success" role="status">Compra “{{c.description}}” criada com {{c.installmentCount}} parcelas pendentes, de {{c.firstDueDate}} a {{c.lastDueDate}}, somando R$ {{c.installmentsSum}}. <a routerLink="/despesas">Ver parcelas em Despesas</a>.</p>}
+
+  <app-installment-purchases [refresh]="refresh()" />
 </section>

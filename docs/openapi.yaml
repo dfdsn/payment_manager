@@ -1185,6 +1185,161 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
         '409': { description: '`IDEMPOTENCY_CONFLICT`: a chave já foi usada com outros dados.' }
+    get:
+      summary: Lista as compras parceladas do espaço com o progresso (H05.2)
+      description: >-
+        Compras do espaço ativo, das mais recentes para as mais antigas. O progresso é derivado apenas da situação
+        das parcelas (pagas, pendentes, atrasadas no fuso do espaço e canceladas); não representa saldo bancário.
+        As parcelas são quitadas pelo lote atômico de despesas (`POST /expenses/batch-payment`).
+      security:
+        - sessionCookie: []
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 0, default: 0 } }
+        - { in: query, name: size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Página de compras
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPurchasePage' } } }
+        '400':
+          description: '`INSTALLMENT_VALIDATION` com `field` `page` ou `size`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+  /installment-purchases/{id}:
+    get:
+      summary: Detalha uma compra com a situação de cada parcela (H05.2)
+      description: >-
+        Cabeçalho da compra (valores informados na criação), progresso e as parcelas com situação, versão,
+        atraso, data e valor pagos e a descrição, categoria e responsável atuais de cada uma.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Compra e parcelas
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentPurchase' } } }
+        '400': { description: '`INSTALLMENT_VALIDATION` (identificador inválido).' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+        '404': { description: '`INSTALLMENT_PURCHASE_NOT_FOUND`: inexistente ou de outro espaço.' }
+  /installment-purchases/{id}/changes/preview:
+    post:
+      summary: Mostra o impacto de alterar parcelas pendentes, sem gravar (H05.3)
+      description: >-
+        A partir de uma parcela pendente, com alcance `THIS` (só ela) ou `THIS_AND_FOLLOWING` (ela e as pendentes
+        seguintes), calcula as parcelas afetadas com "de → para" e as preservadas com o motivo (`PAID`, `CANCELLED`,
+        `BEFORE_START`, `OUTSIDE_SCOPE`, `UNCHANGED`). Um novo vencimento vale para a parcela escolhida e recalcula
+        as seguintes mês a mês pela diferença de número (meses curtos no último dia). Valor e quantidade não mudam.
+        Devolve `impactToken`, que a confirmação precisa reenviar.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentChangeRequest' } } }
+      responses:
+        '200':
+          description: Impacto calculado; nada foi gravado.
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentImpact' } } }
+        '400':
+          description: >-
+            `INSTALLMENT_VALIDATION` (`fromNumber`, `scope`, `changedFields` inclusive quando nada muda,
+            `description`, `dueDate`), `CATEGORY_NOT_SELECTABLE` ou responsável inválido.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+        '404': { description: '`INSTALLMENT_PURCHASE_NOT_FOUND`.' }
+        '409': { description: '`INSTALLMENT_NOT_PENDING`: a parcela escolhida está paga ou cancelada.' }
+  /installment-purchases/{id}/changes:
+    post:
+      summary: Aplica a alteração revisada das parcelas pendentes (H05.3)
+      description: >-
+        Trava a compra e as parcelas, recalcula o impacto e só grava se ele for igual ao revisado (`impactToken`).
+        Atualiza apenas os campos listados em `changedFields` das parcelas afetadas, registra o evento
+        `INSTALLMENT_CHANGE_APPLIED` no histórico de cada uma e a alteração em `installment_purchase_changes`,
+        tudo numa transação. A mesma `Idempotency-Key` com o mesmo corpo devolve o resultado original
+        (`replayed: true`).
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentChangeRequest' } } }
+      responses:
+        '200':
+          description: Alteração aplicada (ou repetição idempotente).
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentChangeResult' } } }
+        '400': { description: 'Como na prévia, e `INSTALLMENT_VALIDATION` com `field: Idempotency-Key` quando ausente.' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+        '404': { description: '`INSTALLMENT_PURCHASE_NOT_FOUND`.' }
+        '409':
+          description: >-
+            `INSTALLMENT_IMPACT_CHANGED` (`field: impactToken`; revisar de novo), `INSTALLMENT_NOT_PENDING` ou
+            `IDEMPOTENCY_CONFLICT`. Nada é gravado.
+  /installment-purchases/{id}/cancellation/preview:
+    post:
+      summary: Mostra o impacto de cancelar parcelas pendentes selecionadas, sem gravar (H05.3)
+      description: >-
+        Lista as parcelas que serão canceladas (todas precisam estar pendentes), as preservadas (`PAID`,
+        `CANCELLED`, `NOT_SELECTED`), a soma cancelada e, se informada, a prévia da nova compra com o restante.
+        Nada é estornado nem desfeito.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentCancellationRequest' } } }
+      responses:
+        '200':
+          description: Impacto calculado; nada foi gravado.
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentImpact' } } }
+        '400':
+          description: >-
+            `INSTALLMENT_VALIDATION` (`installmentNumbers`, `reason` ou campos da nova compra),
+            `CATEGORY_NOT_SELECTABLE` ou responsável inválido.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+        '404': { description: '`INSTALLMENT_PURCHASE_NOT_FOUND`.' }
+        '409': { description: '`INSTALLMENT_NOT_PENDING`: alguma parcela selecionada está paga ou cancelada.' }
+  /installment-purchases/{id}/cancellation:
+    post:
+      summary: Cancela as parcelas revisadas e cria a nova compra opcional, numa transação (H05.3)
+      description: >-
+        Trava a compra e as parcelas, confere o `impactToken`, cria a nova compra com o restante (se informada,
+        com `replacesPurchaseId`), cancela as parcelas selecionadas com o motivo e o evento `INSTALLMENT_CANCELLED`
+        e registra a alteração. Falha em qualquer passo desfaz tudo. Idempotente por `Idempotency-Key`.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentCancellationRequest' } } }
+      responses:
+        '200':
+          description: Cancelamento aplicado (ou repetição idempotente).
+          content: { application/json: { schema: { $ref: '#/components/schemas/InstallmentChangeResult' } } }
+        '400': { description: 'Como na prévia, e `INSTALLMENT_VALIDATION` com `field: Idempotency-Key` quando ausente.' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: '`ACTIVE_SPACE_ACCESS_NOT_FOUND`.' }
+        '404': { description: '`INSTALLMENT_PURCHASE_NOT_FOUND`.' }
+        '409': { description: '`INSTALLMENT_IMPACT_CHANGED`, `INSTALLMENT_NOT_PENDING` ou `IDEMPOTENCY_CONFLICT`. Nada é gravado.' }
 components:
   securitySchemes:
     sessionCookie:
@@ -1657,6 +1812,53 @@ components:
         dueDate: { type: string, format: date }
         expenseId: { type: [string, "null"], format: uuid, description: Nulo na prévia. }
         status: { type: [string, "null"], enum: [PENDING, PAID, CANCELLED, null], description: Nulo na prévia. }
+        version: { type: [integer, "null"], format: int64, description: Versão otimista da parcela; nula na prévia. }
+        overdue: { type: boolean, description: Pendente com vencimento anterior a hoje no fuso do espaço. }
+        description: { type: [string, "null"], description: Descrição atual da parcela; nula na prévia. }
+        categoryId: { type: [string, "null"], format: uuid }
+        categoryName: { type: [string, "null"] }
+        responsibleUserId: { type: [string, "null"], format: uuid }
+        responsibleDisplayName: { type: [string, "null"] }
+        paymentDate: { type: [string, "null"], format: date }
+        paidAmount: { type: [string, "null"], description: Valor efetivamente pago, quando quitada. }
+    InstallmentProgress:
+      type: object
+      description: Derivado só da situação das parcelas; valores são somas das cobranças por situação, não saldo bancário.
+      required: [installmentCount, paidCount, pendingCount, overdueCount, cancelledCount, paidAmount, pendingAmount,
+        overdueAmount, cancelledAmount]
+      properties:
+        installmentCount: { type: integer }
+        paidCount: { type: integer }
+        pendingCount: { type: integer, description: Inclui as atrasadas. }
+        overdueCount: { type: integer }
+        cancelledCount: { type: integer }
+        paidAmount: { type: string }
+        pendingAmount: { type: string, description: Quanto falta pagar (atrasadas incluídas). }
+        overdueAmount: { type: string }
+        cancelledAmount: { type: string }
+        nextDueDate: { type: [string, "null"], format: date, description: Menor vencimento pendente. }
+    InstallmentPurchaseSummary:
+      type: object
+      required: [id, description, totalAmount, installmentCount, firstDueDate, createdAt, progress]
+      properties:
+        id: { type: string, format: uuid }
+        description: { type: string }
+        totalAmount: { type: string }
+        installmentCount: { type: integer }
+        firstDueDate: { type: string, format: date }
+        lastDueDate: { type: [string, "null"], format: date }
+        categoryName: { type: [string, "null"] }
+        responsibleDisplayName: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        progress: { $ref: '#/components/schemas/InstallmentProgress' }
+    InstallmentPurchasePage:
+      type: object
+      required: [items, page, size, totalItems]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InstallmentPurchaseSummary' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer, format: int64 }
     InstallmentPreview:
       type: object
       required: [description, totalAmount, installmentCount, firstDueDate, lastDueDate, regularAmount, lastAmount,
@@ -1672,6 +1874,86 @@ components:
         lastInstallmentAdjustment: { type: string, description: 'lastAmount - regularAmount; "0.00" em divisão exata.' }
         installmentsSum: { type: string, description: Sempre igual a totalAmount. }
         installments: { type: array, items: { $ref: '#/components/schemas/InstallmentView' } }
+    InstallmentChangeRequest:
+      type: object
+      required: [fromNumber, scope, changedFields]
+      properties:
+        fromNumber: { type: integer, minimum: 1, description: Parcela pendente de onde a alteração começa. }
+        scope: { type: string, enum: [THIS, THIS_AND_FOLLOWING] }
+        changedFields:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [description, categoryId, responsibleUserId, dueDate] }
+          description: Só os campos listados são aplicados; categoryId/responsibleUserId nulos removem o vínculo.
+        description: { type: [string, "null"], maxLength: 200 }
+        categoryId: { type: [string, "null"], format: uuid }
+        responsibleUserId: { type: [string, "null"], format: uuid }
+        dueDate: { type: [string, "null"], format: date, description: Novo vencimento da parcela fromNumber. }
+        impactToken: { type: [string, "null"], description: Obrigatório na confirmação; ignorado na prévia. }
+    InstallmentCancellationRequest:
+      type: object
+      required: [installmentNumbers, reason]
+      properties:
+        installmentNumbers: { type: array, minItems: 1, items: { type: integer, minimum: 1 } }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+        replacement:
+          oneOf:
+            - { $ref: '#/components/schemas/InstallmentPurchaseRequest' }
+            - { type: "null" }
+          description: Nova compra com o restante (regras da H05.1), criada na mesma transação.
+        impactToken: { type: [string, "null"], description: Obrigatório na confirmação; ignorado na prévia. }
+    InstallmentImpact:
+      type: object
+      required: [changeType, impactToken, affected, preserved, affectedAmount]
+      properties:
+        changeType: { type: string, enum: [CHANGE, CANCELLATION] }
+        impactToken: { type: string, description: SHA-256 das parcelas afetadas, versões e novos valores. }
+        affected:
+          type: array
+          items:
+            type: object
+            required: [number, expenseId, version, amount, dueDate, changes]
+            properties:
+              number: { type: integer }
+              expenseId: { type: string, format: uuid }
+              version: { type: integer }
+              amount: { type: string }
+              dueDate: { type: string, format: date }
+              changes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    field: { type: string, description: 'description, categoryId, responsibleUserId, dueDate ou status.' }
+                    from: { type: [string, "null"] }
+                    to: { type: [string, "null"] }
+        preserved:
+          type: array
+          items:
+            type: object
+            properties:
+              number: { type: integer }
+              status: { type: string, enum: [PENDING, PAID, CANCELLED] }
+              reason: { type: string, enum: [PAID, CANCELLED, BEFORE_START, OUTSIDE_SCOPE, UNCHANGED, NOT_SELECTED] }
+        affectedAmount: { type: string, description: Soma das cobranças afetadas. }
+        replacement:
+          oneOf:
+            - { $ref: '#/components/schemas/InstallmentPreview' }
+            - { type: "null" }
+    InstallmentChangeResult:
+      type: object
+      required: [changeId, changeType, affectedCount, preservedCount, purchase, replayed]
+      properties:
+        changeId: { type: string, format: uuid }
+        changeType: { type: string, enum: [CHANGE, CANCELLATION] }
+        affectedCount: { type: integer }
+        preservedCount: { type: integer }
+        purchase: { $ref: '#/components/schemas/InstallmentPurchase' }
+        replacement:
+          oneOf:
+            - { $ref: '#/components/schemas/InstallmentPurchase' }
+            - { type: "null" }
+        replayed: { type: boolean }
     InstallmentPurchase:
       type: object
       required: [id, description, totalAmount, installmentCount, firstDueDate, lastDueDate, createdByUserId,
@@ -1691,6 +1973,11 @@ components:
         createdByDisplayName: { type: string }
         createdAt: { type: string, format: date-time }
         installmentsSum: { type: string }
+        replacesPurchaseId:
+          type: [string, "null"]
+          format: uuid
+          description: Compra cujo restante esta substitui (cancelamento com nova compra, H05.3).
+        progress: { $ref: '#/components/schemas/InstallmentProgress' }
         installments: { type: array, items: { $ref: '#/components/schemas/InstallmentView' } }
     Expense:
       type: object
@@ -1774,12 +2061,14 @@ components:
         type:
           type: string
           enum: [EXPENSE_CREATED, EXPENSE_PAID, PAYMENT_REVERSED, EXPENSE_CORRECTED, EXPENSE_CANCELLED,
-            CHARGE_CONFIRMED, ESTIMATE_UPDATED, RECURRENCE_CHANGE_APPLIED, RECURRENCE_OCCURRENCE_REMOVED]
+            CHARGE_CONFIRMED, ESTIMATE_UPDATED, RECURRENCE_CHANGE_APPLIED, RECURRENCE_OCCURRENCE_REMOVED,
+            INSTALLMENT_CHANGE_APPLIED, INSTALLMENT_CANCELLED]
           description: >-
             CHARGE_CONFIRMED registra estimativa anterior e valor confirmado; ESTIMATE_UPDATED registra a
             atualização automática de uma estimativa posterior causada por uma confirmação. RECURRENCE_CHANGE_APPLIED
             registra os campos alterados por "este e os próximos"; RECURRENCE_OCCURRENCE_REMOVED registra o
-            cancelamento de um lançamento estimado que saiu da programação por alteração ou encerramento (H04.5).
+            cancelamento de um lançamento estimado que saiu da programação por alteração ou encerramento (H04.5). INSTALLMENT_CHANGE_APPLIED e
+            INSTALLMENT_CANCELLED registram alteração e cancelamento feitos pela compra parcelada (H05.3).
         actorUserId: { type: string, format: uuid }
         actorDisplayName: { type: string }
         occurredAt: { type: string, format: date-time }

@@ -1,7 +1,10 @@
 package com.malyah.accountmanager.expenses.infrastructure;
 
 import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -53,13 +56,30 @@ public final class JdbcInstallmentExpenses implements InstallmentExpenses {
 
     @Override
     public List<InstallmentExpenseSnapshot> find(UUID spaceId, UUID purchaseId) {
+        return findByPurchases(spaceId, List.of(purchaseId));
+    }
+
+    @Override
+    public List<InstallmentExpenseSnapshot> findByPurchases(UUID spaceId, Collection<UUID> purchaseIds) {
+        if (purchaseIds.isEmpty()) return List.of();
+        var ids = List.copyOf(purchaseIds);
+        var parameters = new ArrayList<Object>(ids.size() + 1);
+        parameters.add(spaceId);
+        parameters.addAll(ids);
         return jdbc.query("""
-                select id, installment_number, installment_count, charge_amount, due_date, status, version
-                  from expense_entries
-                 where space_id = ? and installment_purchase_id = ? and origin = 'INSTALLMENT'
-                 order by installment_number
-                """, (rs, row) -> new InstallmentExpenseSnapshot(rs.getObject(1, UUID.class), rs.getInt(2), rs.getInt(3),
-                rs.getBigDecimal(4), rs.getObject(5, java.time.LocalDate.class), ExpenseStatus.valueOf(rs.getString(6)),
-                rs.getLong(7)), spaceId, purchaseId);
+                select e.id, e.installment_purchase_id, e.installment_number, e.installment_count, e.charge_amount,
+                       e.due_date, e.status, e.version, e.description, e.category_id, category.name,
+                       e.responsible_user_id, responsible.display_name, e.payment_date, e.paid_amount
+                  from expense_entries e
+                  left join expense_categories category on category.id = e.category_id and category.space_id = e.space_id
+                  left join identity_users responsible on responsible.id = e.responsible_user_id
+                 where e.space_id = ? and e.origin = 'INSTALLMENT' and e.installment_purchase_id in (%s)
+                 order by e.installment_purchase_id, e.installment_number
+                """.formatted(String.join(",", Collections.nCopies(ids.size(), "?"))),
+                (rs, row) -> new InstallmentExpenseSnapshot(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
+                        rs.getInt(3), rs.getInt(4), rs.getBigDecimal(5), rs.getObject(6, LocalDate.class),
+                        ExpenseStatus.valueOf(rs.getString(7)), rs.getLong(8), rs.getString(9),
+                        rs.getObject(10, UUID.class), rs.getString(11), rs.getObject(12, UUID.class), rs.getString(13),
+                        rs.getObject(14, LocalDate.class), rs.getBigDecimal(15)), parameters.toArray());
     }
 }

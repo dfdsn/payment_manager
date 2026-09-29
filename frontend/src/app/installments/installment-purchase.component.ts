@@ -9,6 +9,7 @@ import { MatInputModule } from '@angular/material/input';
 import { finalize } from 'rxjs';
 import { AccountAccessService, SpaceMember } from '../identity/account-access.service';
 import { Category, CategoryService } from '../expenses/category.service';
+import { InstallmentPurchasesComponent } from './installment-purchases.component';
 import { InstallmentPreview, InstallmentPurchase, InstallmentPurchaseData, InstallmentPurchaseService } from './installment-purchase.service';
 
 const FIELD_LABELS: Record<string, string> = { description: 'Descrição', totalAmount: 'Valor total',
@@ -16,7 +17,7 @@ const FIELD_LABELS: Record<string, string> = { description: 'Descrição', total
   responsibleUserId: 'Responsável' };
 
 @Component({ selector: 'app-installment-purchase',
-  imports: [ReactiveFormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule],
+  imports: [ReactiveFormsModule, RouterLink, InstallmentPurchasesComponent, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule],
   templateUrl: './installment-purchase.component.html', styleUrl: './installment-purchase.component.scss' })
 export class InstallmentPurchaseComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
@@ -27,6 +28,8 @@ export class InstallmentPurchaseComponent implements OnInit {
   readonly members = signal<SpaceMember[]>([]);
   readonly preview = signal<InstallmentPreview | null>(null);
   readonly created = signal<InstallmentPurchase | null>(null);
+  /** Bumped after each creation so the purchase list reloads. */
+  readonly refresh = signal(0);
   readonly previewing = signal(false);
   readonly submitting = signal(false);
   readonly error = signal<string | null>(null);
@@ -65,7 +68,7 @@ export class InstallmentPurchaseComponent implements OnInit {
     this.submitting.set(true); this.error.set(null);
     this.api.create(data, this.key).pipe(finalize(() => this.submitting.set(false))).subscribe({
       next: purchase => {
-        this.created.set(purchase); this.preview.set(null); this.reviewed = null;
+        this.created.set(purchase); this.preview.set(null); this.reviewed = null; this.refresh.update(v => v + 1);
         this.form.reset({ description: '', totalAmount: '', installmentCount: 2, firstDueDate: '', categoryId: '', responsibleUserId: '' });
       },
       error: (e: HttpErrorResponse) => {

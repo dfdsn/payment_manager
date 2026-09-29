@@ -374,6 +374,40 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByText(/A última parcela tem R\$ 0\.01 a mais/)).toBeVisible();
   await page.getByRole('button', { name: 'Confirmar e criar 3 parcelas' }).click();
   await expect(page.getByText(/criada com 3 parcelas pendentes, de 2027-01-31 a 2027-03-31, somando R\$ 100\.00/)).toBeVisible();
+  // H05.2: progress comes from the installments; paying selected ones uses the atomic batch of Despesas.
+  await expect(page.getByText('0 de 3 pagas · 3 pendentes')).toBeVisible();
+  await page.getByRole('button', { name: 'Ver parcelas de Sofá parcelado' }).click();
+  await page.getByLabel('Selecionar parcela 1/3').check();
+  await page.getByRole('button', { name: 'Quitar selecionadas (1)' }).click();
+  await page.getByLabel(/Confirmo a quitação integral da parcela selecionada/).check();
+  await page.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(page.getByText('1 parcela quitada.')).toBeVisible();
+  await expect(page.getByText('1 de 3 pagas · 2 pendentes')).toBeVisible();
+  await expect(page.getByRole('row', { name: /1\/3 2027-01-31 R\$ 33\.33 Paga em/ })).toBeVisible();
+  // H05.3: the server reviews the impact; the paid 1/3 is preserved and the following pending ones move month by month.
+  await page.getByRole('button', { name: 'Alterar parcelas pendentes' }).click();
+  await page.getByLabel('A partir da parcela').selectOption({ label: '2/3 · 2027-02-28' });
+  await page.getByLabel('Esta e as próximas pendentes').check();
+  await page.getByLabel('Alterar vencimento').check();
+  await page.getByLabel('Novo vencimento').fill('2027-02-10');
+  await page.getByRole('button', { name: 'Revisar impacto' }).click();
+  await expect(page.getByText('2 parcelas serão alteradas.')).toBeVisible();
+  await expect(page.getByText('Vencimento: 2027-03-31 → 2027-03-10')).toBeVisible();
+  await expect(page.getByText('1 (paga, não muda)')).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar alteração' }).click();
+  await expect(page.getByText('Alteração aplicada a 2 parcelas; 1 preservada.')).toBeVisible();
+  await expect(page.getByRole('row', { name: /3\/3 2027-03-10 R\$ 33\.34 Pendente/ })).toBeVisible();
+  // Cancelling the last one with a replacement purchase for the remainder happens in one transaction.
+  await page.getByLabel('Selecionar parcela 3/3').check();
+  await page.getByRole('button', { name: 'Cancelar selecionadas (1)' }).click();
+  await page.getByLabel('Motivo do cancelamento').fill('Loja renegociou o saldo');
+  await page.getByLabel(/Criar nova compra com o restante/).check();
+  await page.getByRole('button', { name: 'Revisar cancelamento' }).click();
+  await expect(page.getByText('1 parcela será cancelada, somando R$ 33.34.')).toBeVisible();
+  await expect(page.getByText(/Nova compra “Sofá parcelado \(restante\)”: R\$ 33\.34 em 2 parcelas, de 2027-03-10 a 2027-04-10/)).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar cancelamento' }).click();
+  await expect(page.getByText('1 parcela cancelada; 2 preservadas. Nova compra “Sofá parcelado (restante)” criada com 2 parcelas.')).toBeVisible();
+  await expect(page.getByRole('row', { name: /3\/3 2027-03-10 R\$ 33\.34 Cancelada/ })).toBeVisible();
   await page.getByRole('link', { name: 'Ver parcelas em Despesas' }).click();
   await page.getByLabel('Buscar na descrição').fill('Sofá parcelado');
   // Without dates the list shows only the current month (H03.4); the installments fall in 2027.
@@ -381,7 +415,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByLabel('Data final').fill('2027-03-31');
   await page.getByRole('button', { name: 'Aplicar filtros' }).click();
   await expect(page.getByText('Parcela 1/3 · compra parcelada')).toBeVisible();
-  await expect(page.getByText('Parcela 3/3 · compra parcelada')).toBeVisible();
+  await expect(page.getByText('Parcela 2/3 · compra parcelada')).toBeVisible();
 
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);

@@ -1,0 +1,55 @@
+<div class="adjust-actions">
+  <button matButton="outlined" type="button" [disabled]="pending().length===0||busy()" (click)="openChange()">Alterar parcelas pendentes</button>
+  <button matButton="outlined" type="button" [disabled]="selected().length===0||busy()" (click)="openCancel()">Cancelar selecionadas ({{selected().length}})</button>
+</div>
+
+@if(mode()==='change'){
+<form class="adjust" [formGroup]="changeForm" (ngSubmit)="review()" novalidate aria-label="Alterar parcelas pendentes">
+  <h3 class="wide">Alterar parcelas pendentes</h3>
+  <p class="hint wide">Valor e quantidade não mudam aqui: para corrigi-los, cancele as pendentes e crie uma nova compra com o restante. Parcelas pagas e canceladas nunca são alteradas.</p>
+  <label>A partir da parcela<select formControlName="fromNumber">@for(i of pending();track i.number){<option [ngValue]="i.number">{{i.number}}/{{i.count}} · {{i.dueDate}}</option>}</select></label>
+  <fieldset><legend>Alcance</legend>
+    <label class="inline"><input type="radio" formControlName="scope" value="THIS"> Somente esta parcela</label>
+    <label class="inline"><input type="radio" formControlName="scope" value="THIS_AND_FOLLOWING"> Esta e as próximas pendentes</label>
+  </fieldset>
+  <label class="inline wide"><input type="checkbox" formControlName="changeDescription"> Alterar descrição</label>
+  @if(changeForm.controls.changeDescription.value){<mat-form-field appearance="outline" class="wide"><mat-label>Nova descrição</mat-label><input matInput formControlName="description" maxlength="200"></mat-form-field>}
+  <label class="inline"><input type="checkbox" formControlName="changeCategory"> Alterar categoria</label>
+  @if(changeForm.controls.changeCategory.value){<label>Nova categoria<select formControlName="categoryId"><option value="">Sem categoria</option>@for(c of activeCategories();track c.id){<option [value]="c.id">{{c.name}}</option>}</select></label>}
+  <label class="inline"><input type="checkbox" formControlName="changeResponsible"> Alterar responsável</label>
+  @if(changeForm.controls.changeResponsible.value){<label>Novo responsável<select formControlName="responsibleUserId"><option value="">Sem responsável</option>@for(m of members();track m.userId){<option [value]="m.userId">{{m.displayName}}</option>}</select></label>}
+  <label class="inline wide"><input type="checkbox" formControlName="changeDueDate"> Alterar vencimento</label>
+  @if(changeForm.controls.changeDueDate.value){<mat-form-field appearance="outline"><mat-label>Novo vencimento</mat-label><input matInput type="date" formControlName="dueDate"></mat-form-field>
+    <p class="hint">Com “esta e as próximas”, as parcelas pendentes seguintes são recalculadas mês a mês a partir desta data (meses curtos usam o último dia).</p>}
+  <div class="actions wide"><button matButton="filled" type="submit" [disabled]="busy()">{{busy()&&!impact()?'Calculando…':'Revisar impacto'}}</button><button matButton type="button" (click)="close()">Fechar</button></div>
+</form>}
+
+@if(mode()==='cancel'){
+<form class="adjust" [formGroup]="cancelForm" (ngSubmit)="review()" novalidate aria-label="Cancelar parcelas selecionadas">
+  <h3 class="wide">Cancelar {{selected().length}} {{selected().length===1?'parcela selecionada':'parcelas selecionadas'}}</h3>
+  <p class="hint wide">Cancela apenas as parcelas pendentes selecionadas. Parcelas pagas continuam pagas: nada é estornado ou desfeito automaticamente.</p>
+  <mat-form-field appearance="outline" class="wide"><mat-label>Motivo do cancelamento</mat-label><textarea matInput formControlName="reason" maxlength="2000"></textarea><mat-error>Informe o motivo com até 2.000 caracteres.</mat-error></mat-form-field>
+  <label class="inline wide"><input type="checkbox" formControlName="withReplacement"> Criar nova compra com o restante (para corrigir valor ou quantidade)</label>
+  @if(cancelForm.controls.withReplacement.value){
+    <mat-form-field appearance="outline" class="wide"><mat-label>Descrição da nova compra</mat-label><input matInput formControlName="description" maxlength="200"></mat-form-field>
+    <mat-form-field appearance="outline"><mat-label>Valor total da nova compra</mat-label><span matTextPrefix>R$&nbsp;</span><input matInput formControlName="totalAmount" inputmode="decimal"><mat-error>Valor com até duas casas decimais.</mat-error></mat-form-field>
+    <mat-form-field appearance="outline"><mat-label>Parcelas da nova compra</mat-label><input matInput type="number" min="2" max="360" formControlName="installmentCount"><mat-error>De 2 a 360 parcelas.</mat-error></mat-form-field>
+    <mat-form-field appearance="outline"><mat-label>Primeiro vencimento da nova compra</mat-label><input matInput type="date" formControlName="firstDueDate"></mat-form-field>
+    <label>Categoria da nova compra<select formControlName="categoryId"><option value="">Sem categoria</option>@for(c of activeCategories();track c.id){<option [value]="c.id">{{c.name}}</option>}</select></label>
+    <label>Responsável da nova compra<select formControlName="responsibleUserId"><option value="">Sem responsável</option>@for(m of members();track m.userId){<option [value]="m.userId">{{m.displayName}}</option>}</select></label>
+  }
+  <div class="actions wide"><button matButton="filled" type="submit" [disabled]="busy()">{{busy()&&!impact()?'Calculando…':'Revisar cancelamento'}}</button><button matButton type="button" (click)="close()">Fechar</button></div>
+</form>}
+
+@if(error()){<p class="error" role="alert">{{error()}}</p>}
+
+@if(impact(); as im){
+<section class="impact" aria-labelledby="impact-title">
+  <h3 id="impact-title">{{im.changeType==='CHANGE'?'Revise a alteração':'Revise o cancelamento'}}</h3>
+  <p>{{im.affected.length}} {{im.affected.length===1?'parcela será':'parcelas serão'}} {{im.changeType==='CHANGE'?(im.affected.length===1?'alterada':'alteradas'):(im.affected.length===1?'cancelada':'canceladas')}}@if(im.changeType==='CANCELLATION'){, somando R$ {{im.affectedAmount}}}.</p>
+  <ul class="affected">@for(a of im.affected;track a.number){<li><strong>Parcela {{a.number}}</strong> (R$ {{a.amount}}, {{a.dueDate}}):
+    @for(c of a.changes;track c.field){<span class="change">{{fieldLabel(c.field)}}: {{valueLabel(c.field,c.from)}} → {{valueLabel(c.field,c.to)}}</span>}</li>}</ul>
+  @if(im.preserved.length){<p class="preserved">Preservadas: @for(p of im.preserved;track p.number){<span>{{p.number}} ({{preservedLabel(p.reason)}})</span>}</p>}
+  @if(im.replacement; as r){<p class="replacement">Nova compra “{{r.description}}”: R$ {{r.totalAmount}} em {{r.installmentCount}} parcelas, de {{r.firstDueDate}} a {{r.lastDueDate}}@if(r.lastInstallmentAdjustment!=='0.00'){ (última com R$ {{r.lastInstallmentAdjustment}} a mais)}.</p>}
+  <div class="actions"><button matButton="filled" type="button" [disabled]="busy()" (click)="confirm()">{{busy()?'Aplicando…':(im.changeType==='CHANGE'?'Confirmar alteração':'Confirmar cancelamento')}}</button></div>
+</section>}

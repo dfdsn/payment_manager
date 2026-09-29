@@ -428,6 +428,8 @@ describe('ExpenseComponent', () => {
     expect(component.historyLabel('CHARGE_CONFIRMED')).toBe('Valor da cobrança confirmado');
     expect(component.historyLabel('ESTIMATE_UPDATED')).toContain('Estimativa atualizada');
     expect(component.historyLabel('RECURRENCE_CHANGE_APPLIED')).toContain('Alterado pela recorrência');
+    expect(component.historyLabel('INSTALLMENT_CHANGE_APPLIED')).toBe('Alterado pela compra parcelada');
+    expect(component.historyLabel('INSTALLMENT_CANCELLED')).toBe('Cancelado pela compra parcelada');
     expect(component.historyLabel('RECURRENCE_OCCURRENCE_REMOVED')).toContain('Retirado da programação');
   });
   it('identifies installment entries as n/N and keeps their amount read-only in correction', () => {

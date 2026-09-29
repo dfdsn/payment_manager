@@ -157,6 +157,8 @@ test('reviews an installment purchase with the cent remainder on the last instal
   await page.route('**/api/v1/identity/members', route => route.fulfill(json([{ userId: 'actor', displayName: 'Diego', currentUser: true }])));
   await page.route('**/api/v1/categories**', route => route.fulfill(json([{ id: 'cat-1', name: 'Casa', active: true }])));
   await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ headerName: 'X-XSRF-TOKEN' })));
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/installment-purchases?**', route => route.fulfill(json({ items: [], page: 0, size: 10, totalItems: 0 })));
   const previews: unknown[] = [];
   await page.route('**/api/v1/installment-purchases/preview', async route => {
     previews.push(route.request().postDataJSON());
@@ -192,4 +194,146 @@ test('reviews an installment purchase with the cent remainder on the last instal
   expect(creations).toHaveLength(2);
   expect(creations[1].key).toBe(creations[0].key);
   expect(creations[1].body).toEqual(previews[0]);
+});
+
+test('shows purchase progress and pays only the selected pending installments in one batch', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const item = (number: number, status: string, extra: Record<string, unknown> = {}) => ({ number, count: 3,
+    amount: number === 3 ? '33.34' : '33.33', dueDate: `2026-${String(8 + number).padStart(2, '0')}-15`,
+    expenseId: `e-${number}`, status, version: number, overdue: false, description: 'Sofá', categoryName: null,
+    responsibleDisplayName: null, paymentDate: null, paidAmount: null, ...extra });
+  const progress = (paid: number) => ({ installmentCount: 3, paidCount: paid, pendingCount: 3 - paid,
+    overdueCount: paid === 0 ? 1 : 0, cancelledCount: 0, paidAmount: paid ? '66.66' : '0.00',
+    pendingAmount: paid ? '33.34' : '100.00', overdueAmount: paid ? '0.00' : '33.33', cancelledAmount: '0.00',
+    nextDueDate: paid ? '2026-11-15' : '2026-09-15' });
+  let paid = 0;
+  const summary = () => ({ id: 'p-1', description: 'Sofá', totalAmount: '100.00', installmentCount: 3,
+    firstDueDate: '2026-09-15', lastDueDate: '2026-11-15', categoryName: null, responsibleDisplayName: null,
+    createdAt: '2026-08-01T12:00:00Z', progress: progress(paid) });
+  const detail = () => ({ ...summary(), categoryId: null, responsibleUserId: null, createdByUserId: 'actor',
+    createdByDisplayName: 'Diego', installmentsSum: '100.00', installments: paid
+      ? [item(1, 'PAID', { paymentDate: '2026-09-28', paidAmount: '33.33' }), item(2, 'PAID', { paymentDate: '2026-09-28', paidAmount: '33.33' }), item(3, 'PENDING')]
+      : [item(1, 'PENDING', { overdue: true }), item(2, 'PENDING'), item(3, 'PENDING')] });
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/identity/members', route => route.fulfill(json([{ userId: 'actor', displayName: 'Diego', currentUser: true }])));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([])));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ headerName: 'X-XSRF-TOKEN' })));
+  await page.route('**/api/v1/installment-purchases?**', route => route.fulfill(json({ items: [summary()], page: 0, size: 10, totalItems: 1 })));
+  await page.route('**/api/v1/installment-purchases/p-1', route => route.fulfill(json(detail())));
+  const batches: { body: { items: unknown[] }; key: string | undefined }[] = [];
+  await page.route('**/api/v1/expenses/batch-payment', async route => {
+    batches.push({ body: route.request().postDataJSON(), key: route.request().headers()['idempotency-key'] });
+    paid = 2;
+    await route.fulfill(json({ operationId: 'op-1', replayed: false, items: batches[0].body.items }));
+  });
+
+  await page.goto('/compras-parceladas');
+  await expect(page.getByText('0 de 3 pagas · 3 pendentes (1 atrasadas)')).toBeVisible();
+  await expect(page.getByText(/não é saldo bancário/)).toBeVisible();
+  await page.getByRole('button', { name: 'Ver parcelas de Sofá' }).click();
+  await expect(page.getByRole('row', { name: /1\/3 2026-09-15 R\$ 33\.33 Atrasada/ })).toBeVisible();
+  await page.getByLabel('Selecionar parcela 1/3').check();
+  await page.getByLabel('Selecionar parcela 2/3').check();
+  await page.getByRole('button', { name: 'Quitar selecionadas (2)' }).click();
+  await expect(page.getByText('Confirmo a quitação integral das 2 parcelas, no total de R$ 66.66.')).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(page.getByText('Confirme a quitação para continuar.')).toBeVisible();
+  expect(batches).toHaveLength(0);
+  await page.getByLabel(/Confirmo a quitação integral/).check();
+  await page.getByRole('button', { name: 'Confirmar quitação' }).click();
+  await expect(page.getByText('2 parcelas quitadas de uma vez.')).toBeVisible();
+  await expect(page.getByText('2 de 3 pagas · 1 pendentes')).toBeVisible();
+  await expect(page.getByRole('row', { name: /2\/3 2026-10-15 R\$ 33\.33 Paga em 2026-09-28/ })).toBeVisible();
+  expect(batches).toHaveLength(1);
+  expect(batches[0].key).toBeTruthy();
+  expect(batches[0].body).toMatchObject({ items: [{ expenseId: 'e-1', version: 1 }, { expenseId: 'e-2', version: 2 }],
+    paidByUserId: 'actor', confirmed: true });
+});
+
+test('reviews the impact before changing following installments and cancels one with a replacement purchase', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const item = (number: number, status: string, dueDate: string, extra: Record<string, unknown> = {}) => ({ number,
+    count: 3, amount: number === 3 ? '33.34' : '33.33', dueDate, expenseId: `e-${number}`, status, version: number,
+    overdue: false, description: 'Sofá', categoryId: null, categoryName: null, responsibleUserId: null,
+    responsibleDisplayName: null, paymentDate: status === 'PAID' ? '2026-09-28' : null,
+    paidAmount: status === 'PAID' ? '33.33' : null, ...extra });
+  let installments = [item(1, 'PAID', '2026-09-15'), item(2, 'PENDING', '2026-10-15'), item(3, 'PENDING', '2026-11-15')];
+  const detail = () => ({ id: 'p-1', description: 'Sofá', totalAmount: '100.00', installmentCount: 3,
+    firstDueDate: '2026-09-15', lastDueDate: '2026-11-15', categoryId: null, categoryName: null, responsibleUserId: null,
+    responsibleDisplayName: null, createdByUserId: 'actor', createdByDisplayName: 'Diego', createdAt: '2026-08-01T12:00:00Z',
+    installmentsSum: '100.00', replacesPurchaseId: null, installments,
+    progress: { installmentCount: 3, paidCount: 1, pendingCount: 2, overdueCount: 0, cancelledCount: 0, paidAmount: '33.33',
+      pendingAmount: '66.67', overdueAmount: '0.00', cancelledAmount: '0.00', nextDueDate: '2026-10-15' } });
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/identity/members', route => route.fulfill(json([{ userId: 'actor', displayName: 'Diego', currentUser: true }])));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([])));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ headerName: 'X-XSRF-TOKEN' })));
+  await page.route('**/api/v1/installment-purchases?**', route => route.fulfill(json({ items: [detail()], page: 0, size: 10, totalItems: 1 })));
+  await page.route('**/api/v1/installment-purchases/p-1', route => route.fulfill(json(detail())));
+  const calls: { url: string; body: Record<string, unknown>; key: string | undefined }[] = [];
+  const record = (route: import('@playwright/test').Route) => calls.push({ url: new URL(route.request().url()).pathname,
+    body: route.request().postDataJSON(), key: route.request().headers()['idempotency-key'] });
+  await page.route('**/api/v1/installment-purchases/p-1/changes/preview', route => { record(route); return route.fulfill(json({
+    changeType: 'CHANGE', impactToken: 'tok-change', affectedAmount: '66.67', replacement: null,
+    affected: [{ number: 2, expenseId: 'e-2', version: 2, amount: '33.33', dueDate: '2026-10-15',
+      changes: [{ field: 'dueDate', from: '2026-10-15', to: '2026-10-20' }] },
+    { number: 3, expenseId: 'e-3', version: 3, amount: '33.34', dueDate: '2026-11-15',
+      changes: [{ field: 'dueDate', from: '2026-11-15', to: '2026-11-20' }] }],
+    preserved: [{ number: 1, status: 'PAID', reason: 'PAID' }] })); });
+  await page.route('**/api/v1/installment-purchases/p-1/changes', route => {
+    record(route);
+    installments = [installments[0], item(2, 'PENDING', '2026-10-20', { version: 3 }), item(3, 'PENDING', '2026-11-20', { version: 4 })];
+    return route.fulfill(json({ changeId: 'c-1', changeType: 'CHANGE', affectedCount: 2, preservedCount: 1,
+      purchase: detail(), replacement: null, replayed: false }));
+  });
+  const replacement = { description: 'Sofá (restante)', totalAmount: '40.00', installmentCount: 2, firstDueDate: '2026-11-20',
+    lastDueDate: '2026-12-20', installmentsSum: '40.00', lastInstallmentAdjustment: '0.00', installments: [] };
+  await page.route('**/api/v1/installment-purchases/p-1/cancellation/preview', route => { record(route); return route.fulfill(json({
+    changeType: 'CANCELLATION', impactToken: 'tok-cancel', affectedAmount: '33.34', replacement,
+    affected: [{ number: 3, expenseId: 'e-3', version: 4, amount: '33.34', dueDate: '2026-11-20',
+      changes: [{ field: 'status', from: 'PENDING', to: 'CANCELLED' }] }],
+    preserved: [{ number: 1, status: 'PAID', reason: 'PAID' }, { number: 2, status: 'PENDING', reason: 'NOT_SELECTED' }] })); });
+  await page.route('**/api/v1/installment-purchases/p-1/cancellation', route => {
+    record(route);
+    installments = [installments[0], installments[1], item(3, 'CANCELLED', '2026-11-20', { version: 5 })];
+    return route.fulfill(json({ changeId: 'c-2', changeType: 'CANCELLATION', affectedCount: 1, preservedCount: 2,
+      purchase: detail(), replacement: { ...detail(), id: 'p-2', description: 'Sofá (restante)', installmentCount: 2 },
+      replayed: false }));
+  });
+
+  await page.goto('/compras-parceladas');
+  await page.getByRole('button', { name: 'Ver parcelas de Sofá' }).click();
+  await page.getByRole('button', { name: 'Alterar parcelas pendentes' }).click();
+  await page.getByLabel('A partir da parcela').selectOption({ label: '2/3 · 2026-10-15' });
+  await page.getByLabel('Esta e as próximas pendentes').check();
+  await page.getByLabel('Alterar vencimento').check();
+  await page.getByLabel('Novo vencimento').fill('2026-10-20');
+  await page.getByRole('button', { name: 'Revisar impacto' }).click();
+  await expect(page.getByText('2 parcelas serão alteradas.')).toBeVisible();
+  await expect(page.getByText('Vencimento: 2026-11-15 → 2026-11-20')).toBeVisible();
+  await expect(page.getByText('1 (paga, não muda)')).toBeVisible();
+  expect(calls.filter(c => c.url.endsWith('/changes'))).toHaveLength(0);
+  await page.getByRole('button', { name: 'Confirmar alteração' }).click();
+  await expect(page.getByText('Alteração aplicada a 2 parcelas; 1 preservada.')).toBeVisible();
+  await expect(page.getByRole('row', { name: /3\/3 2026-11-20 R\$ 33\.34/ })).toBeVisible();
+  const change = calls.find(c => c.url.endsWith('/changes'))!;
+  expect(change.key).toBeTruthy();
+  expect(change.body).toMatchObject({ fromNumber: 2, scope: 'THIS_AND_FOLLOWING', changedFields: ['dueDate'],
+    dueDate: '2026-10-20', impactToken: 'tok-change' });
+
+  await page.getByLabel('Selecionar parcela 3/3').check();
+  await page.getByRole('button', { name: 'Cancelar selecionadas (1)' }).click();
+  await page.getByLabel('Motivo do cancelamento').fill('Loja reduziu o saldo');
+  await page.getByLabel(/Criar nova compra com o restante/).check();
+  await page.getByLabel('Valor total da nova compra').fill('40.00');
+  await page.getByRole('button', { name: 'Revisar cancelamento' }).click();
+  await expect(page.getByText('1 parcela será cancelada, somando R$ 33.34.')).toBeVisible();
+  await expect(page.getByText(/Nova compra “Sofá \(restante\)”: R\$ 40\.00 em 2 parcelas/)).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar cancelamento' }).click();
+  await expect(page.getByText('1 parcela cancelada; 2 preservadas. Nova compra “Sofá (restante)” criada com 2 parcelas.')).toBeVisible();
+  const cancel = calls.find(c => c.url.endsWith('/cancellation'))!;
+  expect(cancel.key).toBeTruthy();
+  expect(cancel.key).not.toBe(change.key);
+  expect(cancel.body).toMatchObject({ installmentNumbers: [3], reason: 'Loja reduziu o saldo', impactToken: 'tok-cancel',
+    replacement: { description: 'Sofá (restante)', totalAmount: '40.00', installmentCount: 2, firstDueDate: '2026-11-20' } });
 });
