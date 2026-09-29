@@ -57,7 +57,7 @@ class InvitationPostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(25);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(27);
         jdbc = new JdbcTemplate(dataSource);
         sent = new ArrayList<>();
         insertAdministrator();

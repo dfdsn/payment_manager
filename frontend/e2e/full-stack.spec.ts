@@ -8,7 +8,7 @@ const guestEmail = 'guest@example.com';
 const guestPassword = 'senha convidada 2026';
 
 test('runs setup, email confirmation, login, reset and session revocation against real services', async ({ browser, page }) => {
-  test.setTimeout(110_000);
+  test.setTimeout(330_000); // H08.3 waits for the real reminder job (runs every 60 s).
   await page.goto('/configuracao-inicial');
   await page.getByLabel('Segredo temporário').fill('local-only-setup-secret-change-me');
   await page.getByLabel('Nome do administrador').fill('Diego');
@@ -293,6 +293,92 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(guestPage.getByLabel('Seu celular com DDD')).toHaveCount(0);
   await expect(guestPage.getByText('98765')).toHaveCount(0);
 
+  // H08.3: the real job generates a summary; both members receive it in the application, the administrator also gets
+  // the WhatsApp failure (enabled channel, provider not implemented), and reading or dismissing changes one member only.
+  // Today's second slot is moved to the next minute, which is still unprocessed only before 17:55 in São Paulo.
+  const clockNow = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit',
+    hourCycle: 'h23' }).format(new Date()).split(':').map(Number);
+  const slotMinute = clockNow[0] * 60 + clockNow[1] + 1;
+  if (slotMinute > 17 * 60 + 55) throw new Error('Run the full-stack E2E before 17:55 in America/Sao_Paulo (H08.3 uses today\'s second slot).');
+  const hhmm = (minute: number) => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+  const spToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  await page.goto('/despesas');
+  await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Aviso E2E');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('15,00');
+  await page.getByLabel('Vencimento', { exact: true }).fill(spToday);
+  await page.getByRole('button', { name: 'Salvar despesa' }).click();
+  await expect(page.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
+  await page.goto('/lembretes');
+  await page.getByLabel('Primeiro horário').fill('00:00');
+  await page.getByLabel('Segundo horário').fill(hhmm(slotMinute));
+  await page.getByRole('button', { name: 'Salvar horários' }).click();
+  await expect(page.getByTestId('settings-success')).toContainText(hhmm(slotMinute));
+  await guestPage.goto('/avisos');
+  await expect.poll(async () => {
+    await guestPage.reload();
+    await guestPage.getByTestId('inbox-explain').waitFor();
+    return guestPage.getByTestId('inbox-item').count();
+  }, { timeout: 180_000, intervals: [10_000] }).toBe(1);
+  await expect(guestPage.getByTestId('inbox-unread')).toHaveText('1 não lido');
+  await expect(guestPage.getByText('Somente administrador')).toHaveCount(0);
+  await expect(guestPage.getByTestId('inbox-item')).toContainText('Contas a pagar: segundo horário');
+  await page.goto('/avisos');
+  await expect(page.getByTestId('inbox-item')).toHaveCount(2);
+  await expect(page.getByText('Somente administrador')).toBeVisible();
+  await expect(page.getByTestId('inbox-list')).toContainText('WhatsApp não enviado');
+  await page.getByTestId('inbox-item').filter({ hasText: 'Contas a pagar' }).getByTestId('inbox-read').click();
+  await expect(page.getByTestId('inbox-unread')).toHaveText('1 não lido');
+  await guestPage.reload();
+  await expect(guestPage.getByTestId('inbox-unread')).toHaveText('1 não lido');
+  await guestPage.getByTestId('inbox-dismiss').click();
+  await expect(guestPage.getByTestId('inbox-empty')).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId('inbox-item')).toHaveCount(2);
+  const noticeId = await guestPage.evaluate(async () => {
+    const response = await fetch('/api/v1/notifications/inbox?view=DISMISSED', { credentials: 'include' });
+    return (await response.json() as { items: { id: string }[] }).items[0].id;
+  });
+  const withoutCsrf = await guestPage.evaluate(async id => (await fetch(`/api/v1/notifications/inbox/${id}/read`, {
+    method: 'POST', credentials: 'include' })).status, noticeId);
+  expect(withoutCsrf).toBe(403);
+  const adminReadsGuestNotice = await page.evaluate(async id => {
+    const csrf = document.cookie.split('; ').find(cookie => cookie.startsWith('XSRF-TOKEN='))?.split('=')[1] ?? '';
+    return (await fetch(`/api/v1/notifications/inbox/${id}/read`, { method: 'POST', credentials: 'include',
+      headers: { 'X-XSRF-TOKEN': decodeURIComponent(csrf) } })).status;
+  }, noticeId);
+  expect(adminReadsGuestNotice).toBe(404);
+  await guestPage.getByTestId('inbox-dismissed').click();
+  await guestPage.getByTestId('inbox-open').click();
+  await expect(guestPage.getByTestId('summary-heading')).toContainText('Segundo horário');
+  await expect(guestPage.locator('app-reminder-summary-card')).toContainText('Aviso E2E');
+  await guestPage.locator('li', { hasText: 'Aviso E2E' }).first().getByRole('link', { name: 'Abrir conta' }).click();
+  await expect(guestPage).toHaveURL(/\/despesas\?despesa=/);
+  await expect(guestPage.getByText('Anexos de Aviso E2E')).toBeVisible();
+  const avisoStatus = await guestPage.evaluate(async () => {
+    const id = new URL(location.href).searchParams.get('despesa');
+    return (await (await fetch(`/api/v1/expenses/${id}`, { credentials: 'include' })).json() as { status: string }).status;
+  });
+  expect(avisoStatus).toBe('PENDING');
+  const anonymousInbox = await page.evaluate(async () => (await fetch('/api/v1/notifications/inbox', { credentials: 'omit' })).status);
+  expect(anonymousInbox).toBe(401);
+  // H08.4: the Meta webhook is the only path outside session and CSRF; with the integration off it answers 404,
+  // never 401/403. WhatsApp tracking is for the administrator only.
+  const webhook = await page.evaluate(async () => [
+    (await fetch('/api/v1/integrations/whatsapp/webhook', { method: 'POST', credentials: 'omit', body: '{}',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': 'sha256=00' } })).status,
+    (await fetch('/api/v1/integrations/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1',
+      { credentials: 'omit' })).status]);
+  expect(webhook).toEqual([404, 404]);
+  const summaryOfNotice = await guestPage.evaluate(async () => {
+    const response = await fetch('/api/v1/notifications/inbox?view=DISMISSED', { credentials: 'include' });
+    return (await response.json() as { items: { summary: { id: string } }[] }).items[0].summary.id;
+  });
+  const tracking = await Promise.all([guestPage, page].map(p => p.evaluate(async id => {
+    const response = await fetch(`/api/v1/notifications/reminders/summaries/${id}/whatsapp`, { credentials: 'include' });
+    return `${response.status} ${response.ok ? (await response.json() as { state: string; reason: string }).state : ''}`;
+  }, summaryOfNotice)));
+  expect(tracking).toEqual(['403 ', '200 NOT_PLANNED']);
+
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();
 
@@ -301,13 +387,17 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByRole('button', { name: 'Transferir administração' }).click();
   await expect(page.getByText(/Administração transferida/)).toBeVisible();
   await expect(page.getByText(/Como convidado/)).toBeVisible();
+  // H08.3: after the transfer the former administrator no longer sees the WhatsApp failure notice.
+  await page.goto('/avisos');
+  await expect(page.getByTestId('inbox-item')).toHaveCount(1);
+  await expect(page.getByText('Somente administrador')).toHaveCount(0);
 
   // H08.1: the transfer revokes the previous consent and number; the new administrator starts without them.
   await guestPage.goto('/lembretes');
   await expect(guestPage.getByTestId('recipient')).toHaveText('Não cadastrado');
   await expect(guestPage.getByTestId('consent-status')).toContainText('Não registrado');
   await expect(guestPage.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'RECIPIENT_REQUIRED');
-  await expect(guestPage.getByLabel('Primeiro horário')).toHaveValue('08:30');
+  await expect(guestPage.getByLabel('Primeiro horário')).toHaveValue('00:00');
   await expect(guestPage.getByTestId('settings-events')).toContainText('Consentimento revogado');
   await guestPage.goto('/membros');
 
@@ -317,7 +407,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await guestPage.getByRole('button', { name: 'Transferir administração' }).click();
   await expect(guestPage.getByText(/Administração transferida/)).toBeVisible();
 
-  await page.reload();
+  await page.goto('/membros');
   await expect(page.getByRole('button', { name: 'Remover membro' })).toBeVisible();
   await guestPage.reload();
   guestPage.once('dialog', dialog => dialog.accept());

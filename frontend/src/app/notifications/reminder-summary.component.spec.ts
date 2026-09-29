@@ -27,7 +27,7 @@ const seven = (id: string | null): ReminderSummary => ({
 });
 
 describe('Reminder summaries (H08.2)', () => {
-  const api = { preview: vi.fn(), summary: vi.fn() };
+  const api = { preview: vi.fn(), summary: vi.fn(), whatsapp: vi.fn() };
   const render = async (fixture: ComponentFixture<unknown>) => { fixture.detectChanges(); await fixture.whenStable(); fixture.detectChanges(); };
   const text = (fixture: ComponentFixture<unknown>) => (fixture.nativeElement as HTMLElement).textContent!.replace(/\s+/g, ' ');
   const byTestId = (fixture: ComponentFixture<unknown>, id: string) =>
@@ -35,6 +35,7 @@ describe('Reminder summaries (H08.2)', () => {
 
   beforeEach(async () => {
     Object.values(api).forEach(mock => mock.mockReset());
+    api.whatsapp.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 403 })));
     await TestBed.configureTestingModule({
       imports: [ReminderPreviewComponent, ReminderSummaryComponent],
       providers: [provideRouter([]), { provide: ReminderSummaryService, useValue: api },
@@ -61,8 +62,9 @@ describe('Reminder summaries (H08.2)', () => {
     expect(byTestId(fixture, 'summary-remaining')!.textContent).toContain('e mais 2 contas');
     expect(byTestId(fixture, 'summary-items')!.querySelectorAll('li').length).toBe(7);
     expect(text(fixture)).toContain('Oculta B');
-    expect(byTestId(fixture, 'summary-channels')!.textContent).toContain('não será enviado (envio real ainda indisponível)');
+    expect(byTestId(fixture, 'summary-channels')!.textContent).toContain('não será enviado (envio pela Meta desligado ou incompleto no servidor)');
     expect(byTestId(fixture, 'summary-channels')!.textContent).toContain('No aplicativo (os dois membros): previsto');
+    expect(text(fixture)).not.toContain('Abrir conta');
   });
 
   it('simulates another date and slot and explains an empty slot', async () => {
@@ -106,6 +108,23 @@ describe('Reminder summaries (H08.2)', () => {
     expect(byTestId(fixture, 'summary-items')!.querySelectorAll('li').length).toBe(7);
   });
 
+  it('shows the current situation of each bill next to the historical content (H08.3)', async () => {
+    const summary = seven('s1');
+    summary.items[0] = { ...summary.items[0], currentStatus: 'PAID', currentDueDate: '2026-10-01' };
+    summary.items[1] = { ...summary.items[1], currentStatus: 'PENDING', currentDueDate: '2026-10-20' };
+    summary.items[2] = { ...summary.items[2], currentStatus: 'PENDING', currentDueDate: '2026-10-07' };
+    api.summary.mockReturnValue(of(summary));
+    const fixture = TestBed.createComponent(ReminderSummaryComponent);
+    await render(fixture);
+    const details = byTestId(fixture, 'summary-details')!.querySelectorAll('li');
+    expect(details[0].textContent).toContain('1.234,56');
+    expect(details[0].textContent).toContain('Agora: paga');
+    expect(details[1].textContent).toContain('Agora vence em 20/10/2026');
+    expect(details[2].textContent).not.toContain('Agora');
+    expect(details[3].textContent).not.toContain('Abrir conta');
+    expect(details[0].querySelector('a')!.getAttribute('href')).toBe('/despesas?despesa=e1');
+  });
+
   it('distinguishes a missing session from a summary of another space', async () => {
     api.summary.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 401 })));
     const unauthenticated = TestBed.createComponent(ReminderSummaryComponent);
@@ -118,5 +137,34 @@ describe('Reminder summaries (H08.2)', () => {
     await render(missing);
     expect(byTestId(missing, 'summary-error')!.textContent).toContain('Resumo não encontrado no seu espaço');
     expect(byTestId(missing, 'summary-error')!.querySelector('a')).toBeNull();
+  });
+  it('shows the administrator what happened on WhatsApp, keeping acceptance apart from delivery (H08.4)', async () => {
+    api.summary.mockReturnValue(of(seven('s1')));
+    api.whatsapp.mockReturnValue(of({ state: 'DELIVERED', stateMessage: 'Entregue no WhatsApp do administrador.', kind: 'SUMMARY',
+      reason: null, reasonMessage: null, recipientMasked: '+55 ** *****-4321', itemCount: 7, createdAt: '2026-10-05T12:00:10Z',
+      attemptedAt: '2026-10-05T12:00:10Z', acceptedAt: '2026-10-05T12:00:11Z', sentAt: '2026-10-05T12:00:15Z',
+      deliveredAt: '2026-10-05T12:01:00Z', readAt: null, failedAt: null, attempts: [] }));
+    const fixture = TestBed.createComponent(ReminderSummaryComponent);
+    await render(fixture);
+    expect(api.whatsapp).toHaveBeenCalledWith('s1');
+    expect(byTestId(fixture, 'whatsapp-delivery')!.dataset['state']).toBe('DELIVERED');
+    expect(byTestId(fixture, 'whatsapp-delivery-state')!.textContent).toContain('Entregue no WhatsApp do administrador.');
+    const steps = byTestId(fixture, 'whatsapp-delivery-steps')!.querySelectorAll('li');
+    expect(Array.from(steps).map(li => li.textContent!.split(':')[0])).toEqual(['Tentativa', 'Aceito pela Meta', 'Enviado', 'Entregue']);
+    expect(text(fixture)).toContain('+55 ** *****-4321 · 7 contas enviadas');
+    expect(text(fixture)).toContain('Aceito pela Meta não significa entregue');
+  });
+
+  it('shows nothing about WhatsApp to the guest and a notice when it cannot be read (H08.4)', async () => {
+    api.summary.mockReturnValue(of(seven('s1')));
+    const guest = TestBed.createComponent(ReminderSummaryComponent);
+    await render(guest);
+    expect(byTestId(guest, 'whatsapp-delivery')).toBeNull();
+    expect(byTestId(guest, 'whatsapp-delivery-error')).toBeNull();
+    api.whatsapp.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 500 })));
+    const failing = TestBed.createComponent(ReminderSummaryComponent);
+    await render(failing);
+    expect(byTestId(failing, 'whatsapp-delivery-error')!.textContent).toContain('Não foi possível consultar o envio');
+    expect(byTestId(failing, 'summary-items')!.querySelectorAll('li').length).toBe(7);
   });
 });

@@ -12,11 +12,13 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import java.util.UUID;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class SecurityConfiguration {
+    static final String WHATSAPP_WEBHOOK = "/integrations/whatsapp/webhook";
 
     @Bean
     SecurityFilterChain securityFilterChain(
@@ -28,8 +30,12 @@ public class SecurityConfiguration {
         var production = "production".equalsIgnoreCase(environment.getProperty("APP_ENVIRONMENT", "local"));
         csrfRepository.setCookieCustomizer(cookie -> cookie.path("/").sameSite("Lax").secure(production));
 
+        // H08.4: the Meta webhook is the one exception to session and CSRF; it authenticates by the verify token
+        // (GET) and by the HMAC signature of the body (POST). Every other mutation keeps CSRF.
         http
                 .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(HttpMethod.GET, WHATSAPP_WEBHOOK).permitAll()
+                        .requestMatchers(HttpMethod.POST, WHATSAPP_WEBHOOK).permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/setup/status", "/actuator/health", "/auth/csrf", "/invitations/preview").permitAll()
                         .requestMatchers(HttpMethod.POST,
@@ -38,6 +44,8 @@ public class SecurityConfiguration {
                                 "/auth/password-resets/complete", "/invitations/accept").permitAll()
                         .anyRequest().authenticated())
                 .csrf(csrf -> csrf
+                        .ignoringRequestMatchers(PathPatternRequestMatcher.withDefaults()
+                                .matcher(HttpMethod.POST, WHATSAPP_WEBHOOK))
                         .csrfTokenRepository(csrfRepository)
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))

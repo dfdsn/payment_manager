@@ -1,6 +1,7 @@
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, switchMap } from 'rxjs';
+import { WhatsAppDelivery } from './reminder-summary.service';
 
 export type WhatsAppState = 'RECIPIENT_REQUIRED' | 'CONSENT_REQUIRED' | 'DISABLED' | 'PROVIDER_UNAVAILABLE' | 'READY';
 
@@ -61,6 +62,12 @@ export class ReminderSettingsService {
       { expectedVersion, enabled }, { headers }));
   }
 
+  /** H08.4: test template to the consented number; the same key never sends twice. */
+  sendTest(key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() => this.http.post<WhatsAppDelivery>(
+      `${this.endpoint}/whatsapp/test-message`, null, { headers: new HttpHeaders({ 'Idempotency-Key': key }) })));
+  }
+
   private write(key: string, request: (headers: HttpHeaders) => Observable<ReminderSettings>) {
     return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() => request(new HttpHeaders({ 'Idempotency-Key': key }))));
   }
@@ -70,8 +77,8 @@ export const WHATSAPP_STATE_LABELS: Record<WhatsAppState, string> = {
   RECIPIENT_REQUIRED: 'Sem número cadastrado: nenhum resumo vai para o WhatsApp.',
   CONSENT_REQUIRED: 'Número cadastrado, falta o consentimento: nenhum resumo vai para o WhatsApp.',
   DISABLED: 'Consentimento registrado, canal desativado: nenhum resumo vai para o WhatsApp.',
-  PROVIDER_UNAVAILABLE: 'Canal configurado e ativo, mas o envio real ainda não está disponível: nenhum resumo é enviado.',
-  READY: 'Canal ativo: os resumos serão enviados ao número cadastrado.',
+  PROVIDER_UNAVAILABLE: 'Canal configurado e ativo, mas o envio pela Meta está desligado ou incompleto no servidor: nenhum resumo é enviado.',
+  READY: 'Canal ativo: os resumos serão enviados ao número cadastrado. Aceite da Meta não é entrega; acompanhe cada resumo na página dele.',
 };
 
 export const SETTINGS_EVENT_LABELS: Record<string, string> = {

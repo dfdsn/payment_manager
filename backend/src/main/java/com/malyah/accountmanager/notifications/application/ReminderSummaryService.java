@@ -8,6 +8,7 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -15,10 +16,12 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 import com.malyah.accountmanager.expenses.application.ExpenseReminderQueries;
+import com.malyah.accountmanager.expenses.application.ReminderExpenseState;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.notifications.application.StoredSummary.Channel;
 import com.malyah.accountmanager.notifications.application.StoredSummary.ChannelStatus;
 import com.malyah.accountmanager.notifications.application.StoredSummary.ChannelType;
+import com.malyah.accountmanager.notifications.application.port.MemberNotificationRepository;
 import com.malyah.accountmanager.notifications.application.port.ReminderSettingsRepository;
 import com.malyah.accountmanager.notifications.application.port.ReminderSummaryRepository;
 import com.malyah.accountmanager.notifications.application.port.WhatsAppProviderStatus;
@@ -30,6 +33,7 @@ import com.malyah.accountmanager.notifications.domain.ReminderSummary;
 import com.malyah.accountmanager.notifications.domain.ReminderSummaryText;
 import com.malyah.accountmanager.notifications.domain.ReminderWindow;
 import com.malyah.accountmanager.notifications.domain.WhatsAppChannelState;
+import com.malyah.accountmanager.notifications.domain.WhatsAppFailureReason;
 import com.malyah.accountmanager.recurrences.application.RecurrenceForecastQueries;
 import com.malyah.accountmanager.recurrences.application.UpcomingOccurrenceGeneration;
 
@@ -39,6 +43,8 @@ import com.malyah.accountmanager.recurrences.application.UpcomingOccurrenceGener
  * space, local date and slot, with one record per channel. Nothing is sent here: the WhatsApp record is only
  * planned when the channel is ready (H08.4 sends); otherwise it is skipped with the reason, and the in-app summary
  * exists anyway. The bills come from the public contracts of the expenses and recurrences modules.
+ * H08.3: the same transaction delivers the in-app notification to every active member and, when an enabled channel
+ * could not use the provider, tells the administrator in the application.
  */
 public final class ReminderSummaryService implements ReminderSummaryUseCase {
     public static final int PREVIEW_DAYS_AHEAD = 60;
@@ -46,6 +52,7 @@ public final class ReminderSummaryService implements ReminderSummaryUseCase {
     static final String PREVIEW_LINK = "(o link é criado quando o resumo é gerado)";
 
     private final ReminderSummaryRepository summaries;
+    private final MemberNotificationRepository notifications;
     private final ReminderSettingsRepository settings;
     private final ExpenseReminderQueries expenses;
     private final RecurrenceForecastQueries forecasts;
@@ -56,11 +63,13 @@ public final class ReminderSummaryService implements ReminderSummaryUseCase {
     private final Supplier<UUID> identifiers;
     private final String publicBaseUrl;
 
-    public ReminderSummaryService(ReminderSummaryRepository summaries, ReminderSettingsRepository settings,
+    public ReminderSummaryService(ReminderSummaryRepository summaries, MemberNotificationRepository notifications,
+            ReminderSettingsRepository settings,
             ExpenseReminderQueries expenses, RecurrenceForecastQueries forecasts,
             UpcomingOccurrenceGeneration generation, WhatsAppProviderStatus provider,
             AuthenticatedUserContextQuery contexts, Clock clock, Supplier<UUID> identifiers, String publicBaseUrl) {
         this.summaries = Objects.requireNonNull(summaries);
+        this.notifications = Objects.requireNonNull(notifications);
         this.settings = Objects.requireNonNull(settings);
         this.expenses = Objects.requireNonNull(expenses);
         this.forecasts = Objects.requireNonNull(forecasts);
@@ -118,6 +127,10 @@ public final class ReminderSummaryService implements ReminderSummaryUseCase {
                 window.scheduledAt(), now, summary.get(), channels(space.spaceId(), true));
         summaries.insert(stored);
         summaries.markGenerated(space.spaceId(), window.date(), window.slot(), stored.id());
+        notifications.deliverSummary(space.spaceId(), stored.id(), now);
+        if (stored.channels().stream().anyMatch(ReminderSummaryService::providerUnavailable))
+            notifications.recordWhatsAppFailure(space.spaceId(), stored.id(),
+                    WhatsAppFailureReason.PROVIDER_UNAVAILABLE, now);
         return ReminderSlotOutcome.GENERATED;
     }
 
@@ -150,7 +163,7 @@ public final class ReminderSummaryService implements ReminderSummaryUseCase {
         var schedule = settings.find(actor.spaceId()).map(StoredReminderSettings::schedule)
                 .orElse(ReminderSchedule.DEFAULT);
         var time = schedule.at(reminderSlot);
-        var view = compose(actor.spaceId(), day, reminderSlot).map(summary -> view(null, summary,
+        var view = compose(actor.spaceId(), day, reminderSlot).map(summary -> view(actor.spaceId(), null, summary,
                 ReminderSchedule.format(time), zone.getId(), null, channels(actor.spaceId(), false), time));
         return new ReminderSummaryView.Preview(day, reminderSlot.name(), ReminderSchedule.format(time), zone.getId(),
                 today, view.orElse(null));
@@ -160,7 +173,7 @@ public final class ReminderSummaryService implements ReminderSummaryUseCase {
     public ReminderSummaryView summary(String actorEmail, UUID summaryId) {
         var actor = contexts.findByEmail(actorEmail);
         var stored = summaries.find(actor.spaceId(), summaryId).orElseThrow(ReminderSummaryNotFoundException::new);
-        return view(stored.id(), stored.summary(), ReminderSchedule.format(stored.scheduledTime()), stored.timeZone(),
+        return view(actor.spaceId(), stored.id(), stored.summary(), ReminderSchedule.format(stored.scheduledTime()), stored.timeZone(),
                 stored.generatedAt(), stored.channels(), stored.scheduledTime());
     }
 
@@ -186,15 +199,29 @@ public final class ReminderSummaryService implements ReminderSummaryUseCase {
         return List.of(new Channel(ChannelType.IN_APP, ChannelStatus.PLANNED, null, null), whatsapp);
     }
 
-    private ReminderSummaryView view(UUID id, ReminderSummary summary, String time, String zone, Instant generatedAt,
-            List<Channel> channels, LocalTime scheduledTime) {
+    /** Only an enabled, consented channel that the provider could not serve is a failure the administrator sees. */
+    private static boolean providerUnavailable(Channel channel) {
+        return channel.channel() == ChannelType.WHATSAPP && channel.status() == ChannelStatus.SKIPPED
+                && WhatsAppChannelState.PROVIDER_UNAVAILABLE.name().equals(channel.skipReason());
+    }
+
+    private ReminderSummaryView view(UUID spaceId, UUID id, ReminderSummary summary, String time, String zone,
+            Instant generatedAt, List<Channel> channels, LocalTime scheduledTime) {
+        // H08.3: the summary stays as generated; the current situation of each bill is read now, next to it.
+        var current = new HashMap<UUID, ReminderExpenseState>();
+        for (var state : expenses.currentStates(spaceId, summary.items().stream()
+                .map(item -> item.expenseId()).filter(Objects::nonNull).toList()))
+            current.put(state.id(), state);
         var items = new ArrayList<ReminderSummaryView.Item>();
         var position = 1;
-        for (var item : summary.items())
+        for (var item : summary.items()) {
+            var state = item.expenseId() == null ? null : current.get(item.expenseId());
             items.add(new ReminderSummaryView.Item(position++, item.expenseId(), item.recurrenceId(),
                     item.description(), item.label(), item.amount().setScale(2).toPlainString(), item.dueDate(),
                     item.estimated(), item.overdue(summary.date()), item.forecast(), item.origin(),
-                    item.installmentNumber(), item.installmentCount()));
+                    item.installmentNumber(), item.installmentCount(), state == null ? null : state.status(),
+                    state == null ? null : state.dueDate()));
+        }
         var link = id == null ? null : link(id);
         return new ReminderSummaryView(id, summary.date(), summary.slot().name(), time, zone, generatedAt,
                 summary.count(), summary.total().setScale(2).toPlainString(), summary.estimatedCount(),

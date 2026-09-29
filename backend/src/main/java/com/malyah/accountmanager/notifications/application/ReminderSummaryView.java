@@ -7,7 +7,9 @@ import java.util.UUID;
 
 /**
  * H08.2 summary as the members read it, generated ({@code id} set) or simulated ({@code id} null). Amounts are
- * decimal strings; {@code items} is the full list, {@code details} the first five of the message.
+ * decimal strings; {@code items} is the full list, {@code details} the first five of the message. Each item is the
+ * bill as it was when the slot was processed; {@code currentStatus}/{@code currentDueDate} (H08.3) are the
+ * expense now, read at each query, and stay null for a forecast that was never materialized.
  */
 public record ReminderSummaryView(UUID id, LocalDate date, String slot, String scheduledTime, String timeZone,
         Instant generatedAt, int count, String total, int estimatedCount, String estimatedTotal, int overdueCount,
@@ -15,7 +17,7 @@ public record ReminderSummaryView(UUID id, LocalDate date, String slot, String s
 
     public record Item(int position, UUID expenseId, UUID recurrenceId, String description, String label,
             String amount, LocalDate dueDate, boolean estimated, boolean overdue, boolean forecast, String origin,
-            Integer installmentNumber, Integer installmentCount) { }
+            Integer installmentNumber, Integer installmentCount, String currentStatus, LocalDate currentDueDate) { }
 
     public record ChannelView(String channel, String status, String reason) { }
 

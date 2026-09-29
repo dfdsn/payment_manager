@@ -111,7 +111,7 @@ class ReminderSummaryPostgresIT {
                 POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(25);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(27);
         jdbc = new JdbcTemplate(dataSource);
         tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         insertSpace(SPACE, "Casa");
@@ -133,11 +133,11 @@ class ReminderSummaryPostgresIT {
         generation = new JdbcRecurrenceGenerationJob(jdbc, tx, materializer, clock, Duration.ofMinutes(2), 25);
         WhatsAppProviderStatus provider = () -> providerAvailable
                 ? new WhatsAppProviderStatus.Availability(true, "TEST_PROVIDER", "Porta de teste.")
-                : new UnavailableWhatsAppProvider().availability();
+                : new MetaWhatsAppProvider(MetaWhatsAppProperties.disabled()).availability();
         settings = new TransactionalReminderSettingsUseCase(new ReminderSettingsService(
                 new JdbcReminderSettingsRepository(jdbc), context, members, provider, clock, UUID::randomUUID), tx);
         service = new ReminderSummaryService(new JdbcReminderSummaryRepository(jdbc),
-                new JdbcReminderSettingsRepository(jdbc), new JdbcExpenseReminderQueries(jdbc),
+                new JdbcMemberNotificationRepository(jdbc), new JdbcReminderSettingsRepository(jdbc), new JdbcExpenseReminderQueries(jdbc),
                 new RecurrenceForecastCatalog(RecurrenceTestFixtures.service(jdbc, context, categories, members,
                         clock, materializer, null)), generation, provider, context, clock, UUID::randomUUID,
                 "https://contas.malyah.tech");
@@ -274,11 +274,11 @@ class ReminderSummaryPostgresIT {
         });
         assertThat(count("expense_entries")).isZero();
         var withoutGeneration = new ReminderSummaryJob(new ReminderSummaryService(new JdbcReminderSummaryRepository(jdbc),
-                new JdbcReminderSettingsRepository(jdbc), new JdbcExpenseReminderQueries(jdbc),
+                new JdbcMemberNotificationRepository(jdbc), new JdbcReminderSettingsRepository(jdbc), new JdbcExpenseReminderQueries(jdbc),
                 new RecurrenceForecastCatalog(RecurrenceTestFixtures.service(jdbc, context, categories, members, clock,
                         new JdbcRecurringExpenseMaterializer(jdbc, tx), null)),
                 (space, through) -> { throw new IllegalStateException("generation down"); },
-                new UnavailableWhatsAppProvider(), context, clock, UUID::randomUUID, "https://x"), tx, clock);
+                new MetaWhatsAppProvider(MetaWhatsAppProperties.disabled()), context, clock, UUID::randomUUID, "https://x"), tx, clock);
         withoutGeneration.poll();
         var stored = only(LocalDate.of(2026, 9, 28), "FIRST");
         assertThat(stored.items()).singleElement().extracting(ReminderSummaryView.Item::forecast).isEqualTo(true);

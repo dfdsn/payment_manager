@@ -1,6 +1,7 @@
 package com.malyah.accountmanager.expenses.infrastructure;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -9,8 +10,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.malyah.accountmanager.expenses.application.ExpenseReminderQueries;
 import com.malyah.accountmanager.expenses.application.InstallmentLink;
 import com.malyah.accountmanager.expenses.application.ReminderExpense;
+import com.malyah.accountmanager.expenses.application.ReminderExpenseState;
 
-/** H08.2 read of the pending expenses of a space due up to a date, ordered by due date and id. */
+/**
+ * H08.2 read of the pending expenses of a space due up to a date, ordered by due date and id; H08.3 current state of
+ * the expenses a summary mentioned.
+ */
 public final class JdbcExpenseReminderQueries implements ExpenseReminderQueries {
     private final JdbcTemplate jdbc;
 
@@ -32,5 +37,14 @@ public final class JdbcExpenseReminderQueries implements ExpenseReminderQueries 
                             purchase == null ? null : new InstallmentLink(purchase, rs.getInt(4), rs.getInt(5)),
                             rs.getString(6), rs.getObject(7, LocalDate.class), rs.getBigDecimal(8), rs.getBoolean(9));
                 }, spaceId, dueThrough);
+    }
+
+    @Override
+    public List<ReminderExpenseState> currentStates(UUID spaceId, Collection<UUID> expenseIds) {
+        if (expenseIds.isEmpty()) return List.of();
+        return jdbc.query("""
+                select id, status, due_date from expense_entries where space_id = ? and id = any(?)
+                """, (rs, row) -> new ReminderExpenseState(rs.getObject(1, UUID.class), rs.getString(2),
+                rs.getObject(3, LocalDate.class)), spaceId, expenseIds.toArray(UUID[]::new));
     }
 }

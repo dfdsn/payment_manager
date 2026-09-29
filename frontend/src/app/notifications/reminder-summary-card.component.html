@@ -13,6 +13,8 @@
       <span class="due">{{ date(item.dueDate) }}</span> {{ item.label }} — {{ money(item.amount) }}
       @if (item.estimated) { <span class="tag">Estimada</span> }
       @if (item.forecast) { <span class="tag">Previsão</span> }
+      @if (currentNote(item); as note) { <span class="tag current" data-testid="summary-current">{{ note }}</span> }
+      @if (showCurrent() && item.expenseId) { <a class="open" [routerLink]="['/despesas']" [queryParams]="{ despesa: item.expenseId }">Abrir conta</a> }
     </li>
   }
 </ol>
@@ -27,6 +29,8 @@
         <span class="due">{{ date(item.dueDate) }}</span> {{ item.label }} — {{ money(item.amount) }}
         @if (item.estimated) { <span class="tag">Estimada</span> }
         @if (item.forecast) { <span class="tag">Previsão</span> }
+        @if (currentNote(item); as note) { <span class="tag current">{{ note }}</span> }
+        @if (showCurrent() && item.expenseId) { <a class="open" [routerLink]="['/despesas']" [queryParams]="{ despesa: item.expenseId }">Abrir conta</a> }
       </li>
     }
   </ol>

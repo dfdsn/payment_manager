@@ -5,7 +5,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { ApiError } from '../identity/initial-setup.service';
 import { AccountAccessService, SpaceMember } from '../identity/account-access.service';
@@ -35,6 +35,7 @@ export class ExpenseComponent implements OnInit {
   private readonly identity = inject(AccountAccessService);
   private readonly categoryApi = inject(CategoryService);
   private readonly csvExports = inject(CsvExportService);
+  private readonly route = inject(ActivatedRoute, { optional: true });
   readonly categories = signal<Category[]>([]);
   readonly members = signal<SpaceMember[]>([]);
   readonly responsibleFilterPeople = signal<import('./expense.service').ExpenseFilterPerson[]>([]);
@@ -138,6 +139,9 @@ export class ExpenseComponent implements OnInit {
     this.loadCategories();
     this.loadFilterOptions();
     this.load();
+    // H08.3: a notification links here with ?despesa=<id>; the backend authorizes the read (404 outside the space).
+    const linked = this.route?.snapshot?.queryParamMap?.get('despesa');
+    if (linked) this.loadDetail(linked);
   }
 
   submit(): void {

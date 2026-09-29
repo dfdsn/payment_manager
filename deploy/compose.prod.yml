@@ -57,10 +57,24 @@ services:
       APP_MODE: runtime
       SPRING_FLYWAY_ENABLED: "false"
       SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+      # H08.4: WhatsApp stays off until P03 is complete and Diego enables it.
+      META_WHATSAPP_ENABLED: ${META_WHATSAPP_ENABLED:-false}
+      META_WHATSAPP_API_VERSION: ${META_WHATSAPP_API_VERSION:-}
+      META_WHATSAPP_PHONE_NUMBER_ID: ${META_WHATSAPP_PHONE_NUMBER_ID:-}
+      META_WHATSAPP_SUMMARY_TEMPLATE: ${META_WHATSAPP_SUMMARY_TEMPLATE:-}
+      META_WHATSAPP_TEMPLATE_LANGUAGE: ${META_WHATSAPP_TEMPLATE_LANGUAGE:-pt_BR}
+      META_WHATSAPP_TEST_TEMPLATE: ${META_WHATSAPP_TEST_TEMPLATE:-}
+      META_WHATSAPP_TEST_TEMPLATE_LANGUAGE: ${META_WHATSAPP_TEST_TEMPLATE_LANGUAGE:-pt_BR}
+      META_WHATSAPP_TOKEN_FILE: /run/secrets/meta_whatsapp_token
+      META_WHATSAPP_APP_SECRET_FILE: /run/secrets/meta_whatsapp_app_secret
+      META_WHATSAPP_VERIFY_TOKEN_FILE: /run/secrets/meta_whatsapp_verify_token
     secrets:
       - postgres_password
       - setup_secret
       - smtp_password
+      - meta_whatsapp_token
+      - meta_whatsapp_app_secret
+      - meta_whatsapp_verify_token
     volumes:
       - private-files:/var/lib/account-manager/files
     depends_on:
@@ -98,3 +112,10 @@ secrets:
     file: ./secrets/setup_secret.txt
   smtp_password:
     file: ./secrets/smtp_password.txt
+  # H08.4: may stay empty while META_WHATSAPP_ENABLED=false.
+  meta_whatsapp_token:
+    file: ./secrets/meta_whatsapp_token.txt
+  meta_whatsapp_app_secret:
+    file: ./secrets/meta_whatsapp_app_secret.txt
+  meta_whatsapp_verify_token:
+    file: ./secrets/meta_whatsapp_verify_token.txt

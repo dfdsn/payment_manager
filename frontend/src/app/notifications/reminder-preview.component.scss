@@ -11,3 +11,5 @@ p { line-height: 1.5; }
 fieldset { border: 0; padding: 0; margin: 0; display: flex; gap: 1rem; align-items: center; }
 legend { float: left; margin-right: .5rem; font-weight: 600; }
 .error-summary { padding: .75rem 1rem; border-left: .25rem solid #ba1a1a; background: #ffdad6; }
+.hint { color: #52677d; font-size: .9rem; }
+.whatsapp-steps { margin: .25rem 0; padding-left: 1.25rem; line-height: 1.6; overflow-wrap: anywhere; }

@@ -1941,6 +1941,151 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "404": { description: REMINDER_SUMMARY_NOT_FOUND., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/inbox:
+    get:
+      operationId: notificationInbox
+      summary: Avisos internos do membro (H08.3)
+      description: >-
+        Cada membro lista somente os próprios avisos do espaço ativo, do mais recente ao mais antigo (instante de
+        criação e identificador, decrescentes). Avisos de falha do WhatsApp (tipo WHATSAPP_DELIVERY_FAILURE) só
+        aparecem para o destinatário enquanto ele for o administrador. O conteúdo do resumo é histórico. Nenhuma
+        política de retenção está definida: nada é apagado.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: view, in: query, required: false, description: ACTIVE (padrão, não dispensados) ou DISMISSED., schema: { type: string, enum: [ACTIVE, DISMISSED] } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Página de avisos.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationPage" }
+        "400": { description: NOTIFICATION_QUERY_INVALID (view, page ou size)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/inbox/unread-count:
+    get:
+      operationId: notificationUnreadCount
+      summary: Quantidade de avisos não lidos do membro (H08.3)
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Contagem.
+          content:
+            application/json:
+              schema: { type: object, required: [unreadCount], properties: { unreadCount: { type: integer } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/inbox/{id}/read:
+    post:
+      operationId: readNotification
+      summary: Marca o próprio aviso como lido (H08.3)
+      description: >-
+        Idempotente: repetir mantém o primeiro instante. Só altera o aviso do próprio membro; não quita nem altera
+        despesas e não interrompe lembretes. Exige token CSRF como as demais mutações.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Aviso atualizado., content: { application/json: { schema: { $ref: "#/components/schemas/MemberNotification" } } } }
+        "400": { description: NOTIFICATION_QUERY_INVALID (identificador mal formado)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa (ACTIVE_SPACE_ACCESS_NOT_FOUND) ou sem token CSRF., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: NOTIFICATION_NOT_FOUND (inexistente, de outro membro ou de outro espaço)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/inbox/{id}/dismiss:
+    post:
+      operationId: dismissNotification
+      summary: Dispensa o próprio aviso (H08.3)
+      description: >-
+        Também marca como lido e move o aviso para os dispensados. Idempotente; só altera o aviso do próprio membro;
+        não quita nem interrompe lembretes.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Aviso atualizado., content: { application/json: { schema: { $ref: "#/components/schemas/MemberNotification" } } } }
+        "400": { description: NOTIFICATION_QUERY_INVALID (identificador mal formado)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa (ACTIVE_SPACE_ACCESS_NOT_FOUND) ou sem token CSRF., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: NOTIFICATION_NOT_FOUND., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/reminders/summaries/{id}/whatsapp:
+    get:
+      operationId: getSummaryWhatsAppDelivery
+      summary: Acompanha o envio do resumo pelo WhatsApp (H08.4, somente administrador)
+      description: >-
+        Situação da entrega lógica do resumo (uma por resumo), com número mascarado, quantidade de contas enviadas e os
+        instantes de tentativa, aceite, envio, entrega, leitura ou falha. Aceite da Meta (ACCEPTED) não é entrega.
+        NOT_PLANNED quando o canal não estava pronto na geração; WAITING quando previsto e ainda não tentado.
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Situação do envio., content: { application/json: { schema: { $ref: "#/components/schemas/WhatsAppDelivery" } } } }
+        "400": { description: WHATSAPP_REQUEST_INVALID (identificador mal formado)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED (convidado) ou ACTIVE_SPACE_ACCESS_NOT_FOUND., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: REMINDER_SUMMARY_NOT_FOUND (inclusive de outro espaço)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /notifications/settings/whatsapp/test-message:
+    post:
+      operationId: sendWhatsAppTestMessage
+      summary: Envia a mensagem de teste ao número consentido do administrador (H08.4)
+      description: >-
+        Usa o template de teste configurado no servidor (sem dados financeiros). Exige consentimento ativo do
+        administrador atual para o número atual e provedor configurado; o canal não precisa estar ativado. Repetir a
+        mesma chave devolve o primeiro resultado sem reenviar; no máximo um teste por minuto por espaço.
+      security:
+        - { sessionCookie: [], xsrfCookie: [], xsrfHeader: [] }
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Resultado da tentativa (ACCEPTED não é entrega)., content: { application/json: { schema: { $ref: "#/components/schemas/WhatsAppDelivery" } } } }
+        "400": { description: WHATSAPP_REQUEST_INVALID (chave ausente ou mal formada)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED, ACTIVE_SPACE_ACCESS_NOT_FOUND ou sem token CSRF., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: "WHATSAPP_CONSENT_REQUIRED, PROVIDER_DISABLED, PROVIDER_NOT_CONFIGURED, WHATSAPP_TEST_TEMPLATE_MISSING ou WHATSAPP_TEST_TOO_SOON.", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /integrations/whatsapp/webhook:
+    get:
+      operationId: verifyWhatsAppWebhook
+      summary: Verificação do webhook pela Meta (H08.4)
+      description: Sem sessão. Responde o desafio em texto somente com hub.mode=subscribe e o verify token configurado.
+      security: []
+      parameters:
+        - { name: hub.mode, in: query, schema: { type: string, example: subscribe } }
+        - { name: hub.verify_token, in: query, schema: { type: string } }
+        - { name: hub.challenge, in: query, schema: { type: string } }
+      responses:
+        "200": { description: O próprio hub.challenge., content: { text/plain: { schema: { type: string } } } }
+        "403": { description: Modo, token ou desafio inválidos. }
+        "404": { description: Integração desligada ou incompleta. }
+    post:
+      operationId: receiveWhatsAppWebhook
+      summary: Eventos da Meta (H08.4)
+      description: >-
+        Único caminho sem sessão e sem CSRF. A assinatura X-Hub-Signature-256 (HMAC-SHA256 do corpo bruto com o app
+        secret) é validada antes de qualquer leitura. Aplica somente statuses (sent, delivered, read, failed) de
+        mensagens conhecidas do número configurado, uma vez cada e sem regressão; ignora mensagens recebidas. Nunca altera
+        despesas ou pagamentos.
+      security: []
+      parameters:
+        - { name: X-Hub-Signature-256, in: header, required: true, schema: { type: string, example: "sha256=<hex>" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: Payload de webhook do WhatsApp Business (object whatsapp_business_account). }
+      responses:
+        "200": { description: Recebido (inclusive quando nada se aplicava). }
+        "401": { description: Assinatura ausente ou inválida; nada aplicado. }
+        "404": { description: Integração desligada ou incompleta. }
+        "413": { description: Corpo acima de 3 MB. }
+        "500": { description: Falha interna; a Meta reenvia e o reenvio é deduplicado. }
+        "503": { description: Situação de mensagem cujo id ainda não foi gravado enquanto há tentativa em andamento; a Meta reenvia. }
 components:
   securitySchemes:
     sessionCookie:
@@ -3030,7 +3175,7 @@ components:
               required: [available, code, message]
               properties:
                 available: { type: boolean }
-                code: { type: string, example: PROVIDER_NOT_IMPLEMENTED }
+                code: { type: string, enum: [PROVIDER_DISABLED, PROVIDER_NOT_CONFIGURED, PROVIDER_READY], description: 'H08.4: adapter da Meta; desligado por padrão.' }
                 message: { type: string }
             state: { type: string, enum: [RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, PROVIDER_UNAVAILABLE, READY] }
             consentTextVersion: { type: string, example: WHATSAPP-RESUMOS-V1 }
@@ -3051,6 +3196,83 @@ components:
               fromVersion: { type: integer }
               toVersion: { type: integer }
               detail: { type: string, description: Resumo sem número completo. }
+    NotificationPage:
+      type: object
+      required: [items, page, size, totalItems, totalPages, unreadCount, view]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MemberNotification" } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+        unreadCount: { type: integer, description: Não lidos do membro (ativos e dispensados). }
+        view: { type: string, enum: [ACTIVE, DISMISSED] }
+    MemberNotification:
+      type: object
+      required: [id, type, title, message, createdAt, summary]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [REMINDER_SUMMARY, WHATSAPP_DELIVERY_FAILURE] }
+        title: { type: string, example: "Contas a pagar: primeiro horário de 05/10, 09:00" }
+        message: { type: string, description: Texto montado no servidor; nunca contém resposta do provedor, token ou número completo. }
+        createdAt: { type: string, format: date-time }
+        readAt: { type: [string, 'null'], format: date-time }
+        dismissedAt: { type: [string, 'null'], format: date-time }
+        summary:
+          type: object
+          description: Conteúdo histórico do resumo no horário (não muda depois).
+          required: [id, date, slot, scheduledTime, timeZone, count, total, estimatedCount, estimatedTotal, overdueCount, remaining, link]
+          properties:
+            id: { type: string, format: uuid }
+            date: { type: string, format: date }
+            slot: { type: string, enum: [FIRST, SECOND] }
+            scheduledTime: { type: string }
+            timeZone: { type: string }
+            count: { type: integer }
+            total: { type: string }
+            estimatedCount: { type: integer }
+            estimatedTotal: { type: string }
+            overdueCount: { type: integer }
+            remaining: { type: integer }
+            link: { type: string }
+        failure:
+          type: [object, 'null']
+          description: Só em WHATSAPP_DELIVERY_FAILURE, para o administrador.
+          properties:
+            code: { type: string, enum: [PROVIDER_UNAVAILABLE, PROVIDER_REJECTED, DELIVERY_FAILED, RECIPIENT_INVALID, RESULT_UNCERTAIN, NOT_SENT_IN_WINDOW] }
+            message: { type: string, description: Mensagem do catálogo. }
+    WhatsAppDelivery:
+      type: object
+      description: H08.4. Número sempre mascarado; nenhum id da Meta, token ou texto do provedor.
+      required: [state, stateMessage, kind, attempts]
+      properties:
+        state: { type: string, enum: [NOT_PLANNED, WAITING, ATTEMPTING, ACCEPTED, SENT, DELIVERED, READ, FAILED, REJECTED, UNCERTAIN, SKIPPED] }
+        stateMessage: { type: string, example: Aceito pela Meta. A entrega ainda não foi confirmada. }
+        kind: { type: string, enum: [SUMMARY, TEST] }
+        reason:
+          type: [string, 'null']
+          description: >-
+            Motivo de SKIPPED (ADMINISTRATOR_CHANGED, CONSENT_REVOKED, RECIPIENT_CHANGED, DISABLED, PROVIDER_UNAVAILABLE,
+            WINDOW_CLOSED, EMPTY), de falha (catálogo WhatsAppFailureReason) ou, em NOT_PLANNED, o estado do canal na geração.
+        reasonMessage: { type: [string, 'null'] }
+        recipientMasked: { type: [string, 'null'], example: "+55 ** *****-4321" }
+        itemCount: { type: [integer, 'null'] }
+        createdAt: { type: [string, 'null'], format: date-time }
+        attemptedAt: { type: [string, 'null'], format: date-time }
+        acceptedAt: { type: [string, 'null'], format: date-time }
+        sentAt: { type: [string, 'null'], format: date-time }
+        deliveredAt: { type: [string, 'null'], format: date-time }
+        readAt: { type: [string, 'null'], format: date-time }
+        failedAt: { type: [string, 'null'], format: date-time }
+        attempts:
+          type: array
+          items:
+            type: object
+            properties:
+              number: { type: integer }
+              startedAt: { type: string, format: date-time }
+              finishedAt: { type: [string, 'null'], format: date-time }
+              outcome: { type: [string, 'null'], enum: [ACCEPTED, REJECTED, FAILED, UNCERTAIN, null] }
     ReminderPreview:
       type: object
       required: [date, slot, scheduledTime, timeZone, today]
@@ -3100,6 +3322,8 @@ components:
               origin: { type: string, enum: [ONE_OFF, RECURRENCE, INSTALLMENT, RECURRENCE_FORECAST] }
               installmentNumber: { type: [integer, 'null'] }
               installmentCount: { type: [integer, 'null'] }
+              currentStatus: { type: [string, 'null'], enum: [PENDING, PAID, CANCELLED, null], description: "H08.3: situação atual da despesa, lida a cada consulta; null para previsão." }
+              currentDueDate: { type: [string, 'null'], format: date, description: "H08.3: vencimento atual da despesa." }
         channels:
           type: array
           items:
