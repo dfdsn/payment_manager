@@ -7,9 +7,14 @@ import { formatDate, formatInstant } from '../reports/report.service';
 import { ReminderSummaryCardComponent } from './reminder-summary-card.component';
 import { ReminderSummary, ReminderSummaryService, SLOT_LABELS, WhatsAppDelivery } from './reminder-summary.service';
 
+const ATTEMPT_OUTCOMES: Record<string, string> = {
+  ACCEPTED: 'aceita pela Meta', FAILED: 'não recebida pela Meta', REJECTED: 'recusada pela Meta', UNCERTAIN: 'resultado incerto',
+};
+
 /**
  * H08.2: target of the summary link. Requires a session; shows the full list of the summary as generated.
  * H08.4: the administrator also sees what happened on WhatsApp; the guest gets 403 there and sees nothing of it.
+ * H08.5: each attempt of the same summary, the next one while a retry waits and a later reconciliation.
  */
 @Component({
   selector: 'app-reminder-summary',
@@ -47,7 +52,8 @@ export class ReminderSummaryComponent implements OnInit {
   whatsappSteps(w: WhatsAppDelivery): { label: string; at: string }[] {
     const zone = this.summary()?.timeZone ?? 'America/Sao_Paulo';
     const steps: [string, string | null][] = [['Tentativa', w.attemptedAt], ['Aceito pela Meta', w.acceptedAt],
-      ['Enviado', w.sentAt], ['Entregue', w.deliveredAt], ['Lido', w.readAt], ['Falha', w.failedAt]];
+      ['Confirmado depois pelo webhook', w.reconciledAt ?? null], ['Enviado', w.sentAt], ['Entregue', w.deliveredAt],
+      ['Lido', w.readAt], ['Falha', w.failedAt], ['Próxima tentativa', w.nextAttemptAt ?? null]];
     return steps.filter(([, at]) => !!at).map(([label, at]) => ({ label, at: formatInstant(at!, zone) }));
   }
 
@@ -60,6 +66,12 @@ export class ReminderSummaryComponent implements OnInit {
         this.whatsappError.set(status === 403 ? null : 'Não foi possível consultar o envio pelo WhatsApp.');
       },
     });
+  }
+
+  /** H08.5: one line per attempt of the same logical summary (a retry is never a new summary). */
+  attemptLines(w: WhatsAppDelivery): string[] {
+    const zone = this.summary()?.timeZone ?? 'America/Sao_Paulo';
+    return w.attempts.map(a => `Tentativa ${a.number}: ${formatInstant(a.startedAt, zone)} · ${ATTEMPT_OUTCOMES[a.outcome ?? ''] ?? 'em andamento'}`);
   }
 
   generatedAt(s: ReminderSummary): string { return s.generatedAt ? formatInstant(s.generatedAt, s.timeZone) : ''; }

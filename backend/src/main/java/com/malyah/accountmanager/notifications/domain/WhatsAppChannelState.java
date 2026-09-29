@@ -6,12 +6,18 @@ package com.malyah.accountmanager.notifications.domain;
  * send while the integration is missing.
  */
 public enum WhatsAppChannelState {
-    RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, PROVIDER_UNAVAILABLE, READY;
+    RECIPIENT_REQUIRED, CONSENT_REQUIRED, SUSPENDED, DISABLED, PROVIDER_UNAVAILABLE, READY;
 
     public static WhatsAppChannelState of(boolean hasRecipient, boolean consentActive, boolean enabled,
             boolean providerAvailable) {
+        return of(hasRecipient, consentActive, enabled, false, providerAvailable);
+    }
+
+    public static WhatsAppChannelState of(boolean hasRecipient, boolean consentActive, boolean enabled,
+            boolean suspended, boolean providerAvailable) {
         if (!hasRecipient) return RECIPIENT_REQUIRED;
         if (!consentActive) return CONSENT_REQUIRED;
+        if (suspended && !enabled) return SUSPENDED;
         if (!enabled) return DISABLED;
         return providerAvailable ? READY : PROVIDER_UNAVAILABLE;
     }

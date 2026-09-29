@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, switchMap } from 'rxjs';
 import { WhatsAppDelivery } from './reminder-summary.service';
 
-export type WhatsAppState = 'RECIPIENT_REQUIRED' | 'CONSENT_REQUIRED' | 'DISABLED' | 'PROVIDER_UNAVAILABLE' | 'READY';
+export type WhatsAppState = 'RECIPIENT_REQUIRED' | 'CONSENT_REQUIRED' | 'SUSPENDED' | 'DISABLED' | 'PROVIDER_UNAVAILABLE' | 'READY';
 
 /** H08.1: the full number only reaches the administrator; there is no credential field anywhere. */
 export interface ReminderSettings {
@@ -18,6 +18,8 @@ export interface ReminderSettings {
     consent: { active: boolean; grantedAt: string | null; grantedByDisplayName: string | null; recipientLastDigits: string | null };
     provider: { available: boolean; code: string; message: string };
     state: WhatsAppState; consentTextVersion: string; consentText: string;
+    /** H08.5: present while a permanent failure keeps the channel suspended. */
+    suspension: { reason: string; suspendedAt: string; message: string } | null;
   };
 }
 
@@ -76,6 +78,7 @@ export class ReminderSettingsService {
 export const WHATSAPP_STATE_LABELS: Record<WhatsAppState, string> = {
   RECIPIENT_REQUIRED: 'Sem número cadastrado: nenhum resumo vai para o WhatsApp.',
   CONSENT_REQUIRED: 'Número cadastrado, falta o consentimento: nenhum resumo vai para o WhatsApp.',
+  SUSPENDED: 'Canal suspenso por uma falha permanente: nenhum resumo vai para o WhatsApp até você corrigir e reativar.',
   DISABLED: 'Consentimento registrado, canal desativado: nenhum resumo vai para o WhatsApp.',
   PROVIDER_UNAVAILABLE: 'Canal configurado e ativo, mas o envio pela Meta está desligado ou incompleto no servidor: nenhum resumo é enviado.',
   READY: 'Canal ativo: os resumos serão enviados ao número cadastrado. Aceite da Meta não é entrega; acompanhe cada resumo na página dele.',
@@ -84,4 +87,5 @@ export const WHATSAPP_STATE_LABELS: Record<WhatsAppState, string> = {
 export const SETTINGS_EVENT_LABELS: Record<string, string> = {
   SCHEDULE_CHANGED: 'Horários alterados', RECIPIENT_CHANGED: 'Número alterado', CONSENT_GRANTED: 'Consentimento registrado',
   CONSENT_REVOKED: 'Consentimento revogado', CHANNEL_ENABLED: 'Canal ativado', CHANNEL_DISABLED: 'Canal desativado',
+  CHANNEL_SUSPENDED: 'Canal suspenso automaticamente',
 };

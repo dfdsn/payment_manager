@@ -191,7 +191,7 @@ public final class ReminderSummaryService implements ReminderSummaryUseCase {
         var consent = settings.activeConsent(spaceId).filter(active -> administrator.isPresent()
                 && active.userId().equals(administrator.get()) && active.recipient().equals(stored.recipient()));
         var state = WhatsAppChannelState.of(stored.recipient() != null, consent.isPresent(), stored.enabled(),
-                provider.availability().available());
+                stored.suspended(), provider.availability().available());
         var whatsapp = state == WhatsAppChannelState.READY
                 ? new Channel(ChannelType.WHATSAPP, ChannelStatus.PLANNED, null,
                         withRecipient ? consent.get().userId() : null)

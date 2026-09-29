@@ -20,7 +20,9 @@ import com.malyah.accountmanager.notifications.domain.WebhookSignature;
 
 /**
  * H08.4: the Meta webhook. The signature over the raw body is checked before the body is parsed; only then are the
- * {@code statuses} of the configured phone number applied, in one short transaction. Inbound user messages and any
+ * {@code statuses} of the configured phone number applied, in one short transaction. H08.5: the echoed
+ * {@code biz_opaque_callback_data} (the attempt id) reconciles an uncertain attempt, and a failure code of the
+ * recipient is flagged so the channel is suspended. Inbound user messages and any
  * other field are ignored and never stored. Nothing here touches expenses or payments (RF-ALT-12).
  * Answers: 404 when the integration is off, 403 for a wrong verification, 401 for a bad signature, 413 for an
  * oversized body, 503 when an event may belong to a message whose id is not recorded yet (Meta retries), 500 when
@@ -64,8 +66,9 @@ final class MetaWhatsAppWebhook implements WhatsAppWebhookUseCase {
         if (updates.isEmpty()) return new Reply(200, "");
         var now = service.now();
         var outcome = transactions.execute(status -> service.applyStatuses(updates, now));
-        LOG.info("whatsapp_webhook applied={} duplicated={} stale={} ignored={} retryLater={}", outcome.applied(),
-                outcome.duplicated(), outcome.stale(), outcome.ignored(), outcome.retryLater());
+        LOG.info("whatsapp_webhook applied={} duplicated={} stale={} ignored={} reconciled={} retryLater={}",
+                outcome.applied(), outcome.duplicated(), outcome.stale(), outcome.ignored(), outcome.reconciled(),
+                outcome.retryLater());
         return outcome.retryLater() ? new Reply(503, "") : new Reply(200, "");
     }
 
@@ -88,8 +91,10 @@ final class MetaWhatsAppWebhook implements WhatsAppWebhookUseCase {
                     continue;
                 for (var status : value.path("statuses")) {
                     if (updates.size() >= MAX_UPDATES) return updates;
+                    var code = errorCode(status.path("errors").path(0).path("code"));
                     updates.add(new StatusUpdate(text(status.path("id"), 128), text(status.path("status"), 16),
-                            instant(status.path("timestamp")), errorCode(status.path("errors").path(0).path("code"))));
+                            instant(status.path("timestamp")), code, text(status.path("biz_opaque_callback_data"), 64),
+                            code != null && MetaWhatsAppProvider.RECIPIENT_CODES.contains(Long.parseLong(code))));
                 }
             }
         return updates;

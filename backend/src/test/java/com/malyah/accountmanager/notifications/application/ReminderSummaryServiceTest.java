@@ -334,6 +334,22 @@ class ReminderSummaryServiceTest {
                 .isEqualTo("http://x/lembretes/resumos/" + nextId);
     }
 
+    /** H08.5: a suspended channel is not planned and is not a new failure notice (the suspension already was). */
+    @Test
+    void aSuspendedChannelIsSkippedWithItsReason() {
+        bills();
+        configure(true, false, ADMIN);
+        providerAvailable = true;
+        when(settings.find(SPACE)).thenReturn(Optional.of(new StoredReminderSettings(SPACE, ReminderSchedule.DEFAULT,
+                NUMBER, false, 4, FIRST_SLOT,
+                com.malyah.accountmanager.notifications.domain.WhatsAppSuspensionReason.RECIPIENT_INVALID,
+                FIRST_SLOT)));
+        var channel = whatsapp();
+        assertThat(channel.status()).isEqualTo(StoredSummary.ChannelStatus.SKIPPED);
+        assertThat(channel.skipReason()).isEqualTo("SUSPENDED");
+        verify(notifications, never()).recordWhatsAppFailure(any(), any(), any(), any());
+    }
+
     private StoredSummary.Channel whatsapp() {
         nextId = UUID.randomUUID();
         summaries.runs.clear();

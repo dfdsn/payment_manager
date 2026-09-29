@@ -240,7 +240,7 @@ public final class ReminderSettingsService implements ReminderSettingsUseCase, A
         var manager = actor.role() == SpaceRole.ADMINISTRATOR;
         var recipient = settings.recipient();
         var state = WhatsAppChannelState.of(recipient != null, consent.isPresent(), settings.enabled(),
-                availability.available());
+                settings.suspended(), availability.available());
         var consentView = consent.map(active -> new ReminderSettingsView.Consent(true,
                         manager ? active.grantedAt() : null, manager ? active.grantedByDisplayName() : null,
                         active.recipient().lastDigits()))
@@ -255,7 +255,10 @@ public final class ReminderSettingsService implements ReminderSettingsUseCase, A
                         recipient == null ? null : recipient.lastDigits(), settings.enabled(), consentView,
                         new ReminderSettingsView.Provider(availability.available(), availability.code(),
                                 availability.message()),
-                        state.name(), CONSENT_TEXT_VERSION, CONSENT_TEXT));
+                        state.name(), CONSENT_TEXT_VERSION, CONSENT_TEXT, settings.suspended()
+                                ? new ReminderSettingsView.Suspension(settings.suspension().name(),
+                                        settings.suspendedAt(), settings.suspension().guidance())
+                                : null));
     }
 
     private static boolean usable(StoredConsent consent, UUID administratorId, WhatsAppRecipient recipient) {

@@ -53,7 +53,7 @@ class VariableChargeConfirmationPostgresIT {
     @BeforeEach void reset() {
         var ds=new DriverManagerDataSource(POSTGRES.getJdbcUrl(),POSTGRES.getUsername(),POSTGRES.getPassword());
         var flyway=Flyway.configure().dataSource(ds).cleanDisabled(false).load(); flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(27);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(28);
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         insertSpace(SPACE,"Casa"); insertSpace(OTHER,"Outra");
         insertUser(ADMIN,"Admin","admin@example.com",SPACE,"ADMINISTRATOR");

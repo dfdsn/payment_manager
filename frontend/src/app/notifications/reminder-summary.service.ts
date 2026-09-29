@@ -32,12 +32,15 @@ export interface WhatsAppDelivery {
   recipientMasked: string | null; itemCount: number | null; createdAt: string | null; attemptedAt: string | null;
   acceptedAt: string | null; sentAt: string | null; deliveredAt: string | null; readAt: string | null; failedAt: string | null;
   attempts: { number: number; startedAt: string; finishedAt: string | null; outcome: string | null }[];
+  /** H08.5: next attempt of the same summary while one waits; when an uncertain result was confirmed later. */
+  nextAttemptAt: string | null; reconciledAt: string | null;
 }
 
 export const CHANNEL_REASON_LABELS: Record<string, string> = {
   RECIPIENT_REQUIRED: 'sem número cadastrado',
   CONSENT_REQUIRED: 'sem consentimento do administrador atual',
   DISABLED: 'canal desativado',
+  SUSPENDED: 'canal suspenso por uma falha permanente',
   PROVIDER_UNAVAILABLE: 'envio pela Meta desligado ou incompleto no servidor',
 };
 

@@ -35,6 +35,39 @@ public interface WhatsAppDeliveryRepository {
     boolean finish(UUID deliveryId, UUID attemptId, WhatsAppDeliveryStatus status, String providerMessageId,
             String providerErrorCode, String failureCode, Instant at);
 
+    /**
+     * H08.5: moves the delivery from {@code ATTEMPTING} (or from an {@code UNCERTAIN} without provider id, when a late
+     * answer proves the request did not reach the provider) to {@code RETRY_WAITING} until {@code nextAttemptAt}; the
+     * attempt ends as {@code FAILED}. False when nothing matched.
+     */
+    boolean retryLater(UUID deliveryId, UUID attemptId, Instant nextAttemptAt, String providerErrorCode,
+            String failureCode, Instant at);
+
+    /** H08.5: deliveries waiting for a retry, the earliest first. */
+    List<UUID> retryingDeliveries(int limit);
+
+    /** H08.5: a delivery waiting for a retry, with its summary; {@code lock} takes the row lock. */
+    Optional<RetryingDelivery> retrying(UUID deliveryId, boolean lock);
+
+    /** H08.5: the waiting delivery becomes {@code ATTEMPTING} again, with what was revalidated now. */
+    boolean startRetry(UUID deliveryId, UUID consentId, String recipientLastDigits, int itemCount, Instant at);
+
+    /**
+     * H08.5: ends a waiting delivery without another attempt: {@code SKIPPED} with {@code skipReason}, or
+     * {@code FAILED} with {@code failureCode}. False when it was no longer waiting.
+     */
+    boolean closeRetry(UUID deliveryId, WhatsAppDeliveryStatus status, String skipReason, String failureCode,
+            Instant at);
+
+    /** H08.5: locks the delivery of an attempt (the reference sent to the provider). */
+    Optional<DeliveryRef> lockByAttempt(UUID attemptId);
+
+    /**
+     * H08.5: an uncertain delivery without provider id receives the id the provider reported for its attempt; the
+     * attempt is marked accepted. False when the delivery was not in that situation any more.
+     */
+    boolean reconcile(UUID deliveryId, UUID attemptId, String providerMessageId, Instant at);
+
     /** Deliveries still {@code ATTEMPTING} since before {@code before}: the process stopped mid-call. */
     List<StaleDelivery> staleAttempts(Instant before);
 
@@ -67,5 +100,14 @@ public interface WhatsAppDeliveryRepository {
 
     record StaleDelivery(UUID id, UUID attemptId, UUID spaceId, UUID summaryId) { }
 
-    record DeliveryRef(UUID id, UUID spaceId, UUID summaryId, WhatsAppDeliveryStatus status) { }
+    /** {@code consentId}: the consent the last attempt used (to check it is still the one in force). */
+    record DeliveryRef(UUID id, UUID spaceId, UUID summaryId, WhatsAppDeliveryStatus status, UUID consentId,
+            boolean hasProviderMessageId) {
+        public DeliveryRef(UUID id, UUID spaceId, UUID summaryId, WhatsAppDeliveryStatus status) {
+            this(id, spaceId, summaryId, status, null, true);
+        }
+    }
+
+    /** H08.5: a summary delivery waiting for its next attempt ({@code lastAttempt} = number of the last one). */
+    record RetryingDelivery(UUID id, PlannedSummary summary, int lastAttempt, Instant nextAttemptAt) { }
 }

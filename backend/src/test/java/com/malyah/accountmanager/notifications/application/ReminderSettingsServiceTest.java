@@ -443,6 +443,37 @@ class ReminderSettingsServiceTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    /** H08.5: a suspension shows why and what to correct; enabling again or a new number ends it. */
+    @Test
+    void suspensionIsShownKeptByOtherChangesAndEndedByReenablingOrANewNumber() {
+        enabledWithConsent();
+        repository.stored = repository.stored.suspend(
+                com.malyah.accountmanager.notifications.domain.WhatsAppSuspensionReason.RECIPIENT_INVALID, NOW);
+        var suspended = service.view(A);
+        assertThat(suspended.version()).isEqualTo(4);
+        assertThat(suspended.whatsapp().state()).isEqualTo("SUSPENDED");
+        assertThat(suspended.whatsapp().enabled()).isFalse();
+        assertThat(suspended.whatsapp().consent().active()).isTrue();
+        assertThat(suspended.whatsapp().recipient()).isEqualTo("+5511987654321");
+        assertThat(suspended.whatsapp().suspension().reason()).isEqualTo("RECIPIENT_INVALID");
+        assertThat(suspended.whatsapp().suspension().suspendedAt()).isEqualTo(NOW);
+        assertThat(suspended.whatsapp().suspension().message()).contains("reative o canal");
+        assertThat(service.view(G).whatsapp().state()).isEqualTo("SUSPENDED");
+
+        service.changeSchedule(A, ReminderSettingsCommand.schedule(4L, "08:00", "19:00", key()));
+        assertThat(service.view(A).whatsapp().suspension()).isNotNull();
+        var enabled = service.changeChannel(A, ReminderSettingsCommand.channel(5L, true, key()));
+        assertThat(enabled.whatsapp().suspension()).isNull();
+        assertThat(enabled.whatsapp().enabled()).isTrue();
+        assertThat(repository.stored.suspendedAt()).isNull();
+
+        repository.stored = repository.stored.suspend(
+                com.malyah.accountmanager.notifications.domain.WhatsAppSuspensionReason.PROVIDER_REJECTED, NOW);
+        var changed = service.changeRecipient(A, ReminderSettingsCommand.recipient(7L, N2, key()));
+        assertThat(changed.whatsapp().suspension()).isNull();
+        assertThat(changed.whatsapp().state()).isEqualTo("CONSENT_REQUIRED");
+    }
+
     @Test
     void hashSeparatesParts() {
         assertThat(ReminderSettingsService.hash("ab", "c")).isNotEqualTo(ReminderSettingsService.hash("a", "bc"));

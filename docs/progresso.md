@@ -2,7 +2,7 @@
 
 Versão 1.0 • Atualizado em 29/09/2026.
 
-**Estado atual: E08 em andamento (H08.1, H08.2 e H08.3 concluídas; H08.4 em validação, sem envio real; H08.5 não iniciada).** E07 concluído (H07.1–H07.3). H07.1 (fechar mês com retrato imutável), H07.2 (sinalizar alterações posteriores, calculada a cada consulta) e H07.3 (gerar e consultar versões) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04, E05, E06 e E07 estão concluídos; H03.3 mantém validação independente.
+**Estado atual: E08 em andamento (H08.1, H08.2 e H08.3 concluídas; H08.4 e H08.5 em validação, sem envio real).** E07 concluído (H07.1–H07.3). H07.1 (fechar mês com retrato imutável), H07.2 (sinalizar alterações posteriores, calculada a cada consulta) e H07.3 (gerar e consultar versões) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04, E05, E06 e E07 estão concluídos; H03.3 mantém validação independente.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 29/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 30 de 46 concluídas (H08.4 em validação); E01, E02, E04, E05, E06 e E07 concluídos; E03 depende da validação final de H03.3. |
+| Histórias | 30 de 46 concluídas (H08.4 e H08.5 em validação); E01, E02, E04, E05, E06 e E07 concluídos; E03 depende da validação final de H03.3. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Revisão do PR #14 (H08.3 concluída e H08.4 em validação) por Diego. Para concluir a H08.4: itens da P03 (número, segredos no servidor, templates aprovados, custo, webhook HTTPS) e autorização do primeiro envio real. Depois, H08.5. |
+| Próxima ação | Revisão do PR da H08.5 por Diego. Para concluir a H08.4 e a H08.5 (e fechar o E08): itens da P03 (número, segredos no servidor, templates aprovados, custo, webhook HTTPS) e autorização do primeiro envio real. H09.1 só depois de autorizada. |
 
 ## Estados permitidos
 
@@ -74,7 +74,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H08.2 | Calcular elegibilidade e resumo | Concluído | Job de horários no fuso do espaço: primeiro horário com atrasadas e vencimentos até cinco dias, segundo com hoje e amanhã; janela de uma hora com `MISSED`/`EMPTY`; resumo único por espaço/data/horário com quantidade e total de todas as elegíveis, até cinco detalhes (atrasadas primeiro), excedente, estimativas e link autenticado; avulsas, parcelas e recorrências com materialização antecipada pela fila da H04.2; canais `IN_APP`/`WHATSAPP` planejados ou ignorados sem envio; prévia e página do resumo (V25, T32). 418 Java, JaCoCo 96,22%/91,29%, PIT 91%, 187 ITs em Testcontainers 17.6 (16 da matriz E1–E16), 135 frontend, smoke 15/15 e E2E full-stack aprovados. Evidência: `docs/evidencias/H08.2.md`. |
 | H08.3 | Disponibilizar notificações internas | Concluído | Tela **Avisos** e `/notifications/inbox`: um aviso por resumo para cada membro ativo (convidado só no app), falha de WhatsApp só para o administrador atual com catálogo fixo, ler/dispensar individuais e idempotentes sem quitar nem interromper lembretes, paginação, situação atual separada do resumo histórico e link protegido para a conta (V26, T33). 431 Java, JaCoCo 98,33%/93,70%, PIT 91%, 199 ITs em Testcontainers 17.6 (12 da matriz N1–N14), 143 frontend, smoke 16/16 e E2E full-stack com o job real aprovados. Evidência: `docs/evidencias/H08.3.md`. |
 | H08.4 | Enviar e acompanhar WhatsApp real | Em validação | Envio pela Meta Cloud API ao administrador com consentimento, revalidado imediatamente antes da chamada (fora de transação), aceite distinto de entrega, incerteza sem reenvio, webhook assinado e deduplicado sem regressão, mensagem de teste e acompanhamento na página do resumo (V27, T34). Desligado por padrão. 455 Java, JaCoCo 98,38%/94,06%, PIT 91%, 216 ITs em Testcontainers 17.6 (17 da matriz W1–W21 com servidor Meta **simulado**), 147 frontend, smoke 17/17 e E2E full-stack aprovados. **Sem envio real:** depende da P03 e da autorização do Diego. Evidência: `docs/evidencias/H08.4.md`. |
-| H08.5 | Revalidar e tratar falhas sem acúmulo | Não iniciado | — |
+| H08.5 | Revalidar e tratar falhas sem acúmulo | Em validação | Revalidação antes de cada tentativa (conteúdo recomposto, vazio não sai), novas tentativas só após recusa certa com esperas 1/5/15/30 min (máx. 5) dentro da janela não extensível, `RETRY_WAITING` na mesma entrega, expiração `NOT_SENT_IN_WINDOW`, incerto nunca reenviado e reconciliado pelo webhook (`biz_opaque_callback_data`), suspensão do canal em falha permanente mantendo número e consentimento, retomada segura após reinício e visibilidade ao administrador (V28, T35). 477 Java, JaCoCo 98,44%/94,15%, PIT 91%, 229 ITs em Testcontainers 17.6 (30 de `WhatsAppDeliveryPostgresIT`, matriz R1–R21 com Meta **simulada**), 149 frontend e smoke 18/18 aprovados; E2E full-stack não executado nesta sessão (restrição de horário do teste). **Sem envio real:** depende da P03 e da autorização do Diego. Evidência: `docs/evidencias/H08.5.md`. |
 | H09.1 | Instalar e navegar pelo celular | Não iniciado | — |
 | H09.2 | Capturar ou selecionar imagem | Não iniciado | — |
 | H09.3 | Tratar desconexão de forma clara | Não iniciado | — |
@@ -545,6 +545,25 @@ Condição de conclusão ou desbloqueio: P03 concluída e envio real autorizado,
 Próximo passo: revisão do PR #14 por Diego; itens da P03; H08.5.
 ```
 
+## Registro H08.5
+
+```text
+História / objetivo: H08.5 — Revalidar e tratar falhas sem acúmulo.
+Estado / responsável / data: Em validação / desenvolvimento / 29/09/2026. Falta a demonstração real (resumo real ao administrador e nada ao convidado), que depende da P03 e da autorização do Diego, como a H08.4. E08 continua em andamento.
+Requisitos e critérios de aceite relacionados: H08.5 do backlog; PRD RF-ALT-13 a RF-ALT-20, CA-18/CA-20; especificação 5 e 9.2; pedido de Diego de 29/09/2026.
+Decisões e pendências aplicáveis: T35 registrada; T31–T34 e D13 aplicadas. P03 aberta. Parâmetros de nova tentativa escolhidos de forma conservadora (a documentação não os define).
+Branch / commit / PR: branch `claude/h08-5-revalidacao-falhas-4cy098` a partir de `main` em `51251e0` (PR #14 integrado); PR para `main`. Nada foi publicado, implantado ou enviado.
+Arquivos e comportamento alterados: módulo `notifications` (política de nova tentativa, janela, suspensão, revalidação compartilhada, reconciliação, job, adapter Meta, webhook, JDBC); frontend de Lembretes e do resumo; README, OpenAPI, especificação, decisões, guia de operação e evidência.
+Migrações e impacto sobre dados: V28 amplia `whatsapp_deliveries.status`, adiciona `next_attempt_at`/`reconciled_at`, suspensão em `reminder_settings` e o evento `CHANNEL_SUSPENDED` sem autor. Nenhuma migração aplicada foi editada.
+Testes executados: 477 unitários/HTTP/ArchUnit; 229 ITs Failsafe em Testcontainers `postgres:17.6-alpine` (30 de `WhatsAppDeliveryPostgresIT`, com a Meta simulada); JaCoCo e PIT; 149 Vitest; build Angular; 18 smoke E2E. Todos aprovados.
+Cobertura e mutação aplicáveis: JaCoCo 3789/3849 linhas (98,44%) e 2141/2274 branches (94,15%); PIT 1702/1863 (91%), força 95%; limites mantidos, sem exclusões novas.
+Validação manual / integração real: nenhuma mensagem real; todas as falhas da Meta foram simuladas. E2E full-stack não executado: o teste usa o segundo horário de hoje e só roda antes das 17:55 de São Paulo; a execução com relógio deslocado (libfaketime) deixou a JVM lenta demais e foi descartada. Comando para executar: README, seção de testes E2E.
+Limitações e cenários futuros: comportamento real da Meta (Retry-After, códigos) só no envio real; incerto sem webhook fica incerto; intervalos ajustáveis por decisão do Diego.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/especificacao-tecnica.md, docs/decisoes-pendentes.md, docs/guias/operacao.md, docs/evidencias/H08.5.md e este arquivo.
+Condição de conclusão ou desbloqueio: P03 concluída e envio real autorizado; resumo real entregue ao administrador, nada ao convidado (R22), junto com W23 da H08.4.
+Próximo passo: revisão do PR da H08.5 por Diego; itens da P03. Não iniciar a H09.1 sem autorização.
+```
+
 ## Registro de release: modelo
 
 ```text
@@ -619,3 +638,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 29/09/2026 | H08.2 concluída: calendário de elegibilidade por horário, resumo único por espaço/data/horário com totais, detalhes, estimativas e link autenticado, materialização antecipada de recorrências e canais planejados sem envio; matriz E1–E17 conferida em PostgreSQL 17.6, gates (JaCoCo 96,22%/91,29%, PIT 91%), 135 frontend, smoke 15/15 e E2E full-stack. E08 continua em andamento. |
 | 29/09/2026 | H08.3 concluída: avisos internos por membro na transação do resumo, falhas de WhatsApp só para o administrador atual, ler/dispensar idempotentes e situação atual separada do resumo; matriz N1–N14 conferida em PostgreSQL 17.6, gates (JaCoCo 98,33%/93,70%, PIT 91%), 143 frontend, smoke 16/16 e E2E full-stack com o job real. Checkpoint atendido; H08.4 iniciada.
 | 29/09/2026 | H08.4 em validação: envio pela Meta Cloud API com revalidação antes da chamada, aceite distinto de entrega, incerteza sem reenvio, webhook assinado e mensagem de teste; matriz W1–W22 conferida com servidor Meta simulado em PostgreSQL 17.6, gates (JaCoCo 98,38%/94,06%, PIT 91%), 147 frontend, smoke 17/17 e E2E full-stack. Sem envio real: depende da P03 e da autorização do Diego.
+| 29/09/2026 | H08.5 em validação: revalidação antes de cada tentativa, novas tentativas só após recusa certa dentro da janela não extensível, incerto nunca reenviado e reconciliado pelo webhook, suspensão do canal em falha permanente e retomada segura após reinício; matriz R1–R21 com Meta simulada em PostgreSQL 17.6, gates (JaCoCo 98,44%/94,15%, PIT 91%), 149 frontend e smoke 18/18. Sem envio real (P03); E08 não concluído. |

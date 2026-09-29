@@ -31,7 +31,12 @@
               @for (step of whatsappSteps(w); track step.label) { <li>{{ step.label }}: {{ step.at }}</li> }
             </ul>
           }
-          <p class="hint">Aceito pela Meta não significa entregue: a entrega e a leitura chegam depois pelo webhook. Nada é reenviado automaticamente, e pagar continua sendo só no aplicativo.</p>
+          @if (w.attempts.length > 1) {
+            <ul class="whatsapp-steps" data-testid="whatsapp-attempts">
+              @for (line of attemptLines(w); track line) { <li>{{ line }}</li> }
+            </ul>
+          }
+          <p class="hint">Aceito pela Meta não significa entregue: a entrega e a leitura chegam depois pelo webhook. Só há nova tentativa quando a Meta comprovadamente não recebeu, e no máximo até uma hora depois do horário; resultado incerto nunca é reenviado. Pagar continua sendo só no aplicativo.</p>
         </mat-card-content>
       </mat-card>
     }

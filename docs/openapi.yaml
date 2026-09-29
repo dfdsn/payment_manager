@@ -2021,6 +2021,8 @@ paths:
         Situação da entrega lógica do resumo (uma por resumo), com número mascarado, quantidade de contas enviadas e os
         instantes de tentativa, aceite, envio, entrega, leitura ou falha. Aceite da Meta (ACCEPTED) não é entrega.
         NOT_PLANNED quando o canal não estava pronto na geração; WAITING quando previsto e ainda não tentado.
+        H08.5: RETRY_WAITING com nextAttemptAt, uma linha por tentativa em attempts e reconciledAt quando um resultado
+        incerto foi confirmado pelo webhook. Não há reenvio manual.
       security:
         - sessionCookie: []
       parameters:
@@ -3177,7 +3179,15 @@ components:
                 available: { type: boolean }
                 code: { type: string, enum: [PROVIDER_DISABLED, PROVIDER_NOT_CONFIGURED, PROVIDER_READY], description: 'H08.4: adapter da Meta; desligado por padrão.' }
                 message: { type: string }
-            state: { type: string, enum: [RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, PROVIDER_UNAVAILABLE, READY] }
+            state: { type: string, enum: [RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, SUSPENDED, PROVIDER_UNAVAILABLE, READY], description: 'H08.5: SUSPENDED quando uma falha permanente desativou o canal; número e consentimento continuam valendo.' }
+            suspension:
+              type: [object, 'null']
+              description: H08.5. Motivo da suspensão e o que corrigir; null quando o canal não está suspenso. Some ao reativar ou ao salvar outro número.
+              required: [reason, suspendedAt, message]
+              properties:
+                reason: { type: string, enum: [RECIPIENT_INVALID, PROVIDER_REJECTED] }
+                suspendedAt: { type: string, format: date-time }
+                message: { type: string }
             consentTextVersion: { type: string, example: WHATSAPP-RESUMOS-V1 }
             consentText: { type: string }
     ReminderSettingsEvents:
@@ -3190,8 +3200,8 @@ components:
             type: object
             required: [type, actorDisplayName, occurredAt, fromVersion, toVersion, detail]
             properties:
-              type: { type: string, enum: [SCHEDULE_CHANGED, RECIPIENT_CHANGED, CONSENT_GRANTED, CONSENT_REVOKED, CHANNEL_ENABLED, CHANNEL_DISABLED] }
-              actorDisplayName: { type: string }
+              type: { type: string, enum: [SCHEDULE_CHANGED, RECIPIENT_CHANGED, CONSENT_GRANTED, CONSENT_REVOKED, CHANNEL_ENABLED, CHANNEL_DISABLED, CHANNEL_SUSPENDED] }
+              actorDisplayName: { type: string, description: 'H08.5: "Sistema" em CHANNEL_SUSPENDED.' }
               occurredAt: { type: string, format: date-time }
               fromVersion: { type: integer }
               toVersion: { type: integer }
@@ -3246,14 +3256,14 @@ components:
       description: H08.4. Número sempre mascarado; nenhum id da Meta, token ou texto do provedor.
       required: [state, stateMessage, kind, attempts]
       properties:
-        state: { type: string, enum: [NOT_PLANNED, WAITING, ATTEMPTING, ACCEPTED, SENT, DELIVERED, READ, FAILED, REJECTED, UNCERTAIN, SKIPPED] }
+        state: { type: string, description: 'H08.5: RETRY_WAITING enquanto uma nova tentativa do mesmo resumo espera, dentro da janela.', enum: [NOT_PLANNED, WAITING, ATTEMPTING, RETRY_WAITING, ACCEPTED, SENT, DELIVERED, READ, FAILED, REJECTED, UNCERTAIN, SKIPPED] }
         stateMessage: { type: string, example: Aceito pela Meta. A entrega ainda não foi confirmada. }
         kind: { type: string, enum: [SUMMARY, TEST] }
         reason:
           type: [string, 'null']
           description: >-
-            Motivo de SKIPPED (ADMINISTRATOR_CHANGED, CONSENT_REVOKED, RECIPIENT_CHANGED, DISABLED, PROVIDER_UNAVAILABLE,
-            WINDOW_CLOSED, EMPTY), de falha (catálogo WhatsAppFailureReason) ou, em NOT_PLANNED, o estado do canal na geração.
+            Motivo de SKIPPED (ADMINISTRATOR_CHANGED, CONSENT_REVOKED, RECIPIENT_CHANGED, DISABLED, SUSPENDED,
+            PROVIDER_UNAVAILABLE, WINDOW_CLOSED, EMPTY), de falha (catálogo WhatsAppFailureReason) ou, em NOT_PLANNED, o estado do canal na geração.
         reasonMessage: { type: [string, 'null'] }
         recipientMasked: { type: [string, 'null'], example: "+55 ** *****-4321" }
         itemCount: { type: [integer, 'null'] }
@@ -3264,6 +3274,8 @@ components:
         deliveredAt: { type: [string, 'null'], format: date-time }
         readAt: { type: [string, 'null'], format: date-time }
         failedAt: { type: [string, 'null'], format: date-time }
+        nextAttemptAt: { type: [string, 'null'], format: date-time, description: H08.5. Próxima tentativa marcada (só em RETRY_WAITING). }
+        reconciledAt: { type: [string, 'null'], format: date-time, description: H08.5. Resultado incerto confirmado depois pelo webhook. }
         attempts:
           type: array
           items:
@@ -3332,7 +3344,7 @@ components:
             properties:
               channel: { type: string, enum: [IN_APP, WHATSAPP] }
               status: { type: string, enum: [PLANNED, SKIPPED] }
-              reason: { type: [string, 'null'], enum: [RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, PROVIDER_UNAVAILABLE, null] }
+              reason: { type: [string, 'null'], enum: [RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, SUSPENDED, PROVIDER_UNAVAILABLE, null] }
     ClosingVersionList:
       type: object
       required: [month, versions]
