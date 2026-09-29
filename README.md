@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) e H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, e H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -802,4 +802,44 @@ Teste manual (continua o do painel):
 5. Escolha um mês sem pagamentos: “Nenhum pagamento neste mês com os filtros escolhidos.” e todos os valores em R$ 0,00.
 
 Testes: os mesmos de H06.1 (`ReportingPostgresIT` cobre as duas visões).
+
+## Planejamento dos próximos meses (H06.3)
+
+Em `/planejamento` (link **Planejamento** em Despesas, no painel e em Pagamentos) fica **quanto está comprometido no mês atual e nos 12 seguintes**, pelo vencimento e no fuso do espaço.
+
+- **O que entra:** despesas já lançadas (avulsas, parcelas e ocorrências de recorrência, pendentes ou pagas) e **previsões** das recorrências ativas cujo período ainda não virou lançamento. Canceladas e o cabeçalho da compra parcelada não entram. Não há receitas, saldo nem orçamento.
+- **Sem dupla contagem:** a previsão e o lançamento da mesma ocorrência (recorrência + período) nunca aparecem juntos. Quando a ocorrência é gerada, antecipada, remarcada, paga ou cancelada, o lançamento prevalece com seus dados reais; o período cancelado não volta como previsão.
+- **Alteração e encerramento:** as previsões usam o valor, a descrição, a categoria e o responsável vigentes em cada período; depois do encerramento não há previsões. Previsão de categoria arquivada ou de responsável que saiu do espaço aparece sem eles, como a geração gravaria.
+- **Indicadores** (horizonte e cada mês, sobre toda a seleção): total planejado; lançamentos × previsões; confirmado × **a confirmar** (estimativas); **já pago** (pelo valor efetivamente pago) e **em aberto** (pendentes + previsões); composição avulsas/parcelas/recorrências.
+- **Filtros:** descrição, categoria/sem categoria e responsável/sem responsável, aplicados a lançamentos, previsões e totais. A lista mostra um mês por vez (botão **Ver** na tabela mês a mês), por data, 20 por página.
+- **Somente leitura:** abrir o planejamento não gera lançamentos nem grava nada.
+
+```text
+GET /api/v1/reports/planning?month=2026-12&categoryId=<uuid>&page=0&size=20
+→ 200 {"horizonStart": "2026-10", "horizonEnd": "2027-10", "dateBasis": "DUE_DATE", "today": "2026-10-15",
+       "totals": {"count": 39, "plannedTotal": "6900.00", "confirmedTotal": "5220.00", "estimatedTotal": "1680.00",
+                  "materializedCount": 11, "materializedTotal": "3770.00", "forecastCount": 28, "forecastTotal": "3130.00",
+                  "paidCount": 2, "paidTotal": "980.00", "openCount": 37, "openTotal": "5900.00", ...},
+       "months": [{"month": "2026-10", "totals": {...}}, ...13 meses],
+       "month": "2026-12", "monthTotals": {...},
+       "content": [{"kind": "EXPENSE", "description": "Luz", "date": "2026-12-02", "amount": "210.00", "estimated": true,
+                    "status": "PENDING", ...},
+                   {"kind": "FORECAST", "recurrenceId": "...", "description": "Internet", "date": "2026-12-05",
+                    "amount": "100.00", "estimated": false, "status": "FORECAST", ...}],
+       "page": 0, "size": 20, "totalElements": 4, "totalPages": 1}
+```
+
+Erros: `400 REPORT_QUERY_INVALID` (mês fora do horizonte, página negativa, tamanho fora de 1–100, filtros incompatíveis), `401` sem sessão e `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`.
+
+Teste manual:
+
+1. Cadastre uma recorrência fixa de R$ 100,00 vencendo no dia 5 a partir do mês que vem. Em **Planejamento**, cada mês do horizonte a partir do próximo mostra R$ 100,00 em **Previsões**.
+2. Em **Recorrências**, antecipe o lançamento do próximo mês. No planejamento, esse mês passa a mostrar o valor em **Lançamentos** e não mais em Previsões; o total não muda.
+3. Remarque esse lançamento para o mês seguinte em Despesas: ele aparece no mês novo como lançamento, junto com a previsão daquele mês, e o mês antigo fica sem o valor.
+4. Cancele o lançamento: o valor some e o período não volta como previsão.
+5. Cadastre uma recorrência variável de R$ 180,00: seus valores aparecem **a confirmar** e somam no indicador “A confirmar”.
+6. Encerre a recorrência: as previsões depois do último vencimento somem.
+7. Filtre por uma categoria: totais, meses e lista mudam juntos.
+
+Testes: `PlanningPostgresIT` (matriz M1–M14 em PostgreSQL real), `PlanningDomainTest`, `PlanningServiceTest`, `planning.component.spec.ts`, smoke E2E e E2E full-stack. Evidência: `docs/evidencias/H06.3.md`.
 

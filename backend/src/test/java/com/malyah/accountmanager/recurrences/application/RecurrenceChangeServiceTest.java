@@ -13,6 +13,7 @@ import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -261,6 +262,46 @@ class RecurrenceChangeServiceTest {
         assertThat(forecast.get(2)).satisfies(f->{assertThat(f.reviewReason()).isEqualTo("OUTSIDE_SCHEDULE");
             assertThat(f.state()).isEqualTo("MATERIALIZED"); assertThat(f.estimated()).isFalse();});
         assertThat(forecast.get(3).actualDueDate()).isEqualTo(LocalDate.of(2027,1,12));
+    }
+
+    @Test void plannedForecastsKeepOnlyUnmaterializedPeriodsWithTheCategoryAndResponsibleTheGenerationWouldUse() {
+        var other=UUID.randomUUID();
+        var stored=new StoredSchedule(new StoredRecurrence(definition(RecurrenceValueType.VARIABLE_ESTIMATE,1,
+                LocalDate.of(2027,1,15)),null,null,"Ana"),List.of(
+                new RecurrenceSegment(YearMonth.of(2026,8),config(),true),
+                new RecurrenceSegment(YearMonth.of(2026,11),new RecurrenceConfiguration("Aluguel novo",new BigDecimal("1200"),
+                        RecurrenceFrequency.MONTHLY,15,CATEGORY,RESPONSIBLE),true),
+                new RecurrenceSegment(YearMonth.of(2027,1),new RecurrenceConfiguration("Aluguel novo",new BigDecimal("1200"),
+                        RecurrenceFrequency.MONTHLY,15,other,other),false)),
+                List.of(new RecurrenceSegmentView(LocalDate.of(2026,8,1),"Aluguel","1000.00",RecurrenceFrequency.MONTHLY,10,
+                                null,null,null,null),
+                        new RecurrenceSegmentView(LocalDate.of(2026,11,1),"Aluguel novo","1200.00",RecurrenceFrequency.MONTHLY,
+                                15,CATEGORY,"Casa",RESPONSIBLE,"Bia"),
+                        new RecurrenceSegmentView(LocalDate.of(2027,1,1),"Aluguel novo","1200.00",RecurrenceFrequency.MONTHLY,
+                                15,other,"Arquivada",other,"Ex-membro")),null,null,null);
+        when(repository.findSchedules(SPACE)).thenReturn(List.of(stored));
+        when(repository.findOccurrences(eq(SPACE),any(),any())).thenReturn(List.of(
+                new StoredOccurrence(ID,LocalDate.of(2026,10,10),oct,LocalDate.of(2026,10,10),"PENDING",new BigDecimal("1000"),false),
+                new StoredOccurrence(ID,LocalDate.of(2026,12,15),dec,LocalDate.of(2026,12,15),"CANCELLED",new BigDecimal("1200"),false)));
+        when(repository.generationEligibility(SPACE)).thenReturn(new GenerationEligibility(Set.of(CATEGORY),Set.of(RESPONSIBLE)));
+        var catalog=new RecurrenceForecastCatalog(service);
+
+        var planned=catalog.unmaterialized(SPACE,YearMonth.of(2026,9),YearMonth.of(2027,9));
+
+        assertThat(planned).extracting(PlannedForecast::dueDate).containsExactly(LocalDate.of(2026,9,10),
+                LocalDate.of(2026,11,15),LocalDate.of(2027,1,15));
+        assertThat(planned.getFirst()).satisfies(f->{assertThat(f.description()).isEqualTo("Aluguel");
+            assertThat(f.amount()).isEqualByComparingTo("1000.00"); assertThat(f.estimated()).isTrue();
+            assertThat(f.categoryId()).isNull(); assertThat(f.categoryName()).isNull();
+            assertThat(f.responsibleUserId()).isNull(); assertThat(f.responsibleDisplayName()).isNull();
+            assertThat(f.recurrenceId()).isEqualTo(ID);});
+        assertThat(planned.get(1)).satisfies(f->{assertThat(f.amount()).isEqualByComparingTo("1200");
+            assertThat(f.categoryId()).isEqualTo(CATEGORY); assertThat(f.categoryName()).isEqualTo("Casa");
+            assertThat(f.responsibleUserId()).isEqualTo(RESPONSIBLE); assertThat(f.responsibleDisplayName()).isEqualTo("Bia");});
+        // An archived category and a member who left are dropped, as the materialization does.
+        assertThat(planned.get(2)).satisfies(f->{assertThat(f.categoryId()).isNull(); assertThat(f.categoryName()).isNull();
+            assertThat(f.responsibleUserId()).isNull(); assertThat(f.responsibleDisplayName()).isNull();});
+        verify(repository,never()).claimChange(any(),any(),any(),anyString(),any(),any());
     }
 
     private static RecurringOccurrenceSnapshot snapshot(UUID id,LocalDate scheduled,String status,boolean confirmed,String amount,

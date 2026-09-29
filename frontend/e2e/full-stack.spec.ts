@@ -458,6 +458,33 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByText('Parcela 1/3 · compra parcelada')).toBeVisible();
   await expect(page.getByText('Parcela 2/3 · compra parcelada')).toBeVisible();
 
+  // H06.3: planning over the real data; the cancelled 3/3 is out and nothing is counted twice.
+  await page.goto('/planejamento');
+  await expect(page.getByRole('heading', { name: 'Planejamento dos próximos meses' })).toBeVisible();
+  await page.getByLabel('Buscar na descrição').fill('Sofá parcelado');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByTestId('planning-total')).toHaveText(/R\$\s*100,00/);
+  await expect(page.getByTestId('planning-materialized')).toContainText('(4)');
+  await expect(page.getByTestId('planning-forecast')).toContainText('(0)');
+  await page.getByRole('button', { name: 'Ver janeiro de 2027' }).click();
+  await expect(page.getByTestId('planning-month-title')).toHaveText(/janeiro de 2027: R\$\s*33,33/i);
+  await expect(page.getByTestId('planning-item')).toHaveCount(1);
+  await expect(page.getByTestId('planning-item')).toContainText('Parcela 1/3');
+  await expect(page.getByTestId('planning-item')).toContainText('Paga em');
+  await page.getByLabel('Buscar na descrição').fill('Condomínio recorrente');
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  // January was anticipated: only the entry shows; February onwards are forecasts of the same recurrence.
+  await expect(page.getByTestId('planning-month-title')).toHaveText(/janeiro de 2027: R\$\s*500,00/i);
+  await expect(page.getByTestId('planning-item')).toHaveCount(1);
+  await expect(page.getByTestId('planning-item')).toContainText('Lançamento');
+  await page.getByRole('button', { name: 'Ver fevereiro de 2027' }).click();
+  await expect(page.getByTestId('planning-item')).toHaveCount(1);
+  await expect(page.getByTestId('planning-item')).toContainText('Previsão (ainda não gerada)');
+  const anonymousPlanningStatus = await page.evaluate(async () => (await fetch('/api/v1/reports/planning', {
+    credentials: 'omit',
+  })).status);
+  expect(anonymousPlanningStatus).toBe(401);
+
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);

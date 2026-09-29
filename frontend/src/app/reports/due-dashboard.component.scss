@@ -25,12 +25,14 @@
 .error-summary { border-color: #ba1a1a; background: #ffdad6; }
 .empty-state { border-color: #52677d; background: #e9eef5; }
 .loading { color: #354a5f; }
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; position: relative; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
 th.amount, td.amount { text-align: right; white-space: nowrap; }
 tr.overdue td { color: #a00; }
 tr.muted td { color: #666; text-decoration: line-through; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+tr[aria-current='true'] th, tr[aria-current='true'] td { background: #eef3f9; }
 .pagination { display: flex; justify-content: center; align-items: center; gap: .75rem; margin-top: .75rem; }
 @media (max-width: 48rem) {
   .filters { grid-template-columns: 1fr; }

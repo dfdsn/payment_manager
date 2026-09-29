@@ -394,6 +394,41 @@ public final class RecurrenceService implements RecurrenceUseCase {
      * always shown, even outside the current schedule, unless it was cancelled and left the program.
      */
     private ForecastPeriodView forecasts(UUID spaceId,YearMonth from,YearMonth to) {
+        var result=new ArrayList<ForecastView>(reconcile(spaceId,from,to).stream().map(Reconciled::view).toList());
+        result.sort(Comparator.comparing(ForecastView::scheduledDueDate).thenComparing(ForecastView::recurrenceId));
+        return new ForecastPeriodView(from,to,List.copyOf(result));
+    }
+
+    /**
+     * H06.3: the forecasts of the period that have no materialized occurrence (same reconciliation by recurrence and
+     * period as {@link #forecasts(String)}), with the category and responsible the generation would use: an archived
+     * category or a member who left becomes none, as in the materialization. Nothing is written.
+     */
+    public List<PlannedForecast> plannedForecasts(UUID spaceId,YearMonth from,YearMonth to) {
+        var eligibility=repository.generationEligibility(spaceId);
+        var result=new ArrayList<PlannedForecast>();
+        for(var item:reconcile(spaceId,from,to)) {
+            if(!"FORECAST".equals(item.view().state())) continue;
+            var segment=item.stored().schedule().segmentFor(item.month());
+            var configuration=segment.configuration();
+            var names=item.stored().segmentViews().stream()
+                    .filter(v->YearMonth.from(v.effectiveMonth()).equals(segment.effectiveMonth())).findFirst();
+            var category=configuration.categoryId()!=null&&eligibility.activeCategoryIds().contains(configuration.categoryId())
+                    ?configuration.categoryId():null;
+            var responsible=configuration.responsibleUserId()!=null
+                    &&eligibility.activeMemberIds().contains(configuration.responsibleUserId())
+                    ?configuration.responsibleUserId():null;
+            result.add(new PlannedForecast(item.view().recurrenceId(),item.view().scheduledDueDate(),
+                    item.view().description(),new BigDecimal(item.view().amount()),item.view().estimated(),category,
+                    category==null?null:names.map(RecurrenceSegmentView::categoryName).orElse(null),responsible,
+                    responsible==null?null:names.map(RecurrenceSegmentView::responsibleDisplayName).orElse(null)));
+        }
+        result.sort(Comparator.comparing(PlannedForecast::dueDate)
+                .thenComparing(f->f.recurrenceId().toString()));
+        return List.copyOf(result);
+    }
+
+    private List<Reconciled> reconcile(UUID spaceId,YearMonth from,YearMonth to) {
         Map<PeriodKey,StoredOccurrence> actual=repository.findOccurrences(spaceId,from.atDay(1),to.atEndOfMonth())
                 .stream().collect(Collectors.toMap(o->new PeriodKey(o.recurrenceId(),YearMonth.from(o.scheduledDueDate())),
                         Function.identity(),(a,b)->a));
@@ -401,7 +436,7 @@ public final class RecurrenceService implements RecurrenceUseCase {
                 .stream().collect(Collectors.groupingBy(StoredOccurrence::recurrenceId,Collectors.mapping(
                         o->new VariableEstimateReference.ConfirmedCharge(o.scheduledDueDate(),o.amount()),
                         Collectors.toList())));
-        var result=new ArrayList<ForecastView>();
+        var result=new ArrayList<Reconciled>();
         for(var stored:repository.findSchedules(spaceId)) {
             var id=stored.recurrence().definition().id();
             var schedule=stored.schedule();
@@ -411,19 +446,19 @@ public final class RecurrenceService implements RecurrenceUseCase {
                 var materialized=actual.get(new PeriodKey(id,month));
                 if(materialized!=null&&(scheduled.isPresent()||!"CANCELLED".equals(materialized.status()))) {
                     var description=schedule.segmentFor(month).configuration().description();
-                    result.add(new ForecastView(id,description,materialized.amount().setScale(2).toPlainString(),
+                    result.add(new Reconciled(stored,month,new ForecastView(id,description,
+                            materialized.amount().setScale(2).toPlainString(),
                             !materialized.chargeConfirmed()&&variable,materialized.scheduledDueDate(),"MATERIALIZED",
                             materialized.expenseId(),materialized.actualDueDate(),materialized.status(),
-                            materialized.chargeConfirmed(),materialized.reviewReason()));
+                            materialized.chargeConfirmed(),materialized.reviewReason())));
                 } else if(scheduled.isPresent()) {
                     var projected=projection(schedule,variable,confirmed.getOrDefault(id,List.of()),month).orElseThrow();
-                    result.add(new ForecastView(id,projected.description(),projected.amount(),variable,
-                            projected.dueDate(),"FORECAST",null,null,null,false));
+                    result.add(new Reconciled(stored,month,new ForecastView(id,projected.description(),
+                            projected.amount(),variable,projected.dueDate(),"FORECAST",null,null,null,false)));
                 }
             }
         }
-        result.sort(Comparator.comparing(ForecastView::scheduledDueDate).thenComparing(ForecastView::recurrenceId));
-        return new ForecastPeriodView(from,to,List.copyOf(result));
+        return result;
     }
 
     private RecurrenceView view(StoredSchedule stored, YearMonth current, List<RecurrenceChangeView> changes) {
@@ -529,6 +564,7 @@ public final class RecurrenceService implements RecurrenceUseCase {
     }
 
     private record PeriodKey(UUID recurrenceId, YearMonth month) { }
+    private record Reconciled(StoredSchedule stored, YearMonth month, ForecastView view) { }
     private record Target(StoredSchedule stored, RecurrenceSchedule.ScheduledOccurrence occurrence) { }
     private record Projection(LocalDate dueDate, String amount, String description) { }
 

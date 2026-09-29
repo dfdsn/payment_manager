@@ -440,3 +440,66 @@ test('H06.2 shows active payments by payment date with payer, recorder and corre
   expect(last.searchParams.get('sort')).toBe('PAID_AMOUNT');
   expect(last.searchParams.get('page')).toBe('0');
 });
+
+test('H06.3 shows the integrated planning with forecasts marked, month drill-down and filters on the whole set', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const calls: URL[] = [];
+  const totals = (planned: string, forecast: string, estimated: string) => ({ count: 3, plannedTotal: planned,
+    confirmedTotal: '1200.00', estimatedTotal: estimated, materializedCount: 2, materializedTotal: '1300.00', forecastCount: 1,
+    forecastTotal: forecast, paidCount: 0, paidTotal: '0.00', openCount: 3, openTotal: planned, oneOffTotal: '1200.00',
+    installmentTotal: '0.00', recurrenceTotal: '280.00' });
+  const months = ['2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04', '2027-05',
+    '2027-06', '2027-07', '2027-08', '2027-09'];
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([{ id: 'casa', name: 'Casa', archived: false }])));
+  await page.route('**/api/v1/expenses/filter-options', route => route.fulfill(json({ responsiblePeople: [], payerPeople: [] })));
+  await page.route('**/api/v1/reports/planning**', route => {
+    const url = new URL(route.request().url());
+    calls.push(url);
+    const month = url.searchParams.get('month') ?? '2026-09';
+    const filtered = url.searchParams.get('categoryId') === 'casa';
+    const monthTotals = month === '2026-09' ? totals(filtered ? '1300.00' : '1480.00', filtered ? '100.00' : '180.00', '180.00')
+      : totals('0.00', '0.00', '0.00');
+    route.fulfill(json({ horizonStart: '2026-09', horizonEnd: '2027-09', periodStart: '2026-09-01', periodEnd: '2027-09-30',
+      dateBasis: 'DUE_DATE', today: '2026-09-29', timeZone: 'America/Sao_Paulo',
+      totals: totals(filtered ? '1300.00' : '1480.00', filtered ? '100.00' : '180.00', '180.00'),
+      months: months.map(value => ({ month: value, totals: value === '2026-09' ? monthTotals : totals('0.00', '0.00', '0.00') })),
+      month, monthTotals,
+      content: month !== '2026-09' ? [] : [
+        { kind: 'EXPENSE', expenseId: 'car', recurrenceId: null, origin: 'ONE_OFF', installment: null,
+          description: 'Seguro do carro com descrição longa para testar a quebra em telas estreitas', date: '2026-09-10',
+          dueDate: '2026-09-10', amount: '1200.00', estimated: false, status: 'PENDING', overdue: true, paidAmount: null,
+          paymentDate: null, categoryName: 'Casa', responsibleDisplayName: null },
+        { kind: 'FORECAST', expenseId: null, recurrenceId: 'luz', origin: 'RECURRENCE', installment: null,
+          description: 'Luz', date: '2026-09-20', dueDate: '2026-09-20', amount: '180.00', estimated: true, status: 'FORECAST',
+          overdue: false, paidAmount: null, paymentDate: null, categoryName: null, responsibleDisplayName: null },
+      ],
+      page: 0, size: 20, totalElements: month === '2026-09' ? 2 : 0, totalPages: month === '2026-09' ? 1 : 0 }));
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/planejamento');
+  await expect(page.getByRole('heading', { name: 'Planejamento dos próximos meses' })).toBeVisible();
+  await expect(page.getByText('Base temporal: vencimento')).toBeVisible();
+  await expect(page.getByText(/Não mostra receitas, saldo nem orçamento/)).toBeVisible();
+  await expect(page.getByTestId('planning-total')).toHaveText(/R\$\s*1\.480,00/);
+  await expect(page.getByTestId('planning-forecast')).toContainText('(1)');
+  await expect(page.getByTestId('planning-item')).toHaveCount(2);
+  await expect(page.getByTestId('planning-item').nth(1)).toContainText('Previsão');
+  await expect(page.getByTestId('planning-item').nth(1)).toContainText('a confirmar');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  expect(calls[0].searchParams.has('month')).toBe(false);
+
+  await page.getByLabel('Categoria').selectOption({ label: 'Casa' });
+  await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await expect(page.getByTestId('planning-total')).toHaveText(/R\$\s*1\.300,00/);
+  expect(calls[calls.length - 1].searchParams.get('categoryId')).toBe('casa');
+
+  await page.getByRole('button', { name: 'Ver novembro de 2026' }).click();
+  await expect(page.getByText('Nenhuma despesa nem previsão neste mês com os filtros escolhidos.')).toBeVisible();
+  const last = calls[calls.length - 1];
+  expect(last.searchParams.get('month')).toBe('2026-11');
+  expect(last.searchParams.get('categoryId')).toBe('casa');
+  expect(last.searchParams.get('page')).toBe('0');
+});

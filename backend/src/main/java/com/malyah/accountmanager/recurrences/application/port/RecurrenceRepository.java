@@ -38,4 +38,7 @@ public interface RecurrenceRepository {
     com.malyah.accountmanager.recurrences.application.RecurrenceChangeView findChange(UUID spaceId, UUID changeId);
     /** Applied changes and closures of the space, oldest first, grouped by recurrence. */
     java.util.Map<UUID, List<com.malyah.accountmanager.recurrences.application.RecurrenceChangeView>> findChanges(UUID spaceId);
+
+    /** H06.3: categories and members a generation could still record in the space. */
+    com.malyah.accountmanager.recurrences.application.GenerationEligibility generationEligibility(UUID spaceId);
 }

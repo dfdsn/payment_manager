@@ -1,8 +1,8 @@
 # Progresso de implementação — account_Manager
 
-Versão 1.0 • Atualizado em 28/09/2026.
+Versão 1.0 • Atualizado em 29/09/2026.
 
-**Estado atual: H05.3 concluída; E05 concluído (H05.1–H05.3); E04 concluído.** H05.3 altera parcelas pendentes por alcance, recalcula vencimentos seguintes e cancela as pendentes selecionadas com motivo e nova compra opcional com o restante, sempre depois de revisar o impacto calculado pelo servidor. Gates, 88 ITs em PostgreSQL 16 local, 6 smoke E2E e o E2E full-stack local passaram em 28/09/2026, e a CI `36494395974` (commit `7483e3c`) aprovou os 88 ITs em Testcontainers 17.6. E01, E02, E04 e E05 estão concluídos; H03.3 mantém validação independente.
+**Estado atual: H06.3 concluída; H06.4 em andamento.** H06.1 (painel por vencimento), H06.2 (pagamentos pela data efetiva) e H06.3 (planejamento integrado do mês atual e dos 12 seguintes, com lançamentos e previsões sem dupla contagem) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04 e E05 estão concluídos; H03.3 mantém validação independente.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 28/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 20 de 46 concluídas; E01, E02, E04 e E05 concluídos; E03 depende da validação final de H03.3. |
+| Histórias | 23 de 46 concluídas; E01, E02, E04 e E05 concluídos; E06 com H06.1–H06.3 concluídas e H06.4 em andamento; E03 depende da validação final de H03.3. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Revisar e mesclar o PR #8 (H05.2 e H05.3) e iniciar E06 (H06.1, dashboard por vencimento). |
+| Próxima ação | Concluir H06.4 (CSV filtrado) no mesmo PR da H06.3 e encerrar o E06. |
 
 ## Estados permitidos
 
@@ -65,8 +65,8 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H05.3 | Ajustar e cancelar parcelas pendentes | Concluído | Alteração de descrição, categoria, responsável e vencimento “só esta” ou “esta e as próximas pendentes” com recálculo mensal; cancelamento das pendentes selecionadas com motivo e nova compra opcional com o restante, na mesma transação; impacto revisado protegido por token; pagas preservadas; V21. 215 Java, JaCoCo 93,43%/85,36%, PIT 85%, 88 ITs em PostgreSQL 16 local, 88 frontend, build, 6 smoke e E2E full-stack local aprovados. CI `36494395974` (commit `7483e3c`) aprovou os 88 ITs em Testcontainers 17.6. Evidência: `docs/evidencias/H05.3.md`. |
 | H06.1 | Consultar dashboard por vencimento | Concluído | Painel `/painel` e `GET /reports/due-dashboard`: previsto, pago, pendente, atrasado, ajustes e pendências anteriores somados no PostgreSQL com o mesmo predicado da lista; sem migração. 236 Java, JaCoCo 93,99%/86,76%, PIT 87%, 95 ITs em Testcontainers 17.6 (7 da matriz), 96 frontend, smoke 7/7 e E2E full-stack aprovados. Evidência: `docs/evidencias/H06.1.md`. |
 | H06.2 | Consultar pagamentos e ajustes | Concluído | `/pagamentos` e `GET /reports/payments`: quitações ativas pela data efetiva, totais pela mesma porta do painel, pagador, autor, lote e última correção da quitação ativa; reversão retira e nova quitação conta uma vez; sem migração. 245 Java, JaCoCo 94,24%/86,98%, PIT 87%, 100 ITs em Testcontainers 17.6 (12 de relatórios), 101 frontend, smoke 8/8 e E2E full-stack aprovados; regressão H06.1 aprovada. Evidência: `docs/evidencias/H06.2.md`. |
-| H06.3 | Consultar planejamento futuro integrado | Não iniciado | — |
-| H06.4 | Exportar CSV filtrado | Não iniciado | — |
+| H06.3 | Consultar planejamento futuro integrado | Concluído | `/planejamento` e `GET /reports/planning`: mês atual + 12, lançamentos ativos (avulsas, parcelas, recorrências) e previsões ainda não lançadas reconciliadas pela identidade da ocorrência, estimado × confirmado, já pago e em aberto, por mês e origem; filtros em tudo; nada é gravado; sem migração. 261 Java, JaCoCo 97,79%/91,17%, PIT 88%, 106 ITs em Testcontainers 17.6 (6 da matriz M1–M14), 107 frontend, smoke 9/9 e E2E full-stack aprovados; regressão H06.1/H06.2 aprovada. Evidência: `docs/evidencias/H06.3.md`. |
+| H06.4 | Exportar CSV filtrado | Em andamento | Iniciada depois do checkpoint da H06.3 (sete condições atendidas). |
 | H07.1 | Fechar mês com resumo | Não iniciado | — |
 | H07.2 | Sinalizar alterações posteriores | Não iniciado | — |
 | H07.3 | Gerar e consultar versões | Não iniciado | — |
@@ -552,3 +552,4 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 28/09/2026 | H05.3 implementou alteração e cancelamento de parcelas pendentes com revisão do impacto protegida por token, recálculo mensal de vencimentos, nova compra opcional com o restante na mesma transação e auditoria por parcela (V21). Regressão: 215 Java, 88 ITs em PostgreSQL 16 local, JaCoCo 93,43%/85,36%, PIT 85%/força 92%, 88 frontend, build, 6 smoke E2E e E2E full-stack local aprovados. CI `36494395974` (commit `7483e3c`) aprovada; H05.3 e E05 concluídos. |
 | 29/09/2026 | H06.1 concluída: painel por vencimento com matriz conferida em PostgreSQL 17.6, gates (JaCoCo 93,99%/86,76%, PIT 87%), frontend, smoke e E2E full-stack. Checkpoint atendido; H06.2 iniciada. |
 | 29/09/2026 | H06.2 concluída: visão de pagamentos pela data efetiva com matriz conferida em PostgreSQL 17.6, gates (JaCoCo 94,24%/86,98%, PIT 87%), frontend, smoke 8/8, E2E full-stack e regressão da H06.1. |
+| 29/09/2026 | H06.3 concluída: planejamento integrado com matriz M1–M14 conferida em PostgreSQL 17.6, gates (JaCoCo 97,79%/91,17%, PIT 88%), 107 frontend, smoke 9/9 (corrigida rolagem horizontal a 390 px), E2E full-stack e regressão H06.1/H06.2. Checkpoint atendido; H06.4 iniciada. |
