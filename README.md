@@ -605,7 +605,7 @@ Calendário: parcelas mensais a partir do primeiro vencimento, reutilizando a re
 | 30/11/2027 | 30/12/2027, 30/01/2028, 29/02/2028 (bissexto), 30/03/2028 |
 | 15/12/2026 | 15/01/2027, 15/02/2027 (virada de ano) |
 
-Não há campo “data da compra”: a documentação aprovada define só o primeiro vencimento (decisão T21). Vencimentos passados são aceitos; parcelas já vencidas aparecem como atrasadas.
+Não há campo “data da compra”: a compra guarda só o primeiro vencimento, confirmado por Diego em 29/09/2026 (decisão T21). Vencimentos passados são aceitos; parcelas já vencidas aparecem como atrasadas.
 
 Garantias: compra, parcelas e evento `PURCHASE_CREATED` são gravados numa única transação (qualquer falha desfaz tudo). `Idempotency-Key` é obrigatório e vale por espaço e autor: repetir com o mesmo conteúdo devolve a mesma compra (`200`, sem nova parcela nem auditoria), inclusive com pedidos simultâneos; reutilizar a chave com outro conteúdo retorna `409 IDEMPOTENCY_CONFLICT`. Categoria e responsável são validados no backend para o espaço do autor.
 

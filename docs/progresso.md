@@ -13,7 +13,7 @@ Versão 1.0 • Atualizado em 28/09/2026.
 | Histórias | 20 de 46 concluídas; E01, E02, E04 e E05 concluídos; E03 depende da validação final de H03.3. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Revisar e mesclar o PR #8 (H05.2 e H05.3) e iniciar E06 (H06.1, dashboard por vencimento). Diego ainda pode responder se quer um campo informativo “data da compra” (T21), sem bloqueio. |
+| Próxima ação | Revisar e mesclar o PR #8 (H05.2 e H05.3) e iniciar E06 (H06.1, dashboard por vencimento). |
 
 ## Estados permitidos
 
@@ -417,7 +417,7 @@ Próximo passo: H05.2 (consultar e quitar parcelas), não iniciada.
 História / objetivo: H05.2 — Consultar e quitar parcelas.
 Estado / responsável / data: Concluído / desenvolvimento / 28/09/2026.
 Requisitos e critérios de aceite relacionados: H05.2 do backlog; RF-PAR-04 e RF-PAR-06; D19/T12; instrução de Diego de 28/09/2026 (seguir para H05.3 se H05.2 fechar sem depender dele).
-Decisões e pendências aplicáveis: T22 registrada. Nenhuma decisão de Diego foi necessária; a pergunta sobre “data da compra” (T21) continua aberta e não afeta esta história.
+Decisões e pendências aplicáveis: T22 registrada. Nenhuma decisão de Diego foi necessária; a pergunta sobre “data da compra” (T21) não afeta esta história; em 29/09/2026 Diego confirmou que o campo não é necessário.
 Branch / commit / PR: branch `claude/h04-4-confirmar-valores-variaveis-usnyyj` reiniciada sobre `main` `7828ef8`; PR para `main` junto com H05.3, em commits separados. Nada foi publicado ou implantado.
 Arquivos e comportamento alterados: `GET /installment-purchases[/{id}]`, `InstallmentProgress`, `InstallmentPurchaseSummary/Page`, `InstallmentView` ampliada, leitura somente leitura em `REPEATABLE READ`; porta `InstallmentExpenses.findByPurchases`; componente Angular **Compras cadastradas**; README, OpenAPI, decisões e evidência.
 Migrações e impacto sobre dados: nenhuma.
@@ -436,7 +436,7 @@ Próximo passo: H05.3 (ajustar e cancelar parcelas pendentes).
 História / objetivo: H05.3 — Ajustar e cancelar parcelas pendentes.
 Estado / responsável / data: Concluído / desenvolvimento / 28/09/2026.
 Requisitos e critérios de aceite relacionados: H05.3 do backlog (demonstração do E05); RF-PAR-05 a RF-PAR-08; D19; instrução de Diego de 28/09/2026 (fazer H05.3 se H05.2 fechasse sem depender dele).
-Decisões e pendências aplicáveis: T23 registrada. Nenhuma decisão de Diego foi necessária; a pergunta sobre “data da compra” (T21) continua aberta e não afeta esta história.
+Decisões e pendências aplicáveis: T23 registrada. Nenhuma decisão de Diego foi necessária; a pergunta sobre “data da compra” (T21) não afeta esta história; em 29/09/2026 Diego confirmou que o campo não é necessário.
 Branch / commit / PR: branch `claude/h04-4-confirmar-valores-variaveis-usnyyj`; commit separado do da H05.2 (`f5d9a74`) no mesmo PR #8 para `main`. Nada foi publicado ou implantado.
 Arquivos e comportamento alterados: V21; módulo `installments` (domínio `InstallmentChange`/`InstallmentCancellation`, `InstallmentAdjustmentService`, repositório JDBC de alterações, 4 rotas `POST /installment-purchases/{id}/changes[/preview]` e `/cancellation[/preview]`, `replacesPurchaseId`); porta pública `InstallmentAdjuster` e `JdbcInstallmentAdjuster` no módulo de despesas; histórico de Despesas com `INSTALLMENT_CHANGE_APPLIED`/`INSTALLMENT_CANCELLED`; componente Angular de ajustes no detalhe da compra; README, OpenAPI, decisões e evidência.
 Migrações e impacto sobre dados: V21 cria `installment_purchase_changes` e `installment_change_requests`, adiciona `installment_purchases.replaces_purchase_id` e `installment_change_id` aos eventos de correção e cancelamento de despesas, com checks de origem única. Nenhum dado existente é reescrito; nenhuma migração anterior foi editada. Pagas e canceladas nunca são alteradas; `charge_amount` nunca muda.
