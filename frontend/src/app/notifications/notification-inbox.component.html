@@ -1,0 +1,64 @@
+<section class="page" aria-labelledby="inbox-title">
+  <header class="page-header">
+    <div>
+      <h1 id="inbox-title">Avisos</h1>
+      <p>Resumos das contas a pagar de cada horário e, para o administrador, problemas no envio pelo WhatsApp.</p>
+    </div>
+    <nav aria-label="Outras telas"><a routerLink="/despesas">Despesas</a> · <a routerLink="/lembretes">Lembretes</a> · <a routerLink="/painel">Painel</a></nav>
+  </header>
+
+  <p class="explain" data-testid="inbox-explain">Abrir, marcar como lido ou dispensar um aviso muda só o seu aviso: nenhuma conta é paga e os próximos lembretes continuam chegando. Para pagar, use a tela Despesas.</p>
+
+  <div class="toolbar">
+    <mat-button-toggle-group [value]="view()" (change)="changeView($event.value)" aria-label="Quais avisos mostrar">
+      <mat-button-toggle value="ACTIVE" data-testid="inbox-active">Ativos</mat-button-toggle>
+      <mat-button-toggle value="DISMISSED" data-testid="inbox-dismissed">Dispensados</mat-button-toggle>
+    </mat-button-toggle-group>
+    @if (page(); as p) { <span class="unread" data-testid="inbox-unread" aria-live="polite">{{ p.unreadCount === 1 ? '1 não lido' : p.unreadCount + ' não lidos' }}</span> }
+  </div>
+
+  @if (error()) {
+    <div class="error-summary" role="alert" data-testid="inbox-error">{{ error() }}
+      @if (unauthenticated()) { <a routerLink="/entrar">Entrar</a> } @else { <button mat-button type="button" (click)="load(page()?.page ?? 0)">Tentar novamente</button> }
+    </div>
+  }
+  @if (actionError()) { <div class="error-summary" role="alert" data-testid="inbox-action-error">{{ actionError() }}</div> }
+  @if (loading() && !page()) { <p role="status" data-testid="inbox-loading">Carregando avisos…</p> }
+
+  @if (page(); as p) {
+    @if (p.items.length === 0) {
+      <p class="empty" data-testid="inbox-empty">{{ view() === 'ACTIVE' ? 'Nenhum aviso ativo. Os resumos aparecem aqui nos horários configurados em Lembretes, quando há contas a pagar.' : 'Nenhum aviso dispensado.' }}</p>
+    } @else {
+      <ul class="notices" data-testid="inbox-list" [attr.aria-busy]="loading()">
+        @for (n of p.items; track n.id) {
+          <li>
+            <mat-card appearance="outlined" [class.unread]="!n.readAt" [class.failure]="n.failure" data-testid="inbox-item">
+              <mat-card-content>
+                <h2>
+                  @if (!n.readAt) { <span class="badge" data-testid="inbox-new">Novo</span> }
+                  @if (n.failure) { <span class="badge failure-badge">Somente administrador</span> }
+                  {{ n.title }}
+                </h2>
+                <p data-testid="inbox-message">{{ n.message }}</p>
+                <p class="meta">Recebido em {{ when(n) }}@if (n.dismissedAt) { · dispensado }</p>
+                <div class="actions">
+                  <button mat-flat-button type="button" (click)="open(n)" [disabled]="busy() === n.id" data-testid="inbox-open">Abrir resumo</button>
+                  @if (!n.readAt) { <button mat-stroked-button type="button" (click)="markRead(n)" [disabled]="busy() === n.id" data-testid="inbox-read">Marcar como lido</button> }
+                  @if (!n.dismissedAt) { <button mat-button type="button" (click)="dismiss(n)" [disabled]="busy() === n.id" data-testid="inbox-dismiss">Dispensar</button> }
+                  @if (n.failure) { <a mat-button routerLink="/lembretes">Ver configuração do WhatsApp</a> }
+                </div>
+              </mat-card-content>
+            </mat-card>
+          </li>
+        }
+      </ul>
+      @if (p.totalPages > 1) {
+        <nav class="pager" aria-label="Páginas de avisos">
+          <button mat-stroked-button type="button" (click)="load(p.page - 1)" [disabled]="p.page === 0 || loading()" data-testid="inbox-previous">Anteriores</button>
+          <span data-testid="inbox-page">Página {{ p.page + 1 }} de {{ p.totalPages }} · {{ p.totalItems }} avisos</span>
+          <button mat-stroked-button type="button" (click)="load(p.page + 1)" [disabled]="p.page + 1 >= p.totalPages || loading()" data-testid="inbox-next">Próximos</button>
+        </nav>
+      }
+    }
+  }
+</section>

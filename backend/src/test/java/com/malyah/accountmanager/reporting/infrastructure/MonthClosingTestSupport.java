@@ -130,7 +130,7 @@ abstract class MonthClosingTestSupport {
     }
 
     int expectedMigrations() {
-        return 25;
+        return 26;
     }
 
     MonthClosingUseCase closings(MonthClosingRepository repository, ExpenseReportQueries queries, Clock clock) {

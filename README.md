@@ -973,7 +973,7 @@ Testes: `MonthClosingVersionsPostgresIT` (matriz V1–V13 em PostgreSQL real, co
 
 ## Lembretes e WhatsApp (E08)
 
-O E08 está em andamento: H08.1 e H08.2 estão entregues; H08.3 (avisos no aplicativo), H08.4 (envio real pelo WhatsApp) e H08.5 (falhas e retomada) não existem nesta versão, e nenhum lembrete sai do sistema.
+O E08 está em andamento: H08.1, H08.2 e H08.3 estão entregues; H08.4 (envio real pelo WhatsApp) é descrita abaixo com o seu estado, e H08.5 (retentativas, reconciliação e retomada) não existe nesta versão.
 
 ### Configurar canal, consentimento e horários (H08.1)
 
@@ -1052,6 +1052,35 @@ Teste manual com datas controladas (não depende do relógio do servidor):
 4. Escolha a data de daqui a um dia e o **Primeiro**: a de seis dias agora está a cinco e entra; a de hoje aparece como atrasada.
 5. Quite uma delas e simule de novo: ela sai. Com mais de cinco contas aparece “e mais X contas” e a lista completa abaixo.
 
-Os resumos gravados pelo job (com relógio real) abrem pelo link `/lembretes/resumos/{id}`; a listagem de avisos no aplicativo é da H08.3.
+Os resumos gravados pelo job (com relógio real) abrem pelo link `/lembretes/resumos/{id}` e pela tela **Avisos** (H08.3).
 
 Testes: `ReminderSummaryPostgresIT` (matriz E1–E16 em PostgreSQL real, com relógio controlado, materialização concorrente e isolamento), `ReminderSummaryDomainTest`, `ReminderSummaryServiceTest`, `ReminderSummaryHttpTest`, `reminder-summary.component.spec.ts`, smoke E2E e E2E full-stack (prévia de uma conta real em dois horários e em outra data). Evidência: `docs/evidencias/H08.2.md`.
+
+### Avisos no aplicativo (H08.3)
+
+Tela **Avisos** (`/avisos`, link em Despesas, Lembretes e na página do resumo). Não há configuração nova: os avisos seguem os horários da H08.1 e o job da H08.2. Nenhum push ou email é enviado.
+
+- **Quem recebe:** cada resumo gerado vira um aviso para cada membro ativo no momento da geração (administrador e convidado). O convidado recebe lembretes só por aqui. Um membro removido deixa de acessar (`403`) e não recebe avisos novos.
+- **Falhas do WhatsApp:** quando o canal está ativado com consentimento, mas o resumo não pôde seguir pelo WhatsApp, o administrador recebe um aviso “WhatsApp não enviado” (marcado “Somente administrador”). A mensagem vem de um catálogo fixo (`PROVIDER_UNAVAILABLE`, `PROVIDER_REJECTED`, `DELIVERY_FAILED`, `RECIPIENT_INVALID`, `RESULT_UNCERTAIN`), nunca da resposta do provedor. O convidado não recebe nem vê esses avisos; depois de uma transferência, o antigo administrador também deixa de vê-los. Nesta versão o único motivo que ocorre de verdade é `PROVIDER_UNAVAILABLE`; os demais são o contrato da H08.4.
+- **Ler e dispensar:** estados individuais. “Marcar como lido” e “Dispensar” mudam só o aviso de quem clicou; dispensar também marca como lido e move o aviso para **Dispensados**. Repetir não muda o primeiro instante. Nada disso paga, cancela ou altera contas, nem interrompe os próximos lembretes.
+- **Histórico × atual:** o aviso e o resumo mostram as contas como estavam no horário. Na página do resumo, cada conta que mudou mostra a situação atual (“Agora: paga”, “Agora: cancelada”, “Agora vence em …”) e o link **Abrir conta** (`/despesas?despesa={id}`), que usa a autorização normal das despesas.
+- **Ordem e paginação:** mais recentes primeiro; 20 por página, até 100 (`size`). Contagem de não lidos na própria lista.
+- **Retenção:** não definida na documentação; nenhum aviso é apagado (registrado em T33 como dúvida para P08/P09).
+
+```text
+GET  /api/v1/notifications/inbox?view=ACTIVE|DISMISSED&page=0&size=20  → 200 { items, page, size, totalItems, totalPages, unreadCount, view }
+GET  /api/v1/notifications/inbox/unread-count                            → 200 { unreadCount }
+POST /api/v1/notifications/inbox/{id}/read                               → 200 aviso (exige X-XSRF-TOKEN)
+POST /api/v1/notifications/inbox/{id}/dismiss                            → 200 aviso (exige X-XSRF-TOKEN)
+```
+
+Erros: `400 NOTIFICATION_QUERY_INVALID`, `404 NOTIFICATION_NOT_FOUND` (inexistente, de outro membro ou de outro espaço), `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`, `403` sem token CSRF e `401` sem sessão.
+
+Teste manual:
+
+1. Como administrador, cadastre uma despesa pendente vencendo hoje. Em **Lembretes e WhatsApp**, deixe o primeiro horário em `00:00` e ponha o segundo um ou dois minutos à frente (só funciona se o segundo horário de hoje ainda não foi processado, ou seja, antes do horário anterior + 1 h).
+2. Espere o job (até um minuto depois do horário). Em **Avisos**, os dois membros veem “Contas a pagar: segundo horário de …”. Com o canal ativado, o administrador também vê “WhatsApp não enviado”.
+3. Como administrador, clique **Marcar como lido**; como convidado, o aviso dele continua “Novo”. Como convidado, clique **Dispensar**: some dos ativos e aparece em **Dispensados**.
+4. Abra o resumo, clique **Abrir conta**: a despesa continua pendente. Quite-a em Despesas e reabra o resumo: ela aparece com “Agora: paga”, e o próximo horário não a inclui.
+
+Testes: `MemberNotificationPostgresIT` (matriz N1–N14 em PostgreSQL real, com relógio controlado, concorrência, remoção e transferência), `MemberNotificationServiceTest`, `MemberNotificationHttpTest`, `ReminderSummaryServiceTest`, `notification-inbox.component.spec.ts`, `reminder-summary.component.spec.ts`, smoke E2E e E2E full-stack (job real gerando o aviso). O E2E full-stack usa o segundo horário de hoje e precisa rodar antes das 17:55 de São Paulo. Evidência: `docs/evidencias/H08.3.md`.

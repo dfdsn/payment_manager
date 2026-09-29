@@ -20,6 +20,7 @@ export const routes: Routes = [
   { path: 'compras-parceladas', loadComponent: () => import('./installments/installment-purchase.component').then(module => module.InstallmentPurchaseComponent) },
   { path: 'lembretes/previa', loadComponent: () => import('./notifications/reminder-preview.component').then(module => module.ReminderPreviewComponent) },
   { path: 'lembretes/resumos/:id', loadComponent: () => import('./notifications/reminder-summary.component').then(module => module.ReminderSummaryComponent) },
+  { path: 'avisos', loadComponent: () => import('./notifications/notification-inbox.component').then(module => module.NotificationInboxComponent) },
   { path: 'lembretes', loadComponent: () => import('./notifications/reminder-settings.component').then(module => module.ReminderSettingsComponent) },
   { path: 'aceitar-convite', component: InvitationComponent, data: { mode: 'accept' } },
   { path: 'configuracao-inicial', component: InitialSetupComponent },

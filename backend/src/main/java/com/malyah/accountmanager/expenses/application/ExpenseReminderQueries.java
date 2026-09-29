@@ -1,6 +1,7 @@
 package com.malyah.accountmanager.expenses.application;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -11,4 +12,10 @@ import java.util.UUID;
  */
 public interface ExpenseReminderQueries {
     List<ReminderExpense> pendingDueThrough(UUID spaceId, LocalDate dueThrough);
+
+    /**
+     * H08.3: the current status and due date of the given expenses of the space, whatever their status; ids of
+     * another space are simply absent.
+     */
+    List<ReminderExpenseState> currentStates(UUID spaceId, Collection<UUID> expenseIds);
 }

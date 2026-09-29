@@ -860,3 +860,64 @@ test('H08.2 simulates a slot with the calendar of the server and opens a summary
   overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test('H08.3 lists the member notifications, reads, dismisses and opens a summary without paying anything', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const notice = (id: string, extra: Record<string, unknown> = {}) => ({ id, type: 'REMINDER_SUMMARY',
+    title: 'Contas a pagar: primeiro horário de 05/10, 09:00', message: '7 contas, total R$ 3.050,00, 1 atrasada. Abra para ver todas.',
+    createdAt: '2026-10-05T12:00:05Z', readAt: null, dismissedAt: null, failure: null,
+    summary: { id: 's1', date: '2026-10-05', slot: 'FIRST', scheduledTime: '09:00', timeZone: 'America/Sao_Paulo', count: 7,
+      total: '3050.00', estimatedCount: 0, estimatedTotal: '0.00', overdueCount: 1, remaining: 2, link: 'http://localhost/lembretes/resumos/s1' },
+    ...extra });
+  const state = { read: new Set<string>(), dismissed: new Set<string>() };
+  const all = [notice('n1'), notice('f1', { type: 'WHATSAPP_DELIVERY_FAILURE', title: 'WhatsApp não enviado: resumo de 05/10, 09:00',
+    message: 'O envio pelo WhatsApp não está disponível no momento. O resumo continua disponível aqui no aplicativo.',
+    failure: { code: 'PROVIDER_UNAVAILABLE', message: 'x' } })];
+  const current = (n: Record<string, unknown>) => ({ ...n, readAt: state.read.has(n['id'] as string) ? '2026-10-05T13:00:00Z' : null,
+    dismissedAt: state.dismissed.has(n['id'] as string) ? '2026-10-05T13:01:00Z' : null });
+  const posts: string[] = [];
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ headerName: 'X-XSRF-TOKEN' })));
+  await page.route('**/api/v1/notifications/inbox?**', route => {
+    const view = new URL(route.request().url()).searchParams.get('view');
+    const items = all.map(current).filter(n => (n.dismissedAt !== null) === (view === 'DISMISSED'));
+    return route.fulfill(json({ items, page: 0, size: 20, totalItems: items.length, totalPages: items.length ? 1 : 0,
+      unreadCount: all.map(current).filter(n => !n.readAt).length, view }));
+  });
+  await page.route('**/api/v1/notifications/inbox/*/*', route => {
+    const [, id, action] = new URL(route.request().url()).pathname.match(/inbox\/([^/]+)\/([^/]+)$/)!;
+    posts.push(`${route.request().method()} ${id} ${action}`);
+    state.read.add(id);
+    if (action === 'dismiss') state.dismissed.add(id);
+    return route.fulfill(json(current(all.find(n => n.id === id)!)));
+  });
+  await page.route('**/api/v1/notifications/reminders/summaries/**', route => route.fulfill(json({ id: 's1', date: '2026-10-05',
+    slot: 'FIRST', scheduledTime: '09:00', timeZone: 'America/Sao_Paulo', generatedAt: '2026-10-05T12:00:05Z', count: 1, total: '1500.00',
+    estimatedCount: 0, estimatedTotal: '0.00', overdueCount: 1, detailCount: 1, remaining: 0, link: 'http://localhost/lembretes/resumos/s1',
+    text: 'Contas a pagar', channels: [{ channel: 'IN_APP', status: 'PLANNED', reason: null }],
+    items: [{ position: 1, expenseId: 'e1', recurrenceId: null, description: 'Aluguel', label: 'Aluguel', amount: '1500.00',
+      dueDate: '2026-10-01', estimated: false, overdue: true, forecast: false, origin: 'ONE_OFF', installmentNumber: null,
+      installmentCount: null, currentStatus: 'PAID', currentDueDate: '2026-10-01' }] })));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/avisos');
+  await expect(page.getByTestId('inbox-explain')).toContainText('nenhuma conta é paga');
+  await expect(page.getByTestId('inbox-item')).toHaveCount(2);
+  await expect(page.getByTestId('inbox-unread')).toHaveText('2 não lidos');
+  await expect(page.getByText('Somente administrador')).toBeVisible();
+  await page.getByTestId('inbox-read').first().click();
+  await expect(page.getByTestId('inbox-unread')).toHaveText('1 não lido');
+  await page.getByTestId('inbox-dismiss').nth(1).click();
+  await expect(page.getByTestId('inbox-item')).toHaveCount(1);
+  await page.getByTestId('inbox-dismissed').click();
+  await expect(page.getByTestId('inbox-item')).toContainText('dispensado');
+  await page.getByTestId('inbox-active').click();
+  let overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await page.getByTestId('inbox-open').click();
+  await expect(page).toHaveURL(/\/lembretes\/resumos\/s1$/);
+  await expect(page.getByTestId('summary-current')).toHaveText('Agora: paga');
+  await expect(page.getByRole('link', { name: 'Abrir conta' })).toHaveAttribute('href', '/despesas?despesa=e1');
+  expect(posts).toEqual(['POST n1 read', 'POST f1 dismiss']);
+  overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});

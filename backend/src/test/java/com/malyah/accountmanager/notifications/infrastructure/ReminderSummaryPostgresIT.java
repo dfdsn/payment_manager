@@ -111,7 +111,7 @@ class ReminderSummaryPostgresIT {
                 POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(25);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(26);
         jdbc = new JdbcTemplate(dataSource);
         tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         insertSpace(SPACE, "Casa");
@@ -137,7 +137,7 @@ class ReminderSummaryPostgresIT {
         settings = new TransactionalReminderSettingsUseCase(new ReminderSettingsService(
                 new JdbcReminderSettingsRepository(jdbc), context, members, provider, clock, UUID::randomUUID), tx);
         service = new ReminderSummaryService(new JdbcReminderSummaryRepository(jdbc),
-                new JdbcReminderSettingsRepository(jdbc), new JdbcExpenseReminderQueries(jdbc),
+                new JdbcMemberNotificationRepository(jdbc), new JdbcReminderSettingsRepository(jdbc), new JdbcExpenseReminderQueries(jdbc),
                 new RecurrenceForecastCatalog(RecurrenceTestFixtures.service(jdbc, context, categories, members,
                         clock, materializer, null)), generation, provider, context, clock, UUID::randomUUID,
                 "https://contas.malyah.tech");
@@ -274,7 +274,7 @@ class ReminderSummaryPostgresIT {
         });
         assertThat(count("expense_entries")).isZero();
         var withoutGeneration = new ReminderSummaryJob(new ReminderSummaryService(new JdbcReminderSummaryRepository(jdbc),
-                new JdbcReminderSettingsRepository(jdbc), new JdbcExpenseReminderQueries(jdbc),
+                new JdbcMemberNotificationRepository(jdbc), new JdbcReminderSettingsRepository(jdbc), new JdbcExpenseReminderQueries(jdbc),
                 new RecurrenceForecastCatalog(RecurrenceTestFixtures.service(jdbc, context, categories, members, clock,
                         new JdbcRecurringExpenseMaterializer(jdbc, tx), null)),
                 (space, through) -> { throw new IllegalStateException("generation down"); },

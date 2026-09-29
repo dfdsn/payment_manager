@@ -41,7 +41,8 @@ class ReminderSummaryHttpTest {
         return new ReminderSummaryView(id, LocalDate.of(2026, 10, 5), "FIRST", "09:00", "America/Sao_Paulo",
                 id == null ? null : Instant.parse("2026-10-05T12:00:05Z"), 7, "1349.91", 1, "99.99", 1, 5, 2,
                 List.of(new ReminderSummaryView.Item(1, UUID.randomUUID(), null, "Aluguel", "Aluguel", "1500.00",
-                        LocalDate.of(2026, 10, 1), false, true, false, "ONE_OFF", null, null)),
+                        LocalDate.of(2026, 10, 1), false, true, false, "ONE_OFF", null, null, "PENDING",
+                        LocalDate.of(2026, 10, 1))),
                 id == null ? null : "https://contas.example/lembretes/resumos/" + id, "Contas a pagar",
                 List.of(new ReminderSummaryView.ChannelView("IN_APP", "PLANNED", null),
                         new ReminderSummaryView.ChannelView("WHATSAPP", "SKIPPED", "PROVIDER_UNAVAILABLE")));

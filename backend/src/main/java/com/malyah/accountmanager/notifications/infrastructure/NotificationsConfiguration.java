@@ -16,6 +16,8 @@ import com.malyah.accountmanager.expenses.application.ExpenseReminderQueries;
 import com.malyah.accountmanager.identity.application.AdministrationTransferHandler;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.identity.application.FinancialMemberAccess;
+import com.malyah.accountmanager.notifications.application.MemberNotificationService;
+import com.malyah.accountmanager.notifications.application.MemberNotificationUseCase;
 import com.malyah.accountmanager.notifications.application.ReminderSettingsService;
 import com.malyah.accountmanager.notifications.application.ReminderSettingsUseCase;
 import com.malyah.accountmanager.notifications.application.ReminderSummaryService;
@@ -59,6 +61,16 @@ class NotificationsConfiguration {
                 provider, contexts, applicationClock, publicBaseUrl), new TransactionTemplate(transactionManager));
     }
 
+    /** H08.3: each member's in-app notifications. */
+    @Bean
+    MemberNotificationUseCase memberNotificationUseCase(JdbcTemplate jdbcTemplate,
+            AuthenticatedUserContextQuery contexts, Clock applicationClock,
+            @Value("${app.public-base-url}") String publicBaseUrl, PlatformTransactionManager transactionManager) {
+        return new TransactionalMemberNotificationUseCase(new MemberNotificationService(
+                new JdbcMemberNotificationRepository(jdbcTemplate), contexts, applicationClock, publicBaseUrl),
+                new TransactionTemplate(transactionManager));
+    }
+
     @Bean
     @ConditionalOnProperty(name = "app.jobs.reminders.enabled", matchIfMissing = true)
     ReminderSummaryJob reminderSummaryJob(JdbcTemplate jdbcTemplate, ExpenseReminderQueries expenses,
@@ -79,7 +91,7 @@ class NotificationsConfiguration {
             WhatsAppProviderStatus provider, AuthenticatedUserContextQuery contexts, Clock clock,
             String publicBaseUrl) {
         return new ReminderSummaryService(new JdbcReminderSummaryRepository(jdbcTemplate),
-                new JdbcReminderSettingsRepository(jdbcTemplate), expenses, forecasts,
+                new JdbcMemberNotificationRepository(jdbcTemplate), new JdbcReminderSettingsRepository(jdbcTemplate), expenses, forecasts,
                 generation.getIfAvailable(() -> (spaceId, dueThrough) -> 0), provider, contexts, clock,
                 UUID::randomUUID, publicBaseUrl);
     }

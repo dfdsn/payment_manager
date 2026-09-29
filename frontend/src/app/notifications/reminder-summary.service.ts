@@ -8,6 +8,8 @@ export interface ReminderSummaryItem {
   position: number; expenseId: string | null; recurrenceId: string | null; description: string; label: string;
   amount: string; dueDate: string; estimated: boolean; overdue: boolean; forecast: boolean; origin: string;
   installmentNumber: number | null; installmentCount: number | null;
+  /** H08.3: the expense now, read at each query; null for a forecast that was never materialized. */
+  currentStatus?: 'PENDING' | 'PAID' | 'CANCELLED' | null; currentDueDate?: string | null;
 }
 
 /** H08.2: amounts are decimal strings; {@code items} is the full list and the first {@code detailCount} go in the message. */

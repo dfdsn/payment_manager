@@ -3,8 +3,10 @@ package com.malyah.accountmanager.notifications.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,12 +34,14 @@ import com.malyah.accountmanager.expenses.application.ReminderExpense;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContext;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.identity.domain.SpaceRole;
+import com.malyah.accountmanager.notifications.application.port.MemberNotificationRepository;
 import com.malyah.accountmanager.notifications.application.port.ReminderSettingsRepository;
 import com.malyah.accountmanager.notifications.application.port.ReminderSummaryRepository;
 import com.malyah.accountmanager.notifications.application.port.WhatsAppProviderStatus;
 import com.malyah.accountmanager.notifications.domain.ReminderSchedule;
 import com.malyah.accountmanager.notifications.domain.ReminderSlot;
 import com.malyah.accountmanager.notifications.domain.ReminderWindow;
+import com.malyah.accountmanager.notifications.domain.WhatsAppFailureReason;
 import com.malyah.accountmanager.notifications.domain.WhatsAppRecipient;
 import com.malyah.accountmanager.recurrences.application.PlannedForecast;
 import com.malyah.accountmanager.recurrences.application.RecurrenceForecastQueries;
@@ -53,6 +57,7 @@ class ReminderSummaryServiceTest {
     static final WhatsAppRecipient NUMBER = WhatsAppRecipient.parse("(11) 98765-4321");
 
     FakeSummaries summaries;
+    MemberNotificationRepository notifications;
     ReminderSettingsRepository settings;
     ExpenseReminderQueries expenses;
     RecurrenceForecastQueries forecasts;
@@ -70,13 +75,14 @@ class ReminderSummaryServiceTest {
         when(settings.find(SPACE)).thenReturn(Optional.empty());
         when(settings.activeConsent(SPACE)).thenReturn(Optional.empty());
         expenses = mock(ExpenseReminderQueries.class);
+        notifications = mock(MemberNotificationRepository.class);
         forecasts = mock(RecurrenceForecastQueries.class);
         generation = mock(UpcomingOccurrenceGeneration.class);
         nextId = UUID.fromString("b0000000-0000-0000-0000-000000000001");
         WhatsAppProviderStatus provider = () -> new WhatsAppProviderStatus.Availability(providerAvailable, "X", "m");
         AuthenticatedUserContextQuery contexts = email -> new AuthenticatedUserContext(ADMIN, "Admin", email, SPACE,
                 "Casa", SpaceRole.ADMINISTRATOR, "BRL", "pt-BR", "America/Sao_Paulo");
-        service = new ReminderSummaryService(summaries, settings, expenses, forecasts, generation, provider, contexts,
+        service = new ReminderSummaryService(summaries, notifications, settings, expenses, forecasts, generation, provider, contexts,
                 Clock.fixed(Instant.parse("2026-10-05T15:00:00Z"), ZoneOffset.UTC), () -> nextId,
                 "https://contas.example/");
     }
@@ -164,8 +170,46 @@ class ReminderSummaryServiceTest {
                 new StoredSummary.Channel(StoredSummary.ChannelType.IN_APP, StoredSummary.ChannelStatus.PLANNED, null, null),
                 new StoredSummary.Channel(StoredSummary.ChannelType.WHATSAPP, StoredSummary.ChannelStatus.SKIPPED,
                         "RECIPIENT_REQUIRED", null));
+        // H08.3: both members get the in-app notification in the same transaction; an unconfigured channel is no failure.
+        verify(notifications).deliverSummary(SPACE, nextId, FIRST_SLOT.plusSeconds(30));
+        verify(notifications, never()).recordWhatsAppFailure(any(), any(), any(), any());
         assertThat(service.process(task, FIRST_SLOT.plusSeconds(60))).isEqualTo(ReminderSlotOutcome.ALREADY_PROCESSED);
         assertThat(summaries.stored).hasSize(1);
+        verify(notifications, times(1)).deliverSummary(any(), any(), any());
+    }
+
+    @Test
+    void anEnabledChannelThatTheProviderCannotServeIsAFailureForTheAdministrator() {
+        bills();
+        configure(true, true, ADMIN);
+        var channel = whatsapp();
+        assertThat(channel.skipReason()).isEqualTo("PROVIDER_UNAVAILABLE");
+        verify(notifications).recordWhatsAppFailure(SPACE, nextId, WhatsAppFailureReason.PROVIDER_UNAVAILABLE,
+                FIRST_SLOT);
+        providerAvailable = true;
+        assertThat(whatsapp().status()).isEqualTo(StoredSummary.ChannelStatus.PLANNED);
+        configure(true, false, ADMIN);
+        assertThat(whatsapp().skipReason()).isEqualTo("DISABLED");
+        verify(notifications, times(1)).recordWhatsAppFailure(any(), any(), any(), any());
+        verify(notifications, times(3)).deliverSummary(any(), any(), any());
+    }
+
+    @Test
+    void summaryItemsCarryTheCurrentSituationNextToTheHistoricalContent() {
+        bills();
+        service.process(task(ReminderSlot.FIRST, ReminderSlotTask.Action.GENERATE), FIRST_SLOT);
+        var stored = summaries.stored.getFirst();
+        var paid = stored.summary().items().getFirst().expenseId();
+        when(expenses.currentStates(eq(SPACE), any())).thenReturn(List.of(
+                new com.malyah.accountmanager.expenses.application.ReminderExpenseState(paid, "PAID",
+                        LocalDate.of(2026, 10, 20))));
+        var view = service.summary("admin@example.com", nextId);
+        var first = view.items().getFirst();
+        assertThat(first.dueDate()).isEqualTo(stored.summary().items().getFirst().dueDate());
+        assertThat(first.currentStatus()).isEqualTo("PAID");
+        assertThat(first.currentDueDate()).isEqualTo(LocalDate.of(2026, 10, 20));
+        assertThat(view.items().get(1).currentStatus()).isNull();
+        assertThat(view.items().get(1).currentDueDate()).isNull();
     }
 
     @Test
@@ -285,7 +329,7 @@ class ReminderSummaryServiceTest {
         assertThat(view.channels()).extracting(ReminderSummaryView.ChannelView::reason).containsExactly(null, "RECIPIENT_REQUIRED");
         assertThatThrownBy(() -> service.summary("admin@example.com", UUID.randomUUID()))
                 .isInstanceOf(ReminderSummaryNotFoundException.class).hasMessage("Resumo não encontrado.");
-        assertThat(new ReminderSummaryService(summaries, settings, expenses, forecasts, generation,
+        assertThat(new ReminderSummaryService(summaries, notifications, settings, expenses, forecasts, generation,
                 () -> null, email -> null, Clock.systemUTC(), UUID::randomUUID, "http://x").link(nextId))
                 .isEqualTo("http://x/lembretes/resumos/" + nextId);
     }

@@ -4,7 +4,7 @@
       <h1 id="summary-title">Resumo de contas</h1>
       <p>A lista completa do resumo, como foi montada no horário. Pague ou corrija as contas em Despesas.</p>
     </div>
-    <nav aria-label="Outras telas"><a routerLink="/despesas">Despesas</a> · <a routerLink="/lembretes/previa">Prévia dos resumos</a></nav>
+    <nav aria-label="Outras telas"><a routerLink="/avisos">Avisos</a> · <a routerLink="/despesas">Despesas</a> · <a routerLink="/lembretes/previa">Prévia dos resumos</a></nav>
   </header>
 
   @if (error()) {
@@ -16,8 +16,8 @@
     <mat-card appearance="outlined">
       <mat-card-content>
         <h2 data-testid="summary-heading">{{ slotLabels[s.slot] }} de {{ date(s.date) }}, {{ s.scheduledTime }}</h2>
-        <p class="generated">Gerado em {{ generatedAt(s) }}. Contas pagas ou alteradas depois continuam aqui como estavam.</p>
-        <app-reminder-summary-card [summary]="s" />
+        <p class="generated">Gerado em {{ generatedAt(s) }}. O resumo mostra as contas como estavam no horário; a situação atual de cada conta aparece ao lado quando mudou.</p>
+        <app-reminder-summary-card [summary]="s" [showCurrent]="true" />
       </mat-card-content>
     </mat-card>
   }

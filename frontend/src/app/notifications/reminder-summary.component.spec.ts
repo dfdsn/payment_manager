@@ -63,6 +63,7 @@ describe('Reminder summaries (H08.2)', () => {
     expect(text(fixture)).toContain('Oculta B');
     expect(byTestId(fixture, 'summary-channels')!.textContent).toContain('não será enviado (envio real ainda indisponível)');
     expect(byTestId(fixture, 'summary-channels')!.textContent).toContain('No aplicativo (os dois membros): previsto');
+    expect(text(fixture)).not.toContain('Abrir conta');
   });
 
   it('simulates another date and slot and explains an empty slot', async () => {
@@ -104,6 +105,23 @@ describe('Reminder summaries (H08.2)', () => {
     expect(byTestId(fixture, 'summary-heading')!.textContent).toContain('Primeiro horário de 05/10/2026, 09:00');
     expect(text(fixture)).toContain('Gerado em 05/10/2026');
     expect(byTestId(fixture, 'summary-items')!.querySelectorAll('li').length).toBe(7);
+  });
+
+  it('shows the current situation of each bill next to the historical content (H08.3)', async () => {
+    const summary = seven('s1');
+    summary.items[0] = { ...summary.items[0], currentStatus: 'PAID', currentDueDate: '2026-10-01' };
+    summary.items[1] = { ...summary.items[1], currentStatus: 'PENDING', currentDueDate: '2026-10-20' };
+    summary.items[2] = { ...summary.items[2], currentStatus: 'PENDING', currentDueDate: '2026-10-07' };
+    api.summary.mockReturnValue(of(summary));
+    const fixture = TestBed.createComponent(ReminderSummaryComponent);
+    await render(fixture);
+    const details = byTestId(fixture, 'summary-details')!.querySelectorAll('li');
+    expect(details[0].textContent).toContain('1.234,56');
+    expect(details[0].textContent).toContain('Agora: paga');
+    expect(details[1].textContent).toContain('Agora vence em 20/10/2026');
+    expect(details[2].textContent).not.toContain('Agora');
+    expect(details[3].textContent).not.toContain('Abrir conta');
+    expect(details[0].querySelector('a')!.getAttribute('href')).toBe('/despesas?despesa=e1');
   });
 
   it('distinguishes a missing session from a summary of another space', async () => {
