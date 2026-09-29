@@ -553,3 +553,61 @@ test('H06.4 downloads the CSV of the selection on screen and explains a refused 
   await expect(page.getByTestId('csv-export-message')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Exportar CSV' })).toBeEnabled();
 });
+
+test('H07.1 closes a month with pending entries only after the warning is confirmed', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const indicators = { plannedCount: 3, plannedTotal: '1790.00', plannedEstimated: '180.00', paidCount: 1, paidTotal: '110.00',
+    pendingCount: 2, pendingTotal: '1680.00', pendingEstimated: '180.00', overdueCount: 1, overdueTotal: '1500.00',
+    overdueEstimated: '0.00', adjustmentIncrease: '0.00', adjustmentDiscount: '10.00', adjustmentNet: '-10.00' };
+  const snapshot = {
+    version: null, authorUserId: null, authorDisplayName: null, closedAt: null, businessDate: '2026-09-29',
+    timeZone: 'America/Sao_Paulo', pendingAcknowledged: false, contentDigest: 'd1', indicators,
+    categories: [{ categoryId: 'casa', categoryName: 'Casa', count: 2, plannedTotal: '1620.00', plannedEstimated: '0.00',
+      paidTotal: '110.00', pendingCount: 1, pendingTotal: '1500.00' },
+    { categoryId: null, categoryName: null, count: 1, plannedTotal: '180.00', plannedEstimated: '180.00', paidTotal: '0.00',
+      pendingCount: 1, pendingTotal: '180.00' }],
+    lines: [
+      { expenseId: 'e1', description: 'Aluguel do apartamento com descrição longa para telas estreitas', origin: 'ONE_OFF',
+        installmentNumber: null, installmentCount: null, referenceDate: '2026-09-10', dueDateInformed: true, status: 'PENDING',
+        chargeAmount: '1500.00', estimated: false, paidAmount: null, adjustment: null, overdue: true, categoryId: 'casa', categoryName: 'Casa' },
+      { expenseId: 'e2', description: 'Telefone', origin: 'ONE_OFF', installmentNumber: null, installmentCount: null,
+        referenceDate: '2026-09-05', dueDateInformed: true, status: 'PAID', chargeAmount: '120.00', estimated: false,
+        paidAmount: '110.00', adjustment: '-10.00', overdue: false, categoryId: 'casa', categoryName: 'Casa' },
+      { expenseId: 'e3', description: 'Luz', origin: 'RECURRENCE', installmentNumber: null, installmentCount: null,
+        referenceDate: '2026-09-20', dueDateInformed: true, status: 'PENDING', chargeAmount: '180.00', estimated: true,
+        paidAmount: null, adjustment: null, overdue: false, categoryId: null, categoryName: null },
+    ],
+  };
+  const month = (saved: unknown) => ({ month: '2026-09', periodStart: '2026-09-01', periodEnd: '2026-09-30', dateBasis: 'DUE_DATE',
+    today: '2026-09-29', timeZone: 'America/Sao_Paulo', closable: true, saved, current: snapshot });
+  const posts: { key: string | undefined; body: unknown }[] = [];
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ token: 't' })));
+  await page.route('**/api/v1/reports/closings/**', route => {
+    if (route.request().method() === 'POST') {
+      posts.push({ key: route.request().headers()['idempotency-key'], body: route.request().postDataJSON() });
+      return route.fulfill(json(month({ ...snapshot, version: 1, authorUserId: 'actor', authorDisplayName: 'Diego',
+        closedAt: '2026-09-29T13:00:00Z', pendingAcknowledged: true }), 201));
+    }
+    return route.fulfill(json(month(null)));
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/fechamento');
+  await expect(page.getByRole('heading', { name: 'Fechamento do mês' })).toBeVisible();
+  await expect(page.getByTestId('closing-status')).toContainText('Mês não fechado');
+  await expect(page.getByTestId('current-pending-list')).toContainText('Aluguel do apartamento');
+  await page.getByRole('button', { name: 'Fechar mês…' }).click();
+  await expect(page.getByTestId('pending-warning')).toContainText('Há 2 conta(s) pendente(s)');
+  await expect(page.getByRole('button', { name: 'Confirmar fechamento' })).toBeDisabled();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await page.getByLabel('Estou ciente das pendências e quero fechar mesmo assim.').check();
+  await page.getByRole('button', { name: 'Confirmar fechamento' }).click();
+  await expect(page.getByTestId('closing-status')).toContainText('Mês fechado');
+  await expect(page.getByTestId('closing-status')).toContainText('Diego');
+  await expect(page.getByTestId('saved-planned')).toHaveText(/R\$\s*1\.790,00/);
+  expect(posts).toHaveLength(1);
+  expect(posts[0].key).toMatch(/^[0-9a-f-]{36}$/);
+  expect(posts[0].body).toEqual({ acknowledgePending: true });
+});

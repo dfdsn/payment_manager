@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões. H07.1 fecha o mês guardando um retrato imutável do resumo por vencimento, sem bloquear correções.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -882,3 +882,39 @@ Teste manual (inclui a conferência no Excel, não executada no container de des
 
 Testes: `ExportPostgresIT` (matriz C1–C13 em PostgreSQL real, 10.000 linhas e concorrência), `CsvDocumentTest`, `ExportServiceTest`, `ReportExportHttpTest`, `csv-export-button.component.spec.ts`, smoke E2E com download e E2E full-stack com download real. Evidência: `docs/evidencias/H06.4.md`.
 
+
+## Fechamento do mês (E07)
+
+Em **Fechamento** (`/fechamento`, link no Painel) um membro guarda o **retrato do mês revisado**. Fechar é simbólico: não quita, não cancela, não esconde contas e não mexe em lembretes; qualquer correção continua permitida depois.
+
+### Fechar mês com resumo (H07.1)
+
+- **Quem e quando:** administrador e convidado; o mês atual (no fuso do espaço) ou meses anteriores. Mês futuro não pode ser fechado. Cada mês tem um único fechamento; atualizar o retrato é gerar nova versão (H07.3).
+- **Base temporal:** vencimento, igual ao Painel (paga sem vencimento entra pela data do pagamento), sem filtros. Quitação feita em outro mês não move a conta; a visão por pagamento não faz parte do fechamento.
+- **O que é salvo:** totais do painel (previsto, parte a confirmar, pago, pendente, atrasado na data do fechamento, ajustes), totais por categoria com o nome do momento (“Sem categoria” por último), pendências e cada lançamento com descrição, origem/parcela, vencimento, situação, cobrança, estimativa e valor pago; autor, instante, data local e fuso. Canceladas, previsões ainda não geradas e o total de compras parceladas não entram; pendências de meses anteriores ficam no fechamento do mês delas.
+- **Pendências:** se o mês tem contas pendentes, a confirmação mostra quantas e quanto somam e exige marcar “Estou ciente das pendências e quero fechar mesmo assim.”. Mês sem lançamentos pode ser fechado e fica com o retrato zerado.
+- **Retrato imutável:** a consulta lê só o que foi gravado; renomear categoria, corrigir descrição ou quitar depois não muda o retrato. O banco recusa alterar ou apagar versões, linhas, categorias e eventos do fechamento.
+- **Repetição e concorrência:** a tela envia uma `Idempotency-Key` e a reaproveita se a conexão cair; a mesma chave devolve o mesmo fechamento. Dois membros fechando ao mesmo tempo geram um único fechamento; o outro vê “Este mês já foi fechado” e a tela recarrega o retrato salvo.
+
+```text
+GET  /api/v1/reports/closings/2026-10
+→ 200 { month, periodStart, periodEnd, dateBasis: "DUE_DATE", today, timeZone, closable,
+        saved: null | { version: 1, authorDisplayName, closedAt, businessDate, indicators, categories, lines, ... },
+        current: { indicators, categories, lines, ... } }
+
+POST /api/v1/reports/closings/2026-10   Idempotency-Key: <uuid>   X-XSRF-TOKEN: <token>
+     { "acknowledgePending": true }
+→ 201 (200 na repetição da mesma chave)
+```
+
+Erros: `422 CLOSING_PENDING_CONFIRMATION_REQUIRED` (pendências sem confirmação; nada é gravado), `422 CLOSING_MONTH_NOT_ALLOWED` (mês futuro), `409 MONTH_ALREADY_CLOSED`, `409 IDEMPOTENCY_CONFLICT`, `400 REPORT_QUERY_INVALID`, `401` sem sessão e `403 ACTIVE_SPACE_ACCESS_NOT_FOUND`.
+
+Teste manual:
+
+1. No mês atual, cadastre “Aluguel” 1.500,00 pendente com vencimento já passado, “Luz” como recorrência variável antecipada e “Telefone” 120,00 quitado por 110,00. Confira os números no Painel.
+2. Abra **Fechamento**: aparece “Mês não fechado” e os dados atuais com os mesmos totais do Painel. Clique **Fechar mês…**: o aviso diz quantas contas estão pendentes e o botão só habilita depois de marcar a caixa.
+3. Confirme: aparece “Mês fechado · versão 1”, com seu nome e o horário. Volte ao Painel: as pendentes continuam pendentes.
+4. Renomeie a categoria e corrija a descrição do Aluguel; o retrato salvo continua com os nomes antigos.
+5. Tente o mês seguinte: a tela informa que só é possível fechar o mês atual ou anteriores.
+
+Testes: `MonthClosingPostgresIT` (matriz C1–C14 em PostgreSQL real, com concorrência, rollback e alteração simultânea), `ClosingSummaryTest`, `MonthClosingServiceTest`, `MonthClosingHttpTest`, `TransactionalMonthClosingUseCaseTest`, `month-closing.component.spec.ts`, smoke E2E e E2E full-stack. Evidência: `docs/evidencias/H07.1.md`.

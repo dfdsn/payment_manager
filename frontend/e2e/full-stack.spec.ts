@@ -522,6 +522,29 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   })).status);
   expect(anonymousExportStatus).toBe(401);
 
+  // H07.1: closing the current month saves its snapshot and leaves every expense as it was.
+  await page.goto('/painel');
+  const dashboardPending = await page.getByTestId('pending-total').textContent();
+  await page.goto('/fechamento');
+  await expect(page.getByTestId('closing-status')).toContainText('Mês não fechado');
+  const currentPlanned = await page.getByTestId('current-planned').textContent();
+  await page.getByRole('button', { name: 'Fechar mês…' }).click();
+  if (await page.getByTestId('pending-warning').isVisible())
+    await page.getByLabel('Estou ciente das pendências e quero fechar mesmo assim.').check();
+  await page.getByRole('button', { name: 'Confirmar fechamento' }).click();
+  await expect(page.getByTestId('closing-status')).toContainText('Mês fechado');
+  await expect(page.getByTestId('closing-status')).toContainText('versão 1');
+  await expect(page.getByTestId('closing-status')).toContainText('Diego');
+  await expect(page.getByTestId('saved-planned')).toHaveText(currentPlanned!);
+  await page.reload();
+  await expect(page.getByTestId('saved-planned')).toHaveText(currentPlanned!);
+  await page.goto('/painel');
+  await expect(page.getByTestId('pending-total')).toHaveText(dashboardPending!);
+  const anonymousClosingStatus = await page.evaluate(async () => (await fetch('/api/v1/reports/closings/2026-09', {
+    credentials: 'omit',
+  })).status);
+  expect(anonymousClosingStatus).toBe(401);
+
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);

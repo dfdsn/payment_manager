@@ -150,6 +150,12 @@ Valor zero não permitido em cobrança, estimativa ou pagamento. Isenção integ
 
 Quitação e alteração/cancelamento coletivo: validar todos os registros e versões, aplicar todos com seus históricos numa transação ou nenhum. Mostrar prévia, protegidos e motivos. Conflito entre prévia e confirmação invalida lote; a prévia não é uma reserva permanente. Chamadas a provedores não participam dessa transação.
 
+### 6.2.1 Fechamento mensal (E07)
+
+- **Resumo consistente (H07.1).** A transação de fechamento é `READ COMMITTED`, começa bloqueando o espaço (`FinancialMemberAccess.requireActiveParticipants`, `select ... for update` em `family_spaces`), o mesmo bloqueio de toda escrita financeira do espaço; por isso nenhuma inclusão, correção, quitação, reversão ou cancelamento do espaço é confirmada entre a leitura e a gravação do retrato. Os lançamentos do mês são lidos numa única instrução SQL (`ExpenseReportQueries.entries`), e totais, categorias, pendências e `content_digest` são calculados dessas mesmas linhas em memória (`ClosingSummary`, regras `DueIndicators` da H06.1). Cabeçalho, versão, categorias, linhas, evento `MONTH_CLOSED` e chave de idempotência são gravados na mesma transação; falha em qualquer etapa desfaz tudo.
+- **Unicidade.** `unique (space_id, month)` no cabeçalho e `unique (closing_id, version_number)` na versão; `insert ... on conflict do nothing` decide o vencedor de fechamentos simultâneos. Chave idempotente por (espaço, autor, operação, chave) com hash do pedido.
+- **Imutabilidade.** Gatilho `reject_month_closing_snapshot_change` recusa `UPDATE`/`DELETE` em versões, categorias, linhas e eventos; a consulta lê só o retrato, nunca reconstrói com joins aos valores atuais. Leituras usam transação somente leitura `REPEATABLE READ`.
+
 ### 6.3 Jobs persistentes
 
 Baseline: polling curto no backend, tabela de tarefas no PostgreSQL e reserva com exclusão mútua/lease. Processamento não exige broker. Padrão operacional:

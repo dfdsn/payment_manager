@@ -1,5 +1,6 @@
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
+import { switchMap } from 'rxjs';
 import { ExpenseStatusFilter } from '../expenses/expense.service';
 
 /** Filters shared with the expense list (H03.4), except the period: reports always cover one calendar month. */
@@ -89,6 +90,32 @@ export interface Planning {
 export type PlanningFilters = Pick<ReportFilters, 'search' | 'categoryId' | 'withoutCategory' | 'responsibleUserId'
   | 'withoutResponsible'>;
 
+/** E07: one category of a closing; {@code categoryId} null is “Sem categoria”. */
+export interface ClosingCategory {
+  categoryId: string | null; categoryName: string | null; count: number; plannedTotal: string;
+  plannedEstimated: string; paidTotal: string; pendingCount: number; pendingTotal: string;
+}
+
+/** One entry of a closing, with the labels of the moment the content was taken. */
+export interface ClosingLine {
+  expenseId: string; description: string; origin: 'ONE_OFF' | 'RECURRENCE' | 'INSTALLMENT';
+  installmentNumber: number | null; installmentCount: number | null; referenceDate: string; dueDateInformed: boolean;
+  status: 'PENDING' | 'PAID'; chargeAmount: string; estimated: boolean; paidAmount: string | null;
+  adjustment: string | null; overdue: boolean; categoryId: string | null; categoryName: string | null;
+}
+
+/** Saved version (version, author and instant filled) or current data of a month (those null). */
+export interface ClosingSnapshot {
+  version: number | null; authorUserId: string | null; authorDisplayName: string | null; closedAt: string | null;
+  businessDate: string; timeZone: string; pendingAcknowledged: boolean; contentDigest: string;
+  indicators: DueIndicators; categories: ClosingCategory[]; lines: ClosingLine[];
+}
+
+export interface MonthClosing {
+  month: string; periodStart: string; periodEnd: string; dateBasis: 'DUE_DATE'; today: string; timeZone: string;
+  closable: boolean; saved: ClosingSnapshot | null; current: ClosingSnapshot;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ReportService {
   private readonly http = inject(HttpClient);
@@ -110,6 +137,18 @@ export class ReportService {
     let query = params(month ?? '', { ...filters, page, size });
     if (!month) query = query.delete('month');
     return this.http.get<Planning>(`${this.endpoint}/planning`, { params: query });
+  }
+
+  /** E07: the saved closing of the month, if any, and its current data. */
+  closing(month: string) {
+    return this.http.get<MonthClosing>(`${this.endpoint}/closings/${month}`);
+  }
+
+  /** H07.1: the same key must be reused when the same confirmation is sent again after a failure. */
+  closeMonth(month: string, acknowledgePending: boolean, key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() => this.http.post<MonthClosing>(
+      `${this.endpoint}/closings/${month}`, { acknowledgePending },
+      { headers: new HttpHeaders({ 'Idempotency-Key': key }) })));
   }
 }
 

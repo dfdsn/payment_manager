@@ -13,6 +13,7 @@ export const routes: Routes = [
   { path: 'despesas', loadComponent: () => import('./expenses/expense.component').then(module => module.ExpenseComponent) },
   { path: 'painel', loadComponent: () => import('./reports/due-dashboard.component').then(module => module.DueDashboardComponent) },
   { path: 'pagamentos', loadComponent: () => import('./reports/payments-report.component').then(module => module.PaymentsReportComponent) },
+  { path: 'fechamento', loadComponent: () => import('./reports/month-closing.component').then(module => module.MonthClosingComponent) },
   { path: 'planejamento', loadComponent: () => import('./reports/planning.component').then(module => module.PlanningComponent) },
   { path: 'categorias', loadComponent: () => import('./expenses/category.component').then(module => module.CategoryComponent) },
   { path: 'recorrencias', loadComponent: () => import('./recurrences/recurrence.component').then(module => module.RecurrenceComponent) },
