@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões. H07.1 fecha o mês guardando um retrato imutável do resumo por vencimento, sem bloquear correções.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões. H07.1 fecha o mês guardando um retrato imutável do resumo por vencimento, sem bloquear correções, e H07.2 sinaliza quando os dados atuais passam a diferir do retrato salvo.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -918,3 +918,27 @@ Teste manual:
 5. Tente o mês seguinte: a tela informa que só é possível fechar o mês atual ou anteriores.
 
 Testes: `MonthClosingPostgresIT` (matriz C1–C14 em PostgreSQL real, com concorrência, rollback e alteração simultânea), `ClosingSummaryTest`, `MonthClosingServiceTest`, `MonthClosingHttpTest`, `TransactionalMonthClosingUseCaseTest`, `month-closing.component.spec.ts`, smoke E2E e E2E full-stack. Evidência: `docs/evidencias/H07.1.md`.
+
+### Sinalizar alterações posteriores (H07.2)
+
+- **Situação do mês:** *Mês não fechado*, *Atualizado* (os dados atuais têm os mesmos valores e classificações do retrato) ou *Alterado depois do fechamento*. O servidor calcula a situação a cada consulta comparando o retrato salvo com os dados atuais; nada é marcado nem gravado, então nenhuma alteração se perde, mesmo feita durante o fechamento.
+- **O que conta:** inclusão no mês (nova despesa, parcela, ocorrência, data movida para o mês), saída do mês (cancelamento, data movida para outro mês) e mudança de vencimento, situação (quitação, reversão), cobrança, estimativa/confirmação, valor pago ou categoria. Mudança de vencimento, ou da data do pagamento de conta sem vencimento, entre meses aparece nos dois meses fechados.
+- **O que não conta:** descrição, nome da categoria, observações, responsável, pagador, data do pagamento de conta com vencimento e o passar do tempo (o atraso do retrato é o da data do fechamento; o atual aparece nos dados atuais). Quitar e reverter em seguida não deixa diferença.
+- **Tela:** a lista “O que mudou depois do fechamento” mostra cada conta com o valor salvo e o atual de cada campo; “Retrato salvo (versão N)” e “Dados atuais do mês” ficam lado a lado (um abaixo do outro no celular). “Fechamentos de AAAA” lista os meses fechados do ano com versão, autor, instante e situação; clique para abrir.
+
+```text
+GET /api/v1/reports/closings/2026-10
+→ 200 { ..., status: "OUTDATED", changes: [ { kind: "CHANGED", expenseId, fields: ["SITUATION", "PAID_AMOUNT"],
+                                              saved: {...}, current: {...} } ], saved: {...}, current: {...} }
+GET /api/v1/reports/closings?year=2026
+→ 200 { year: 2026, closings: [ { month: "2026-10", version: 1, authorDisplayName, closedAt, status: "OUTDATED" } ] }
+```
+
+Teste manual (depois do teste da H07.1):
+
+1. Com o mês fechado, abra **Fechamento**: aparece “Atualizado”.
+2. Em **Despesas**, quite o Aluguel e corrija o valor da Luz. Volte ao **Fechamento**: aparece “Alterado depois do fechamento: 2 diferença(s)”, com “Situação: Pendente → Paga” e “Cobrança: … → …”. O retrato salvo continua com os valores antigos; os dados atuais, ao lado, mostram os novos.
+3. Renomeie uma categoria ou corrija só a descrição de uma conta: a situação não muda por isso.
+4. Mude o vencimento de uma conta de um mês fechado para outro mês fechado: os dois aparecem como alterados em “Fechamentos de AAAA”.
+
+Testes: `MonthClosingChangesPostgresIT` (matriz D1–D17 em PostgreSQL real, com concorrência), `ClosingComparisonTest`, `MonthClosingServiceTest`, `MonthClosingHttpTest`, `month-closing.component.spec.ts`, smoke E2E e E2E full-stack (inclusão depois do fechamento). Evidência: `docs/evidencias/H07.2.md`.

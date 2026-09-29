@@ -10,6 +10,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import javax.sql.DataSource;
 
@@ -244,6 +245,54 @@ abstract class MonthClosingTestSupport {
     UUID anticipate(UUID recurrence, LocalDate due) {
         return tx.execute(status -> recurrences.anticipate(A, recurrence, due, UUID.randomUUID()).occurrence()
                 .expenseId());
+    }
+
+    /** The concurrent settlement waits for the space lock held by the closing: financial writes are serialized. */
+    void waitUntilBlockedOnTheSpaceLock() {
+        // A connection outside the closing transaction: activity statistics are frozen inside a transaction.
+        var probe = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+        while (System.nanoTime() < deadline) {
+            Integer waiting = probe.queryForObject(
+                    "select count(*) from pg_stat_activity where wait_event_type = 'Lock'", Integer.class);
+            if (waiting != null && waiting > 0) return;
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        throw new AssertionError("The concurrent settlement did not wait for the closing.");
+    }
+
+    /** Expense queries that run {@code onFirstRead} once, right after the first read of the entries of a month. */
+    ExpenseReportQueries interceptingEntries(Runnable onFirstRead) {
+        var delegate = new JdbcExpenseReportQueries(jdbc);
+        var done = new java.util.concurrent.atomic.AtomicBoolean();
+        return new ExpenseReportQueries() {
+            @Override
+            public List<com.malyah.accountmanager.expenses.application.ExpenseTotalsBucket> totals(UUID spaceId,
+                    com.malyah.accountmanager.expenses.application.ExpenseSelection selection) {
+                return delegate.totals(spaceId, selection);
+            }
+
+            @Override
+            public com.malyah.accountmanager.expenses.application.PaymentRecordPage payments(UUID spaceId,
+                    com.malyah.accountmanager.expenses.application.ExpenseSelection selection, int page, int size,
+                    com.malyah.accountmanager.expenses.application.PaymentSort sort,
+                    com.malyah.accountmanager.expenses.application.SortDirection direction) {
+                return delegate.payments(spaceId, selection, page, size, sort, direction);
+            }
+
+            @Override
+            public List<com.malyah.accountmanager.expenses.application.ReportedExpense> entries(UUID spaceId,
+                    com.malyah.accountmanager.expenses.application.ExpenseSelection selection) {
+                var rows = delegate.entries(spaceId, selection);
+                if (done.compareAndSet(false, true)) onFirstRead.run();
+                return rows;
+            }
+        };
     }
 
     /** Every closing row count, to prove nothing partial is left behind. */

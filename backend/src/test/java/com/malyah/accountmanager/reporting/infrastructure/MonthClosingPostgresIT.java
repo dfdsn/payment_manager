@@ -341,26 +341,6 @@ class MonthClosingPostgresIT extends MonthClosingTestSupport {
         assertThat(view(A, "2026-10").current().indicators().pendingCount()).isEqualTo(3);
     }
 
-    /** The concurrent settlement waits for the space lock held by the closing: financial writes are serialized. */
-    private void waitUntilBlockedOnTheSpaceLock() {
-        // A connection outside the closing transaction: activity statistics are frozen inside a transaction.
-        var probe = new org.springframework.jdbc.core.JdbcTemplate(new org.springframework.jdbc.datasource
-                .DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
-        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
-        while (System.nanoTime() < deadline) {
-            Integer waiting = probe.queryForObject(
-                    "select count(*) from pg_stat_activity where wait_event_type = 'Lock'", Integer.class);
-            if (waiting != null && waiting > 0) return;
-            try {
-                Thread.sleep(20);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                return;
-            }
-        }
-        throw new AssertionError("The concurrent settlement did not wait for the closing.");
-    }
-
     static void assertOctober(ClosingSnapshotView saved) {
         var totals = saved.indicators();
         assertThat(totals.plannedCount()).isEqualTo(8);

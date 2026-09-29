@@ -579,8 +579,10 @@ test('H07.1 closes a month with pending entries only after the warning is confir
     ],
   };
   const month = (saved: unknown) => ({ month: '2026-09', periodStart: '2026-09-01', periodEnd: '2026-09-30', dateBasis: 'DUE_DATE',
-    today: '2026-09-29', timeZone: 'America/Sao_Paulo', closable: true, saved, current: snapshot });
+    today: '2026-09-29', timeZone: 'America/Sao_Paulo', closable: true, status: saved ? 'UP_TO_DATE' : 'NOT_CLOSED',
+    changes: [], saved, current: snapshot });
   const posts: { key: string | undefined; body: unknown }[] = [];
+  await page.route('**/api/v1/reports/closings?*', route => route.fulfill(json({ year: 2026, closings: [] })));
   await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
   await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ token: 't' })));
   await page.route('**/api/v1/reports/closings/**', route => {
@@ -610,4 +612,56 @@ test('H07.1 closes a month with pending entries only after the warning is confir
   expect(posts).toHaveLength(1);
   expect(posts[0].key).toMatch(/^[0-9a-f-]{36}$/);
   expect(posts[0].body).toEqual({ acknowledgePending: true });
+});
+
+test('H07.2 distinguishes the saved snapshot from current data changed after the closing', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const indicators = { plannedCount: 3, plannedTotal: '1790.00', plannedEstimated: '180.00', paidCount: 1, paidTotal: '110.00',
+    pendingCount: 2, pendingTotal: '1680.00', pendingEstimated: '180.00', overdueCount: 1, overdueTotal: '1500.00',
+    overdueEstimated: '0.00', adjustmentIncrease: '0.00', adjustmentDiscount: '10.00', adjustmentNet: '-10.00' };
+  const snapshot = {
+    version: null, authorUserId: null, authorDisplayName: null, closedAt: null, businessDate: '2026-09-29',
+    timeZone: 'America/Sao_Paulo', pendingAcknowledged: false, contentDigest: 'd1', indicators,
+    categories: [{ categoryId: 'casa', categoryName: 'Casa', count: 2, plannedTotal: '1620.00', plannedEstimated: '0.00',
+      paidTotal: '110.00', pendingCount: 1, pendingTotal: '1500.00' },
+    { categoryId: null, categoryName: null, count: 1, plannedTotal: '180.00', plannedEstimated: '180.00', paidTotal: '0.00',
+      pendingCount: 1, pendingTotal: '180.00' }],
+    lines: [
+      { expenseId: 'e1', description: 'Aluguel do apartamento com descrição longa para telas estreitas', origin: 'ONE_OFF',
+        installmentNumber: null, installmentCount: null, referenceDate: '2026-09-10', dueDateInformed: true, status: 'PENDING',
+        chargeAmount: '1500.00', estimated: false, paidAmount: null, adjustment: null, overdue: true, categoryId: 'casa', categoryName: 'Casa' },
+      { expenseId: 'e2', description: 'Telefone', origin: 'ONE_OFF', installmentNumber: null, installmentCount: null,
+        referenceDate: '2026-09-05', dueDateInformed: true, status: 'PAID', chargeAmount: '120.00', estimated: false,
+        paidAmount: '110.00', adjustment: '-10.00', overdue: false, categoryId: 'casa', categoryName: 'Casa' },
+      { expenseId: 'e3', description: 'Luz', origin: 'RECURRENCE', installmentNumber: null, installmentCount: null,
+        referenceDate: '2026-09-20', dueDateInformed: true, status: 'PENDING', chargeAmount: '180.00', estimated: true,
+        paidAmount: null, adjustment: null, overdue: false, categoryId: null, categoryName: null },
+    ],
+  };
+  const month = (saved: unknown) => ({ month: '2026-09', periodStart: '2026-09-01', periodEnd: '2026-09-30', dateBasis: 'DUE_DATE',
+    today: '2026-09-29', timeZone: 'America/Sao_Paulo', closable: true, status: saved ? 'UP_TO_DATE' : 'NOT_CLOSED',
+    changes: [], saved, current: snapshot });
+  const saved = { ...snapshot, version: 1, authorUserId: 'actor', authorDisplayName: 'Diego',
+    closedAt: '2026-09-29T13:00:00Z', pendingAcknowledged: true };
+  const paid = { ...snapshot.lines[0], status: 'PAID', paidAmount: '1500.00', adjustment: '0.00', overdue: false };
+  const current = { ...snapshot, contentDigest: 'd2', indicators: { ...indicators, paidCount: 2, paidTotal: '1610.00',
+    pendingCount: 1, pendingTotal: '180.00', overdueCount: 0, overdueTotal: '0.00' }, lines: [paid, ...snapshot.lines.slice(1)] };
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/reports/closings?*', route => route.fulfill(json({ year: 2026, closings: [
+    { month: '2026-08', version: 1, authorDisplayName: 'Ana', closedAt: '2026-09-01T12:00:00Z', status: 'UP_TO_DATE' },
+    { month: '2026-09', version: 1, authorDisplayName: 'Diego', closedAt: '2026-09-29T13:00:00Z', status: 'OUTDATED' }] })));
+  await page.route('**/api/v1/reports/closings/**', route => route.fulfill(json({ ...month(saved), status: 'OUTDATED',
+    current, changes: [{ kind: 'CHANGED', expenseId: 'e1', fields: ['SITUATION', 'PAID_AMOUNT'], saved: snapshot.lines[0], current: paid }] })));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/fechamento');
+  await expect(page.getByTestId('closing-outdated')).toContainText('1 diferença(s)');
+  await expect(page.getByTestId('closing-changes')).toContainText('Situação: Pendente → Paga');
+  await expect(page.getByTestId('saved-pending')).toHaveText(/R\$\s*1\.680,00/);
+  await expect(page.getByTestId('current-pending')).toHaveText(/R\$\s*180,00/);
+  await expect(page.getByText('Retrato salvo (versão 1)')).toBeVisible();
+  await expect(page.getByTestId('closing-item-2026-09')).toContainText('Alterado depois');
+  await expect(page.getByTestId('closing-item-2026-08')).toContainText('Atualizado');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
 });

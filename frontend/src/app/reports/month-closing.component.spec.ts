@@ -4,7 +4,7 @@ import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { AccountAccessService } from '../identity/account-access.service';
 import { MonthClosingComponent } from './month-closing.component';
-import { ClosingSnapshot, MonthClosing, ReportService } from './report.service';
+import { ClosingLine, ClosingSnapshot, MonthClosing, ReportService } from './report.service';
 
 const indicators = (overrides: Partial<ClosingSnapshot['indicators']> = {}) => ({
   plannedCount: 3, plannedTotal: '1790.00', plannedEstimated: '180.00', paidCount: 1, paidTotal: '110.00',
@@ -29,16 +29,18 @@ const snapshot = (overrides: Partial<ClosingSnapshot> = {}): ClosingSnapshot => 
 
 const open = (month = '2026-10', overrides: Partial<MonthClosing> = {}): MonthClosing => ({
   month, periodStart: `${month}-01`, periodEnd: `${month}-31`, dateBasis: 'DUE_DATE', today: '2026-10-15',
-  timeZone: 'America/Sao_Paulo', closable: true, saved: null, current: snapshot(), ...overrides,
+  timeZone: 'America/Sao_Paulo', closable: true, status: 'NOT_CLOSED', changes: [], saved: null, current: snapshot(),
+  ...overrides,
 });
 
 const closed = (): MonthClosing => open('2026-10', {
+  status: 'UP_TO_DATE',
   saved: snapshot({ version: 1, authorUserId: 'u2', authorDisplayName: 'Convidado', closedAt: '2026-10-15T15:00:00Z', pendingAcknowledged: true }),
 });
 
 describe('MonthClosingComponent', () => {
   let fixture: ComponentFixture<MonthClosingComponent>;
-  const reports = { closing: vi.fn(), closeMonth: vi.fn() };
+  const reports = { closing: vi.fn(), closeMonth: vi.fn(), closings: vi.fn() };
   const element = () => fixture.nativeElement as HTMLElement;
   const text = () => element().textContent!.replace(/\s+/g, ' ');
   const byTestId = (id: string) => element().querySelector<HTMLElement>(`[data-testid="${id}"]`);
@@ -50,6 +52,7 @@ describe('MonthClosingComponent', () => {
     // 02:30 UTC on 1 November is still 31 October in São Paulo: the current month is October.
     vi.setSystemTime(new Date('2026-11-01T02:30:00Z'));
     reports.closing.mockImplementation((month: string) => of(open(month)));
+    reports.closings.mockImplementation((year: number) => of({ year, closings: [] }));
     await TestBed.configureTestingModule({
       imports: [MonthClosingComponent],
       providers: [provideRouter([]), { provide: ReportService, useValue: reports },
@@ -153,5 +156,70 @@ describe('MonthClosingComponent', () => {
     fixture.detectChanges();
     expect(text()).toContain('Não foi possível carregar o fechamento');
     expect(byTestId('current-planned')).toBeNull();
+  });
+
+  it('flags a closing whose current data differ and lists each difference with saved and current values', async () => {
+    const saved = closed().saved!;
+    const lines = saved.lines;
+    const paidInternet: ClosingLine = { ...lines[0], status: 'PAID', paidAmount: '1500.00', adjustment: '0.00', overdue: false };
+    const gift: ClosingLine = { ...lines[2], expenseId: 'e9', description: 'Presente', chargeAmount: '50.00', estimated: false, referenceDate: '2026-10-25' };
+    reports.closing.mockReturnValue(of(open('2026-10', {
+      status: 'OUTDATED', saved,
+      current: snapshot({ contentDigest: 'd2', indicators: indicators({ paidTotal: '1610.00', pendingTotal: '230.00' }) }),
+      changes: [
+        { kind: 'ADDED', expenseId: 'e9', fields: [], saved: null, current: gift },
+        { kind: 'CHANGED', expenseId: 'e1', fields: ['SITUATION', 'PAID_AMOUNT'], saved: lines[0], current: paidInternet },
+        { kind: 'REMOVED', expenseId: 'e3', fields: [], saved: lines[2], current: null },
+        { kind: 'CHANGED', expenseId: 'e2', fields: ['REFERENCE_DATE', 'CHARGE', 'ESTIMATE', 'CATEGORY'], saved: lines[1],
+          current: { ...lines[1], referenceDate: '2026-10-07', chargeAmount: '130.00', estimated: true, categoryId: null, categoryName: null } },
+      ],
+    })));
+    reports.closings.mockReturnValue(of({ year: 2026, closings: [
+      { month: '2026-09', version: 1, authorDisplayName: 'Admin', closedAt: '2026-10-01T13:00:00Z', status: 'UP_TO_DATE' },
+      { month: '2026-10', version: 1, authorDisplayName: 'Convidado', closedAt: '2026-10-15T15:00:00Z', status: 'OUTDATED' },
+    ] }));
+    fixture.componentInstance.reload();
+    fixture.detectChanges();
+
+    expect(byTestId('closing-status')!.classList).toContain('outdated');
+    expect(byTestId('closing-outdated')!.textContent).toContain('4 diferença(s)');
+    expect(byTestId('closing-up-to-date')).toBeNull();
+    const changes = byTestId('closing-changes')!.textContent!.replace(/\s+/g, ' ');
+    expect(changes).toContain('Presente · Entrou no mês depois do fechamento');
+    expect(changes).toContain('Situação: Pendente → Paga');
+    expect(changes).toContain('Valor pago: — → R$ 1.500,00');
+    expect(changes).toContain('Luz · Saiu do mês: cancelada ou com data em outro mês');
+    expect(changes).toContain('no retrato: R$ 180,00, pendente');
+    expect(changes).toContain('Vencimento: 05/10/2026 → 07/10/2026');
+    expect(changes).toContain('Cobrança: R$ 120,00 → R$ 130,00');
+    expect(changes).toContain('Estimativa: confirmado → a confirmar');
+    expect(changes).toContain('Categoria: Casa e contas → Sem categoria');
+    // Saved and current side by side, each with its own numbers.
+    expect(text()).toContain('Retrato salvo (versão 1)');
+    expect(byTestId('saved-paid')!.textContent).toContain('R$ 110,00');
+    expect(byTestId('current-paid')!.textContent).toContain('R$ 1.610,00');
+    expect(byTestId('closing-item-2026-10')!.textContent).toContain('Alterado depois');
+    expect(byTestId('closing-item-2026-09')!.textContent).toContain('Atualizado');
+  });
+
+  it('shows an up-to-date closing and opens a month from the annual list', async () => {
+    reports.closing.mockImplementation((month: string) => of(month === '2026-10' ? closed() : open(month)));
+    reports.closings.mockReturnValue(of({ year: 2026, closings: [
+      { month: '2026-09', version: 1, authorDisplayName: 'Admin', closedAt: '2026-10-01T13:00:00Z', status: 'UP_TO_DATE' },
+    ] }));
+    fixture.componentInstance.reload();
+    fixture.detectChanges();
+    expect(byTestId('closing-status')!.classList).toContain('closed');
+    expect(byTestId('closing-up-to-date')!.textContent).toContain('mesmos valores e classificações');
+    expect(byTestId('closing-changes')).toBeNull();
+    expect(byTestId('closings-list')!.textContent).toContain('Admin');
+    (byTestId('closings-list')!.querySelector('button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(reports.closing).toHaveBeenLastCalledWith('2026-09');
+    expect(reports.closings).toHaveBeenLastCalledWith(2026);
+    reports.closings.mockReturnValue(of({ year: 2025, closings: [] }));
+    fixture.componentInstance.goTo('2025-12');
+    fixture.detectChanges();
+    expect(byTestId('closings-empty')!.textContent).toContain('Nenhum mês de 2025');
   });
 });

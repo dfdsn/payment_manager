@@ -7,6 +7,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.malyah.accountmanager.reporting.application.CloseMonthCommand;
 import com.malyah.accountmanager.reporting.application.CloseMonthResult;
+import com.malyah.accountmanager.reporting.application.MonthClosingListView;
 import com.malyah.accountmanager.reporting.application.MonthClosingUseCase;
 import com.malyah.accountmanager.reporting.application.MonthClosingView;
 
@@ -34,6 +35,11 @@ final class TransactionalMonthClosingUseCase implements MonthClosingUseCase {
     @Override
     public MonthClosingView view(String actorEmail, String month) {
         return reads.execute(status -> delegate.view(actorEmail, month));
+    }
+
+    @Override
+    public MonthClosingListView list(String actorEmail, String year) {
+        return reads.execute(status -> delegate.list(actorEmail, year));
     }
 
     @Override

@@ -8,7 +8,8 @@ import { AccountAccessService } from '../identity/account-access.service';
 import { ApiError } from '../identity/initial-setup.service';
 import { ClosingSnapshotComponent } from './closing-snapshot.component';
 import {
-  MonthClosing, ReportService, currentMonth, formatCurrency, formatDate, formatInstant, monthLabel, shiftMonth,
+  MonthClosing, MonthClosingList, ReportService, closingChangeDetails, closingChangeLabel, currentMonth,
+  formatCurrency, formatDate, formatInstant, monthLabel, shiftMonth,
 } from './report.service';
 
 /**
@@ -34,6 +35,10 @@ export class MonthClosingComponent implements OnInit {
   readonly submitting = signal(false);
   readonly confirmError = signal<string | null>(null);
   readonly success = signal<string | null>(null);
+  readonly list = signal<MonthClosingList | null>(null);
+  readonly timeZone = signal('America/Sao_Paulo');
+  readonly closingChangeDetails = closingChangeDetails;
+  readonly closingChangeLabel = closingChangeLabel;
   readonly formatCurrency = formatCurrency;
   readonly formatDate = formatDate;
   readonly formatInstant = formatInstant;
@@ -43,12 +48,16 @@ export class MonthClosingComponent implements OnInit {
   readonly acknowledge = this.confirmForm.controls.acknowledge;
   readonly pendingCount = computed(() => this.closing()?.current.indicators.pendingCount ?? 0);
   private sequence = 0;
+  private listYear: number | null = null;
   /** Kept while the same confirmation is retried, so a lost answer never closes the month twice. */
   private key: string | null = null;
 
   ngOnInit(): void {
     this.identity.context().subscribe({
-      next: context => this.goTo(currentMonth(context.timeZone)),
+      next: context => {
+        this.timeZone.set(context.timeZone);
+        this.goTo(currentMonth(context.timeZone));
+      },
       error: error => this.fail(error, 'Não foi possível consultar sua sessão.'),
     });
   }
@@ -101,6 +110,7 @@ export class MonthClosingComponent implements OnInit {
         this.key = null;
         this.confirming.set(false);
         if (closing.month === this.month()) this.closing.set(closing);
+        this.loadList();
         this.success.set(`${monthLabel(closing.month)} fechado. O retrato foi salvo; as contas continuam como estavam.`);
       },
       error: error => {
@@ -125,6 +135,7 @@ export class MonthClosingComponent implements OnInit {
   private load(notice: string | null = null): void {
     const month = this.month();
     if (!month) return;
+    this.loadList();
     const sequence = ++this.sequence;
     this.loading.set(true);
     this.error.set(null);
@@ -141,6 +152,18 @@ export class MonthClosingComponent implements OnInit {
         this.closing.set(null);
         this.fail(error, 'Não foi possível carregar o fechamento. Verifique a conexão e tente novamente.');
       },
+    });
+  }
+
+  /** The annual list follows the year of the month on screen and is read again with it and after a closing. */
+  private loadList(): void {
+    const month = this.month();
+    if (!month) return;
+    const year = Number(month.slice(0, 4));
+    this.listYear = year;
+    this.reports.closings(year).subscribe({
+      next: list => { if (this.listYear === list.year) this.list.set(list); },
+      error: () => this.list.set(null),
     });
   }
 

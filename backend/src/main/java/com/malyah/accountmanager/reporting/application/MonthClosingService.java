@@ -5,7 +5,10 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.Year;
 import java.time.YearMonth;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.time.ZoneId;
 import java.util.HexFormat;
 import java.util.List;
@@ -23,8 +26,10 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContext;
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextQuery;
 import com.malyah.accountmanager.identity.application.FinancialMemberAccess;
 import com.malyah.accountmanager.reporting.application.port.MonthClosingRepository;
+import com.malyah.accountmanager.reporting.domain.ClosingComparison;
 import com.malyah.accountmanager.reporting.domain.ClosingLine;
 import com.malyah.accountmanager.reporting.domain.ClosingPeriod;
+import com.malyah.accountmanager.reporting.domain.ClosingStatus;
 import com.malyah.accountmanager.reporting.domain.ClosingSummary;
 import com.malyah.accountmanager.reporting.domain.Situation;
 
@@ -99,14 +104,49 @@ public final class MonthClosingService implements MonthClosingUseCase {
     }
 
     MonthClosingView view(AuthenticatedUserContext actor, YearMonth month, LocalDate today) {
-        var saved = repository.find(actor.spaceId(), month)
+        var version = repository.find(actor.spaceId(), month)
                 .map(closing -> repository.version(actor.spaceId(), closing.id(), closing.currentVersion())
-                        .orElseThrow(() -> new IllegalStateException("The version in force is missing.")))
-                .map(MonthClosingService::savedView).orElse(null);
-        var current = currentView(ClosingSummary.of(lines(actor, month, today)), today, actor.timeZone());
+                        .orElseThrow(() -> new IllegalStateException("The version in force is missing.")));
+        var current = ClosingSummary.of(lines(actor, month, today));
+        // H07.2: derived on every read from the saved lines and the current ones; nothing is stored or flagged.
+        var changes = version.map(saved -> ClosingComparison.between(saved.lines(), current.lines()))
+                .orElse(List.of());
         return new MonthClosingView(month.toString(), month.atDay(1), month.atEndOfMonth(),
-                ExpenseDateBasis.DUE_DATE.name(), today, actor.timeZone(), ClosingPeriod.closable(month, today), saved,
-                current);
+                ExpenseDateBasis.DUE_DATE.name(), today, actor.timeZone(), ClosingPeriod.closable(month, today),
+                ClosingComparison.status(version.isPresent(), changes).name(),
+                changes.stream().map(ClosingChangeView::of).toList(),
+                version.map(MonthClosingService::savedView).orElse(null),
+                currentView(current, today, actor.timeZone()));
+    }
+
+    @Override
+    public MonthClosingListView list(String actorEmail, String year) {
+        var requested = parseYear(year);
+        var actor = contexts.findByEmail(actorEmail);
+        var today = today(actor);
+        var selected = requested == null ? Year.from(today) : requested;
+        var heads = repository.list(actor.spaceId(), selected);
+        if (heads.isEmpty()) return new MonthClosingListView(selected.getValue(), List.of());
+        // One statement for the whole year, grouped by month: the same lines a closing of each month would read.
+        var selection = new ExpenseSelection(null, selected.atDay(1), selected.atMonth(12).atEndOfMonth(),
+                ExpenseDateBasis.DUE_DATE, null, false, null, false, null, ExpenseStatusFilter.ACTIVE, today);
+        var byMonth = new HashMap<YearMonth, List<ClosingLine>>();
+        expenses.entries(actor.spaceId(), selection).forEach(expense -> byMonth
+                .computeIfAbsent(YearMonth.from(expense.referenceDate()), key -> new ArrayList<>()).add(line(expense)));
+        var items = heads.stream().map(head -> {
+            var digest = ClosingSummary.of(byMonth.getOrDefault(head.month(), List.of())).digest();
+            var status = digest.equals(head.contentDigest()) ? ClosingStatus.UP_TO_DATE : ClosingStatus.OUTDATED;
+            return new MonthClosingListView.Item(head.month().toString(), head.currentVersion(),
+                    head.authorDisplayName(), head.createdAt(), status.name());
+        }).toList();
+        return new MonthClosingListView(selected.getValue(), items);
+    }
+
+    static Year parseYear(String value) {
+        if (value == null || value.isBlank()) return null;
+        if (!value.matches("\\d{4}") || Integer.parseInt(value) < 2000)
+            throw new ReportQueryValidationException("year", "Informe o ano no formato AAAA.");
+        return Year.of(Integer.parseInt(value));
     }
 
     /** Every non-cancelled entry of the month by due date, without filters, read in one statement. */

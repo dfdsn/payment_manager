@@ -32,17 +32,49 @@
     </p>
 
     @if (c.saved; as saved) {
-      <div class="status-card closed" data-testid="closing-status">
+      <div class="status-card" [class.closed]="c.status === 'UP_TO_DATE'" [class.outdated]="c.status === 'OUTDATED'" data-testid="closing-status">
         <p><strong>Mês fechado</strong> · versão {{ saved.version }}</p>
         <p>Fechado por {{ saved.authorDisplayName }} em {{ formatInstant(saved.closedAt!, c.timeZone) }}.
           Atraso calculado em {{ formatDate(saved.businessDate) }}.
           @if (saved.pendingAcknowledged) { Fechado com pendências, mediante aviso. }</p>
+        @if (c.status === 'OUTDATED') {
+          <p data-testid="closing-outdated"><strong>Alterado depois do fechamento:</strong> {{ c.changes.length }} diferença(s) entre o retrato salvo e os dados atuais.
+            O retrato salvo não muda; os dados atuais estão ao lado.</p>
+        } @else {
+          <p data-testid="closing-up-to-date">Atualizado: os dados atuais têm os mesmos valores e classificações do retrato salvo.</p>
+        }
       </div>
-      <mat-card appearance="outlined">
-        <mat-card-content>
-          <app-closing-snapshot [snapshot]="saved" prefix="saved" heading="Retrato salvo no fechamento" />
-        </mat-card-content>
-      </mat-card>
+      @if (c.changes.length > 0) {
+        <mat-card appearance="outlined">
+          <mat-card-content>
+            <h3 id="changes-title">O que mudou depois do fechamento</h3>
+            <ul class="change-list" aria-labelledby="changes-title" data-testid="closing-changes">
+              @for (change of c.changes; track change.expenseId) {
+                <li [attr.data-kind]="change.kind">
+                  <strong>{{ (change.current ?? change.saved)!.description }}</strong> · {{ closingChangeLabel(change) }}
+                  @if (change.kind === 'ADDED') { ({{ formatCurrency(change.current!.chargeAmount) }}, vence {{ formatDate(change.current!.referenceDate) }}) }
+                  @if (change.kind === 'REMOVED') { (no retrato: {{ formatCurrency(change.saved!.chargeAmount) }}, {{ change.saved!.status === 'PAID' ? 'paga' : 'pendente' }}) }
+                  @if (closingChangeDetails(change).length > 0) {
+                    <ul>@for (detail of closingChangeDetails(change); track detail) { <li>{{ detail }}</li> }</ul>
+                  }
+                </li>
+              }
+            </ul>
+          </mat-card-content>
+        </mat-card>
+      }
+      <div class="compare">
+        <mat-card appearance="outlined">
+          <mat-card-content>
+            <app-closing-snapshot [snapshot]="saved" prefix="saved" [heading]="'Retrato salvo (versão ' + saved.version + ')'" />
+          </mat-card-content>
+        </mat-card>
+        <mat-card appearance="outlined">
+          <mat-card-content>
+            <app-closing-snapshot [snapshot]="c.current" prefix="current" heading="Dados atuais do mês" />
+          </mat-card-content>
+        </mat-card>
+      </div>
     } @else {
       <div class="status-card" data-testid="closing-status">
         <p><strong>Mês não fechado.</strong> Abaixo, os dados atuais do mês.</p>
@@ -87,5 +119,27 @@
     }
   } @else if (loading()) {
     <p class="loading" role="status">Carregando o fechamento…</p>
+  }
+
+  @if (list(); as l) {
+    <mat-card appearance="outlined">
+      <mat-card-content>
+        <h2 id="closings-title">Fechamentos de {{ l.year }}</h2>
+        @if (l.closings.length === 0) {
+          <p data-testid="closings-empty">Nenhum mês de {{ l.year }} foi fechado.</p>
+        } @else {
+          <ul class="closing-months" aria-labelledby="closings-title" data-testid="closings-list">
+            @for (item of l.closings; track item.month) {
+              <li [attr.aria-current]="item.month === month() ? 'true' : null">
+                <button matButton type="button" (click)="goTo(item.month)">{{ monthLabel(item.month) }}</button>
+                <span>versão {{ item.version }} · {{ item.authorDisplayName }} · {{ formatInstant(item.closedAt, timeZone()) }}</span>
+                <span class="badge" [class.outdated]="item.status === 'OUTDATED'" [attr.data-testid]="'closing-item-' + item.month">
+                  {{ item.status === 'OUTDATED' ? 'Alterado depois' : 'Atualizado' }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </mat-card-content>
+    </mat-card>
   }
 </section>

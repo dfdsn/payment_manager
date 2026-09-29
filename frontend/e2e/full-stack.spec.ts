@@ -545,6 +545,24 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   })).status);
   expect(anonymousClosingStatus).toBe(401);
 
+  // H07.2: a later inclusion in the closed month flags the closing and never rewrites the saved snapshot.
+  const closedMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' })
+    .format(new Date());
+  await page.goto('/despesas');
+  await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Ajuste pós-fechamento');
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('12,34');
+  await page.locator('form').first().getByLabel('Situação').selectOption('PAID');
+  await page.getByLabel('Data do pagamento').fill(`${closedMonth}-01`);
+  await page.getByRole('button', { name: 'Salvar despesa' }).click();
+  await expect(page.getByText('Despesa cadastrada com sucesso.')).toBeVisible();
+  await page.goto('/fechamento');
+  await expect(page.getByTestId('closing-outdated')).toContainText('1 diferença(s)');
+  await expect(page.getByTestId('closing-changes')).toContainText('Ajuste pós-fechamento');
+  await expect(page.getByTestId('closing-changes')).toContainText('Entrou no mês depois do fechamento');
+  await expect(page.getByTestId('saved-planned')).toHaveText(currentPlanned!);
+  await expect(page.getByTestId('current-planned')).not.toHaveText(currentPlanned!);
+  await expect(page.getByTestId(`closing-item-${closedMonth}`)).toContainText('Alterado depois');
+
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);

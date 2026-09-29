@@ -5,6 +5,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.Year;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
@@ -13,6 +14,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.malyah.accountmanager.reporting.application.ClosingClaim;
+import com.malyah.accountmanager.reporting.application.ClosingHead;
 import com.malyah.accountmanager.reporting.application.ClosingIdempotencyConflictException;
 import com.malyah.accountmanager.reporting.application.ClosingVersion;
 import com.malyah.accountmanager.reporting.application.StoredClosing;
@@ -66,6 +68,19 @@ public final class JdbcMonthClosingRepository implements MonthClosingRepository 
                 insert into month_closings(id, space_id, month, current_version, created_at, updated_at)
                 values (?, ?, ?, 1, ?, ?) on conflict (space_id, month) do nothing
                 """, closingId, spaceId, month.atDay(1), Timestamp.from(at), Timestamp.from(at)) == 1;
+    }
+
+    @Override
+    public List<ClosingHead> list(UUID spaceId, Year year) {
+        return jdbc.query("""
+                select c.month, c.current_version, v.author_display_name, v.created_at, v.content_digest
+                  from month_closings c
+                  join month_closing_versions v on v.closing_id = c.id and v.version_number = c.current_version
+                 where c.space_id = ? and c.month between ? and ?
+                 order by c.month
+                """, (rs, row) -> new ClosingHead(YearMonth.from(rs.getObject(1, LocalDate.class)), rs.getInt(2),
+                rs.getString(3), rs.getTimestamp(4).toInstant(), rs.getString(5)), spaceId, year.atDay(1),
+                year.atMonth(12).atDay(1));
     }
 
     @Override

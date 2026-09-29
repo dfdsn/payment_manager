@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNotFoundException;
 import com.malyah.accountmanager.reporting.application.ClosingCategoryView;
+import com.malyah.accountmanager.reporting.application.ClosingChangeView;
 import com.malyah.accountmanager.reporting.application.ClosingIdempotencyConflictException;
 import com.malyah.accountmanager.reporting.application.ClosingLineView;
 import com.malyah.accountmanager.reporting.application.ClosingPendingConfirmationRequiredException;
@@ -33,6 +34,7 @@ import com.malyah.accountmanager.reporting.application.CloseMonthCommand;
 import com.malyah.accountmanager.reporting.application.CloseMonthResult;
 import com.malyah.accountmanager.reporting.application.DueIndicatorsView;
 import com.malyah.accountmanager.reporting.application.MonthAlreadyClosedException;
+import com.malyah.accountmanager.reporting.application.MonthClosingListView;
 import com.malyah.accountmanager.reporting.application.MonthClosingUseCase;
 import com.malyah.accountmanager.reporting.application.MonthClosingView;
 import com.malyah.accountmanager.reporting.application.ReportQueryValidationException;
@@ -65,7 +67,8 @@ class MonthClosingHttpTest {
         var current = new ClosingSnapshotView(null, null, null, null, LocalDate.of(2026, 10, 15),
                 "America/Sao_Paulo", false, "a".repeat(64), indicators, List.of(category), List.of(line));
         return new MonthClosingView("2026-10", LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 31), "DUE_DATE",
-                LocalDate.of(2026, 10, 15), "America/Sao_Paulo", true, saved, current);
+                LocalDate.of(2026, 10, 15), "America/Sao_Paulo", true, "OUTDATED", List.of(new ClosingChangeView("CHANGED",
+                EXPENSE, List.of("SITUATION", "PAID_AMOUNT"), line, line)), saved, current);
     }
 
     @Test
@@ -81,7 +84,28 @@ class MonthClosingHttpTest {
                 .andExpect(jsonPath("$.saved.indicators.pendingTotal").value("180.00"))
                 .andExpect(jsonPath("$.saved.categories[0].categoryName").doesNotExist())
                 .andExpect(jsonPath("$.saved.lines[0].estimated").value(true))
-                .andExpect(jsonPath("$.current.version").doesNotExist());
+                .andExpect(jsonPath("$.current.version").doesNotExist())
+                .andExpect(jsonPath("$.status").value("OUTDATED"))
+                .andExpect(jsonPath("$.changes[0].kind").value("CHANGED"))
+                .andExpect(jsonPath("$.changes[0].fields[1]").value("PAID_AMOUNT"))
+                .andExpect(jsonPath("$.changes[0].saved.chargeAmount").value("180.00"));
+    }
+
+    @Test
+    void listsTheClosedMonthsOfAYear() throws Exception {
+        when(useCase.list("ana@example.com", "2026")).thenReturn(new MonthClosingListView(2026, List.of(
+                new MonthClosingListView.Item("2026-10", 1, "Ana", Instant.parse("2026-10-15T15:00:00Z"),
+                        "UP_TO_DATE"))));
+        mvc.perform(get("/reports/closings").param("year", "2026").principal(() -> "ana@example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.year").value(2026))
+                .andExpect(jsonPath("$.closings[0].month").value("2026-10"))
+                .andExpect(jsonPath("$.closings[0].status").value("UP_TO_DATE"))
+                .andExpect(jsonPath("$.closings[0].closedAt").value("2026-10-15T15:00:00Z"));
+        when(useCase.list("ana@example.com", "26"))
+                .thenThrow(new ReportQueryValidationException("year", "Informe o ano no formato AAAA."));
+        mvc.perform(get("/reports/closings").param("year", "26").principal(() -> "ana@example.com"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors[0].field").value("year"));
     }
 
     @Test

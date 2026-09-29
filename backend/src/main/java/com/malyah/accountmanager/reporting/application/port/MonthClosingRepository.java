@@ -1,11 +1,14 @@
 package com.malyah.accountmanager.reporting.application.port;
 
 import java.time.Instant;
+import java.time.Year;
 import java.time.YearMonth;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import com.malyah.accountmanager.reporting.application.ClosingClaim;
+import com.malyah.accountmanager.reporting.application.ClosingHead;
 import com.malyah.accountmanager.reporting.application.ClosingVersion;
 import com.malyah.accountmanager.reporting.application.StoredClosing;
 
@@ -21,6 +24,9 @@ public interface MonthClosingRepository {
      * already has a closing; a concurrent creation waits for the first one and then returns false.
      */
     boolean create(UUID closingId, UUID spaceId, YearMonth month, Instant at);
+
+    /** Closed months of the year with the version in force, in month order. */
+    List<ClosingHead> list(UUID spaceId, Year year);
 
     Optional<StoredClosing> find(UUID spaceId, YearMonth month);
 

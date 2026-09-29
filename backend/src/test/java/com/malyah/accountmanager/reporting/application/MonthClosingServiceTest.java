@@ -226,6 +226,74 @@ class MonthClosingServiceTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void aLaterChangeMakesTheClosingOutdatedWithoutTouchingTheSavedVersion() {
+        entries = List.of(pendingEntry(1, "180.00", 20, false, false), paidEntry(2, "150.00", "155.00", 5));
+        var service = service(NOW);
+        var closed = service.close("ana@example.com", new CloseMonthCommand("2026-10", true, UUID.randomUUID()))
+                .closing();
+        assertThat(closed.status()).isEqualTo("UP_TO_DATE");
+        assertThat(closed.changes()).isEmpty();
+        assertThat(service.view("ana@example.com", "2026-10").status()).isEqualTo("UP_TO_DATE");
+
+        // Entry 1 is paid, entry 2 left the month and entry 3 entered it.
+        entries = List.of(new ReportedExpense(uuid(1), "RECURRENCE", null, "Conta 1", LocalDate.of(2026, 10, 20),
+                true, ExpenseStatus.PAID, new BigDecimal("180.00"), true, new BigDecimal("175.00"), false, null,
+                null), pendingEntry(3, "40.00", 2, true, true));
+        var view = service.view("ana@example.com", "2026-10");
+
+        assertThat(view.status()).isEqualTo("OUTDATED");
+        assertThat(view.changes()).extracting(ClosingChangeView::kind, ClosingChangeView::expenseId)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("ADDED", uuid(3)),
+                        org.assertj.core.groups.Tuple.tuple("REMOVED", uuid(2)),
+                        org.assertj.core.groups.Tuple.tuple("CHANGED", uuid(1)));
+        var changed = view.changes().getLast();
+        assertThat(changed.fields()).containsExactly("SITUATION", "ESTIMATE", "PAID_AMOUNT");
+        assertThat(changed.saved().status()).isEqualTo("PENDING");
+        assertThat(changed.current().paidAmount()).isEqualTo("175.00");
+        assertThat(view.changes().getFirst().saved()).isNull();
+        assertThat(view.changes().get(1).current()).isNull();
+        assertThat(view.saved()).isEqualTo(closed.saved());
+        assertThat(view.current().contentDigest()).isNotEqualTo(view.saved().contentDigest());
+        assertThat(repository.versions).hasSize(1);
+        assertThat(service.view("ana@example.com", "2026-09").status()).isEqualTo("NOT_CLOSED");
+    }
+
+    @Test
+    void theAnnualListComparesEachClosedMonthWithTheLinesOfThatMonthReadOnce() {
+        var service = service(NOW);
+        entries = List.of(paidEntry(2, "150.00", "150.00", 5));
+        service.close("ana@example.com", new CloseMonthCommand("2026-10", false, UUID.randomUUID()));
+        entries = List.of();
+        service.close("ana@example.com", new CloseMonthCommand("2026-09", false, UUID.randomUUID()));
+        selections.clear();
+
+        // October unchanged; one entry dated in September makes September outdated.
+        entries = List.of(paidEntry(2, "150.00", "150.00", 5), new ReportedExpense(uuid(7), "ONE_OFF", null, "Set",
+                LocalDate.of(2026, 9, 3), true, ExpenseStatus.PENDING, BigDecimal.ONE, true, null, true, null, null));
+        var list = service.list("ana@example.com", null);
+
+        assertThat(list.year()).isEqualTo(2026);
+        assertThat(list.closings()).extracting(MonthClosingListView.Item::month, MonthClosingListView.Item::status,
+                MonthClosingListView.Item::version, MonthClosingListView.Item::authorDisplayName)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("2026-09", "OUTDATED", 1, "Ana"),
+                        org.assertj.core.groups.Tuple.tuple("2026-10", "UP_TO_DATE", 1, "Ana"));
+        assertThat(list.closings().getFirst().closedAt()).isEqualTo(NOW);
+        assertThat(selections).containsExactly(new ExpenseSelection(null, LocalDate.of(2026, 1, 1),
+                LocalDate.of(2026, 12, 31), ExpenseDateBasis.DUE_DATE, null, false, null, false, null,
+                ExpenseStatusFilter.ACTIVE, LocalDate.of(2026, 10, 15)));
+
+        selections.clear();
+        assertThat(service.list("ana@example.com", "2025").closings()).isEmpty();
+        assertThat(service.list("ana@example.com", " ").year()).isEqualTo(2026);
+        assertThat(selections).hasSize(1);
+        for (var invalid : List.of("26", "20266", "1999", "abcd"))
+            assertThatThrownBy(() -> service.list("ana@example.com", invalid))
+                    .isInstanceOfSatisfying(ReportQueryValidationException.class,
+                            error -> assertThat(error.field()).isEqualTo("year"));
+        assertThat(MonthClosingService.parseYear("2000")).isEqualTo(java.time.Year.of(2000));
+    }
+
     /** In-memory closing store with the same contract as the PostgreSQL adapter. */
     static final class InMemoryClosings implements MonthClosingRepository {
         final Map<YearMonth, StoredClosing> headers = new HashMap<>();
@@ -252,6 +320,17 @@ class MonthClosingServiceTest {
         @Override
         public boolean create(UUID closingId, UUID spaceId, YearMonth month, Instant at) {
             return headers.putIfAbsent(month, new StoredClosing(closingId, month, 1, at, at)) == null;
+        }
+
+        @Override
+        public List<ClosingHead> list(UUID spaceId, java.time.Year year) {
+            return headers.values().stream().filter(header -> header.month().getYear() == year.getValue())
+                    .sorted(java.util.Comparator.comparing(StoredClosing::month))
+                    .map(header -> {
+                        var version = version(spaceId, header.id(), header.currentVersion()).orElseThrow();
+                        return new ClosingHead(header.month(), header.currentVersion(), version.authorDisplayName(),
+                                version.createdAt(), version.contentDigest());
+                    }).toList();
         }
 
         @Override

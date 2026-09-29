@@ -12,9 +12,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.malyah.accountmanager.reporting.application.CloseMonthCommand;
+import com.malyah.accountmanager.reporting.application.MonthClosingListView;
 import com.malyah.accountmanager.reporting.application.MonthClosingUseCase;
 import com.malyah.accountmanager.reporting.application.MonthClosingView;
 
@@ -27,6 +29,11 @@ class MonthClosingController {
 
     MonthClosingController(MonthClosingUseCase useCase) {
         this.useCase = useCase;
+    }
+
+    @GetMapping
+    MonthClosingListView list(Principal principal, @RequestParam(required = false) String year) {
+        return useCase.list(principal.getName(), year);
     }
 
     @GetMapping("/{month}")

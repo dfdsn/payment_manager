@@ -111,9 +111,25 @@ export interface ClosingSnapshot {
   indicators: DueIndicators; categories: ClosingCategory[]; lines: ClosingLine[];
 }
 
+export type ClosingStatus = 'NOT_CLOSED' | 'UP_TO_DATE' | 'OUTDATED';
+export type ClosingField = 'REFERENCE_DATE' | 'SITUATION' | 'CHARGE' | 'ESTIMATE' | 'PAID_AMOUNT' | 'CATEGORY';
+
+/** H07.2: one difference between the saved version and the current data, computed by the server. */
+export interface ClosingChange {
+  kind: 'ADDED' | 'REMOVED' | 'CHANGED'; expenseId: string; fields: ClosingField[];
+  saved: ClosingLine | null; current: ClosingLine | null;
+}
+
 export interface MonthClosing {
   month: string; periodStart: string; periodEnd: string; dateBasis: 'DUE_DATE'; today: string; timeZone: string;
-  closable: boolean; saved: ClosingSnapshot | null; current: ClosingSnapshot;
+  closable: boolean; status: ClosingStatus; changes: ClosingChange[]; saved: ClosingSnapshot | null;
+  current: ClosingSnapshot;
+}
+
+/** H07.2: the closed months of a year with the situation of each. */
+export interface MonthClosingList {
+  year: number;
+  closings: { month: string; version: number; authorDisplayName: string; closedAt: string; status: ClosingStatus }[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -142,6 +158,11 @@ export class ReportService {
   /** E07: the saved closing of the month, if any, and its current data. */
   closing(month: string) {
     return this.http.get<MonthClosing>(`${this.endpoint}/closings/${month}`);
+  }
+
+  /** H07.2: closed months of the year and whether each one differs from its saved version. */
+  closings(year: number) {
+    return this.http.get<MonthClosingList>(`${this.endpoint}/closings`, { params: new HttpParams().set('year', year) });
   }
 
   /** H07.1: the same key must be reused when the same confirmation is sent again after a failure. */
@@ -220,4 +241,37 @@ const PAYMENT_FIELD_LABELS: Record<string, string> = {
 
 export function paymentFields(fields: string[]): string {
   return fields.map(field => PAYMENT_FIELD_LABELS[field] ?? field).join(', ');
+}
+
+const CLOSING_FIELD_LABELS: Record<ClosingField, string> = {
+  REFERENCE_DATE: 'Vencimento', SITUATION: 'Situação', CHARGE: 'Cobrança', ESTIMATE: 'Estimativa',
+  PAID_AMOUNT: 'Valor pago', CATEGORY: 'Categoria',
+};
+
+function closingFieldValue(field: ClosingField, line: ClosingLine): string {
+  switch (field) {
+    case 'REFERENCE_DATE': return formatDate(line.referenceDate);
+    case 'SITUATION': return line.status === 'PAID' ? 'Paga' : 'Pendente';
+    case 'CHARGE': return formatCurrency(line.chargeAmount);
+    case 'ESTIMATE': return line.estimated ? 'a confirmar' : 'confirmado';
+    case 'PAID_AMOUNT': return line.paidAmount === null ? '—' : formatCurrency(line.paidAmount);
+    case 'CATEGORY': return line.categoryName ?? 'Sem categoria';
+  }
+}
+
+/** “Cobrança: R$ 100,00 → R$ 120,00” for each field of a changed entry, saved value first. */
+export function closingChangeDetails(change: ClosingChange): string[] {
+  if (change.kind !== 'CHANGED' || !change.saved || !change.current) return [];
+  const saved = change.saved;
+  const current = change.current;
+  return change.fields.map(field =>
+    `${CLOSING_FIELD_LABELS[field]}: ${closingFieldValue(field, saved)} → ${closingFieldValue(field, current)}`);
+}
+
+export function closingChangeLabel(change: ClosingChange): string {
+  switch (change.kind) {
+    case 'ADDED': return 'Entrou no mês depois do fechamento';
+    case 'REMOVED': return 'Saiu do mês: cancelada ou com data em outro mês';
+    case 'CHANGED': return 'Alterada depois do fechamento';
+  }
 }

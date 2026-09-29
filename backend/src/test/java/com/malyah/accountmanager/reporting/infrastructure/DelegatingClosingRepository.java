@@ -35,6 +35,12 @@ class DelegatingClosingRepository implements MonthClosingRepository {
     }
 
     @Override
+    public java.util.List<com.malyah.accountmanager.reporting.application.ClosingHead> list(UUID spaceId,
+            java.time.Year year) {
+        return delegate.list(spaceId, year);
+    }
+
+    @Override
     public Optional<StoredClosing> find(UUID spaceId, YearMonth month) {
         return delegate.find(spaceId, month);
     }
