@@ -55,7 +55,7 @@ class ReminderSettingsHttpTest {
                 new ReminderSettingsView.Schedule("08:30", "20:00", "09:00", "18:00"),
                 new ReminderSettingsView.WhatsApp(true, "+5511987654321", "+55 11 98765-4321", "4321", true,
                         new ReminderSettingsView.Consent(true, Instant.parse("2026-09-29T12:00:00Z"), "Admin", "4321"),
-                        new ReminderSettingsView.Provider(false, "PROVIDER_NOT_IMPLEMENTED", "indisponível"),
+                        new ReminderSettingsView.Provider(false, "PROVIDER_DISABLED", "indisponível"),
                         "PROVIDER_UNAVAILABLE", "WHATSAPP-RESUMOS-V1", "Autorizo..."));
     }
 
@@ -71,7 +71,7 @@ class ReminderSettingsHttpTest {
                 .andExpect(jsonPath("$.whatsapp.recipient").value("+5511987654321"))
                 .andExpect(jsonPath("$.whatsapp.state").value("PROVIDER_UNAVAILABLE"))
                 .andExpect(jsonPath("$.whatsapp.consent.grantedAt").exists())
-                .andExpect(jsonPath("$.whatsapp.provider.code").value("PROVIDER_NOT_IMPLEMENTED"))
+                .andExpect(jsonPath("$.whatsapp.provider.code").value("PROVIDER_DISABLED"))
                 .andExpect(jsonPath("$.whatsapp.token").doesNotExist())
                 .andExpect(jsonPath("$.whatsapp.provider.accessToken").doesNotExist());
     }

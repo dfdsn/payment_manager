@@ -361,6 +361,23 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   expect(avisoStatus).toBe('PENDING');
   const anonymousInbox = await page.evaluate(async () => (await fetch('/api/v1/notifications/inbox', { credentials: 'omit' })).status);
   expect(anonymousInbox).toBe(401);
+  // H08.4: the Meta webhook is the only path outside session and CSRF; with the integration off it answers 404,
+  // never 401/403. WhatsApp tracking is for the administrator only.
+  const webhook = await page.evaluate(async () => [
+    (await fetch('/api/v1/integrations/whatsapp/webhook', { method: 'POST', credentials: 'omit', body: '{}',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': 'sha256=00' } })).status,
+    (await fetch('/api/v1/integrations/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1',
+      { credentials: 'omit' })).status]);
+  expect(webhook).toEqual([404, 404]);
+  const summaryOfNotice = await guestPage.evaluate(async () => {
+    const response = await fetch('/api/v1/notifications/inbox?view=DISMISSED', { credentials: 'include' });
+    return (await response.json() as { items: { summary: { id: string } }[] }).items[0].summary.id;
+  });
+  const tracking = await Promise.all([guestPage, page].map(p => p.evaluate(async id => {
+    const response = await fetch(`/api/v1/notifications/reminders/summaries/${id}/whatsapp`, { credentials: 'include' });
+    return `${response.status} ${response.ok ? (await response.json() as { state: string; reason: string }).state : ''}`;
+  }, summaryOfNotice)));
+  expect(tracking).toEqual(['403 ', '200 NOT_PLANNED']);
 
   await guestPage.goto('/membros');
   await expect(guestPage.getByText(/Como convidado/)).toBeVisible();

@@ -94,6 +94,15 @@
             @if (s.whatsapp.enabled) { <button matButton="outlined" type="button" (click)="setChannel(false)" [disabled]="busy() !== null" data-testid="disable-channel">Desativar canal</button> }
             @if (s.whatsapp.consent.active) { <button matButton="outlined" type="button" (click)="revokeConsent()" [disabled]="busy() !== null" data-testid="revoke-consent">Revogar consentimento</button> }
           </div>
+          @if (s.whatsapp.consent.active && s.whatsapp.provider.available) {
+            <div class="test-panel" data-testid="whatsapp-test">
+              <p>Envie uma mensagem de teste, sem dados de contas, para {{ s.whatsapp.recipientFormatted }}. Ela usa o modelo de teste configurado no servidor.</p>
+              <div class="actions"><button matButton="outlined" type="button" (click)="sendTest()" [disabled]="testing() || busy() !== null" data-testid="send-test">{{ testing() ? 'Enviando teste…' : 'Enviar mensagem de teste' }}</button></div>
+              @if (testResult(); as t) {
+                <p role="status" data-testid="test-result" [attr.data-state]="t.state"><strong>{{ t.stateMessage }}</strong>@if (t.reasonMessage) { {{ t.reasonMessage }} } Número: {{ t.recipientMasked }}.</p>
+              }
+            </div>
+          }
           <p class="hint">Credenciais da Meta ficam somente na configuração do servidor; esta tela não as exibe. Ao transferir a administração, o número e o consentimento deixam de valer e o novo administrador precisa cadastrar os seus.</p>
         } @else {
           <p data-testid="guest-whatsapp">@if (s.whatsapp.hasRecipient) { O administrador cadastrou um número terminado em {{ s.whatsapp.recipientLastDigits }}. } @else { O administrador ainda não cadastrou um número. }

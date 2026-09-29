@@ -120,7 +120,7 @@ class MemberNotificationPostgresIT {
                 POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(26);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(27);
         jdbc = new JdbcTemplate(dataSource);
         tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         insertSpace(SPACE, "Casa");
@@ -137,7 +137,7 @@ class MemberNotificationPostgresIT {
         var materializer = new JdbcRecurringExpenseMaterializer(jdbc, tx);
         var generation = new JdbcRecurrenceGenerationJob(jdbc, tx, materializer, clock, Duration.ofMinutes(2), 25);
         // The real adapter of this version: the provider is not implemented, so an enabled channel cannot send.
-        WhatsAppProviderStatus provider = new UnavailableWhatsAppProvider();
+        WhatsAppProviderStatus provider = new MetaWhatsAppProvider(MetaWhatsAppProperties.disabled());
         settingsService = new ReminderSettingsService(new JdbcReminderSettingsRepository(jdbc), context, members,
                 provider, clock, UUID::randomUUID);
         settings = new TransactionalReminderSettingsUseCase(settingsService, tx);

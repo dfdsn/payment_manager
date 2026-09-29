@@ -11,7 +11,7 @@ const settings = (overrides: Partial<ReminderSettings> = {}, whatsapp: Partial<R
   whatsapp: {
     hasRecipient: false, recipient: null, recipientFormatted: null, recipientLastDigits: null, enabled: false,
     consent: { active: false, grantedAt: null, grantedByDisplayName: null, recipientLastDigits: null },
-    provider: { available: false, code: 'PROVIDER_NOT_IMPLEMENTED', message: 'O envio real pela Meta ainda não está disponível nesta versão (H08.4).' },
+    provider: { available: false, code: 'PROVIDER_DISABLED', message: 'O envio real pela Meta está desligado na configuração do servidor.' },
     state: 'RECIPIENT_REQUIRED', consentTextVersion: 'WHATSAPP-RESUMOS-V1', consentText: 'Autorizo o account_Manager a enviar resumos.',
     ...whatsapp,
   },
@@ -32,7 +32,7 @@ const consented = (version = 2, enabled = false) => settings({ version }, {
 describe('ReminderSettingsComponent', () => {
   let fixture: ComponentFixture<ReminderSettingsComponent>;
   const api = { settings: vi.fn(), events: vi.fn(), newIdempotencyKey: vi.fn(), changeSchedule: vi.fn(), changeRecipient: vi.fn(),
-    grantConsent: vi.fn(), revokeConsent: vi.fn(), changeChannel: vi.fn() };
+    grantConsent: vi.fn(), revokeConsent: vi.fn(), changeChannel: vi.fn(), sendTest: vi.fn() };
   const element = () => fixture.nativeElement as HTMLElement;
   const text = () => element().textContent!.replace(/\s+/g, ' ');
   const byTestId = (id: string) => element().querySelector<HTMLElement>(`[data-testid="${id}"]`);
@@ -72,7 +72,7 @@ describe('ReminderSettingsComponent', () => {
     expect((byTestId('first-time') as HTMLInputElement).value).toBe('09:00');
     expect((byTestId('second-time') as HTMLInputElement).value).toBe('18:00');
     expect(byTestId('whatsapp-state')!.dataset['state']).toBe('RECIPIENT_REQUIRED');
-    expect(byTestId('provider-status')!.textContent).toContain('ainda não está disponível');
+    expect(byTestId('provider-status')!.textContent).toContain('desligado na configuração do servidor');
     expect(byTestId('recipient')!.textContent).toContain('Não cadastrado');
     expect(byTestId('start-consent')).toBeNull();
     expect(byTestId('enable-channel')).toBeNull();
@@ -121,7 +121,7 @@ describe('ReminderSettingsComponent', () => {
     await click('enable-channel');
     expect(api.changeChannel).toHaveBeenCalledWith(2, true, 'key-3');
     expect(byTestId('whatsapp-state')!.dataset['state']).toBe('PROVIDER_UNAVAILABLE');
-    expect(byTestId('whatsapp-state')!.textContent).toContain('envio real ainda não está disponível');
+    expect(byTestId('whatsapp-state')!.textContent).toContain('envio pela Meta está desligado ou incompleto');
     expect(byTestId('channel-status')!.textContent).toContain('Ativado');
   });
 
@@ -174,5 +174,42 @@ describe('ReminderSettingsComponent', () => {
     element().querySelector<HTMLButtonElement>('.error-summary button')!.click();
     await render();
     expect(byTestId('whatsapp-state')).not.toBeNull();
+  });
+  it('sends one test to the consented number and says acceptance is not delivery (H08.4)', async () => {
+    const ready = consented(3, false);
+    ready.whatsapp.provider = { available: true, code: 'PROVIDER_READY', message: 'Envio pela Meta configurado.' };
+    await start(ready);
+    expect(byTestId('whatsapp-test')!.textContent).toContain('sem dados de contas');
+    api.sendTest.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 0 })));
+    await click('send-test');
+    expect(text()).toContain('tentar de novo não envia duas vezes');
+    api.sendTest.mockReturnValueOnce(of({ state: 'ACCEPTED', stateMessage: 'Aceito pela Meta. A entrega ainda não foi confirmada.',
+      kind: 'TEST', reason: null, reasonMessage: null, recipientMasked: '+55 ** *****-4321', itemCount: null, createdAt: null,
+      attemptedAt: null, acceptedAt: null, sentAt: null, deliveredAt: null, readAt: null, failedAt: null, attempts: [] }));
+    await click('send-test');
+    expect(api.sendTest).toHaveBeenNthCalledWith(1, 'key-1');
+    expect(api.sendTest).toHaveBeenNthCalledWith(2, 'key-1');
+    expect(byTestId('test-result')!.dataset['state']).toBe('ACCEPTED');
+    expect(byTestId('test-result')!.textContent).toContain('A entrega ainda não foi confirmada');
+    expect(byTestId('test-result')!.textContent).toContain('+55 ** *****-4321');
+    api.sendTest.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 409,
+      error: { code: 'WHATSAPP_TEST_TOO_SOON', message: 'Aguarde um minuto entre dois testes.' } })));
+    await click('send-test');
+    expect(api.sendTest).toHaveBeenLastCalledWith('key-2');
+    expect(text()).toContain('Aguarde um minuto entre dois testes.');
+  });
+
+  it('offers no test without consent or while the provider is unavailable (H08.4)', async () => {
+    await start(consented(2, true));
+    expect(byTestId('whatsapp-test')).toBeNull();
+    const noConsent = withNumber();
+    noConsent.whatsapp.provider = { available: true, code: 'PROVIDER_READY', message: 'ok' };
+    await start(noConsent);
+    expect(byTestId('whatsapp-test')).toBeNull();
+    await start(settings({ canManage: false }, { hasRecipient: true, recipientLastDigits: '4321',
+      consent: { active: true, grantedAt: null, grantedByDisplayName: null, recipientLastDigits: '4321' },
+      provider: { available: true, code: 'PROVIDER_READY', message: 'ok' }, state: 'READY' }));
+    expect(byTestId('whatsapp-test')).toBeNull();
+    expect(byTestId('send-test')).toBeNull();
   });
 });

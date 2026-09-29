@@ -20,5 +20,21 @@
         <app-reminder-summary-card [summary]="s" [showCurrent]="true" />
       </mat-card-content>
     </mat-card>
+    @if (whatsapp(); as w) {
+      <mat-card appearance="outlined" data-testid="whatsapp-delivery" [attr.data-state]="w.state">
+        <mat-card-content>
+          <h2>WhatsApp do administrador</h2>
+          <p><strong data-testid="whatsapp-delivery-state">{{ w.stateMessage }}</strong>@if (w.reasonMessage) { <span data-testid="whatsapp-delivery-reason"> {{ w.reasonMessage }}</span> }</p>
+          @if (w.recipientMasked) { <p>Número: {{ w.recipientMasked }}@if (w.itemCount) { · {{ w.itemCount }} {{ w.itemCount === 1 ? 'conta enviada' : 'contas enviadas' }} }</p> }
+          @if (whatsappSteps(w).length) {
+            <ul class="whatsapp-steps" data-testid="whatsapp-delivery-steps">
+              @for (step of whatsappSteps(w); track step.label) { <li>{{ step.label }}: {{ step.at }}</li> }
+            </ul>
+          }
+          <p class="hint">Aceito pela Meta não significa entregue: a entrega e a leitura chegam depois pelo webhook. Nada é reenviado automaticamente, e pagar continua sendo só no aplicativo.</p>
+        </mat-card-content>
+      </mat-card>
+    }
+    @if (whatsappError()) { <p class="hint" role="status" data-testid="whatsapp-delivery-error">{{ whatsappError() }}</p> }
   }
 </section>

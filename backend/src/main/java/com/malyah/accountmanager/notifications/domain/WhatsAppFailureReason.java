@@ -15,7 +15,9 @@ public enum WhatsAppFailureReason {
     PROVIDER_REJECTED("A Meta recusou a mensagem deste resumo. Confira o modelo aprovado e o número remetente."),
     DELIVERY_FAILED("A Meta informou que a mensagem deste resumo não foi entregue."),
     RECIPIENT_INVALID("O número configurado não pôde receber a mensagem. Confira o número em Lembretes."),
-    RESULT_UNCERTAIN("Não foi possível confirmar se a Meta recebeu a mensagem. Nada foi reenviado automaticamente.");
+    RESULT_UNCERTAIN("Não foi possível confirmar se a Meta recebeu a mensagem. Nada foi reenviado automaticamente."),
+    NOT_SENT_IN_WINDOW("O resumo não saiu pelo WhatsApp dentro do horário e não será enviado depois. Ele continua "
+            + "disponível aqui no aplicativo.");
 
     private final String message;
 

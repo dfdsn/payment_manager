@@ -339,7 +339,8 @@ npm run e2e
 
 - Email local: Mailpit, identificável e sem entrega externa. O backend usa SMTP em `SMTP_HOST`/`SMTP_PORT` e `SMTP_FROM`.
 - Email real: configure `SMTP_HOST=smtp.gmail.com`, porta 587, autenticação e STARTTLS; injete usuário por variável e senha de app pelo secret `smtp_password`. Não use a senha normal da conta nem registre o valor. P04 comprovou entrega real de confirmação, recuperação e convite; Mailpit continua sendo apenas a captura local reproduzível.
-- WhatsApp e IA: nenhum adapter falso foi criado. A H08.1 guarda número, consentimento e ativação, mas o provedor é informado como indisponível (`PROVIDER_NOT_IMPLEMENTED`) até a H08.4; nenhum resumo é enviado. IA fica indisponível até o E10.
+- WhatsApp: adapter real da Meta Cloud API (H08.4), **desligado por padrão** (`META_WHATSAPP_ENABLED=false`, provedor `PROVIDER_DISABLED`). Não existe adapter falso no código de produção; os testes usam um servidor HTTP local identificado como simulado (`FakeMetaServer`), que só existe no classpath de teste. Configuração e validação real: seção “Enviar e acompanhar pelo WhatsApp (H08.4)”.
+- IA: nenhum adapter falso foi criado; fica indisponível até o E10.
 - Produção: `APP_ENVIRONMENT=production` rejeita `APP_INTEGRATIONS_MODE` diferente de `real`.
 - Gmail real foi validado em P04; Meta e Groq reais continuam dependentes de P03/P05 e de credenciais fornecidas fora do Git.
 
@@ -973,7 +974,7 @@ Testes: `MonthClosingVersionsPostgresIT` (matriz V1–V13 em PostgreSQL real, co
 
 ## Lembretes e WhatsApp (E08)
 
-O E08 está em andamento: H08.1, H08.2 e H08.3 estão entregues; H08.4 (envio real pelo WhatsApp) é descrita abaixo com o seu estado, e H08.5 (retentativas, reconciliação e retomada) não existe nesta versão.
+O E08 está em andamento: H08.1, H08.2 e H08.3 estão entregues; H08.4 (envio real pelo WhatsApp) está implementada e **em validação** (falta a P03 e um envio real autorizado); H08.5 (retentativas, reconciliação e retomada) não existe nesta versão.
 
 ### Configurar canal, consentimento e horários (H08.1)
 
@@ -984,7 +985,7 @@ Tela **Lembretes e WhatsApp** (`/lembretes`, link em **Membros e acesso** e na b
 - **Número:** celular brasileiro; a entrada aceita espaços, parênteses, hífen e `+55` opcional e é guardada em E.164 (`+5511987654321`). Trocar o número revoga o consentimento anterior e desativa o canal.
 - **Consentimento:** explícito. O administrador lê o texto (versão `WHATSAPP-RESUMOS-V1`), confirma o número e marca o aceite; o servidor grava autor, número, versão do texto e instante UTC. Informar número ou ativar nunca cria consentimento. A revogação desativa o canal na mesma operação e o histórico fica guardado.
 - **Ativar:** exige número e consentimento ativo do administrador atual. Desativar mantém número e consentimento.
-- **Canal x provedor:** a tela mostra separadamente o que foi configurado e a disponibilidade do envio. Nesta versão o provedor responde `PROVIDER_NOT_IMPLEMENTED` e o estado efetivo de um canal ativo é `PROVIDER_UNAVAILABLE`. Não existe tela nem campo de token; as credenciais da Meta ficarão só na configuração do backend (H08.4, P03).
+- **Canal x provedor:** a tela mostra separadamente o que foi configurado e a disponibilidade do envio. Enquanto a Meta não estiver configurada no servidor, o provedor responde `PROVIDER_DISABLED` ou `PROVIDER_NOT_CONFIGURED` e o estado efetivo de um canal ativo é `PROVIDER_UNAVAILABLE`. Não existe tela nem campo de token; as credenciais da Meta ficam só na configuração do backend (H08.4).
 - **Transferência de administração:** na mesma transação da transferência, o consentimento é revogado (`ADMINISTRATION_TRANSFERRED`), o número é apagado e o canal desativado; os horários ficam. O novo administrador informa o próprio número e consente.
 - **Concorrência, repetição e auditoria:** toda alteração leva `expectedVersion` e `Idempotency-Key`; versão diferente dá `409 NOTIFICATION_SETTINGS_VERSION_CONFLICT` e a tela recarrega. Os eventos (horários, número mascarado, consentimento, ativação) aparecem para o administrador em “Alterações recentes”. Logs não contêm número.
 
@@ -1042,7 +1043,7 @@ GET /api/v1/notifications/reminders/summaries/{id}                      → 200 
 
 Erros: `400 REMINDER_QUERY_INVALID` (data fora de hoje…+60 dias, formato, horário), `404 REMINDER_SUMMARY_NOT_FOUND`, `401` e `403`.
 
-**Contratos preparados para as próximas histórias (não implementadas):** H08.3 lê `reminder_summaries`/`reminder_summary_items` e o canal `IN_APP` para listar os avisos; H08.4 envia os registros `WHATSAPP` com `PLANNED` usando `ReminderSummaryText` (mensagem única), revalida consentimento e conteúdo antes de cada tentativa e substitui `UnavailableWhatsAppProvider` pelo adapter da Meta; H08.5 usa a identidade espaço + data + horário + canal e a janela de `ReminderWindow` para não acumular tentativas. Nenhuma tabela de tentativa, aceite ou entrega foi criada.
+**Contratos preparados para as próximas histórias (não implementadas):** H08.3 lê `reminder_summaries`/`reminder_summary_items` e o canal `IN_APP` para listar os avisos; H08.4 envia os registros `WHATSAPP` com `PLANNED` usando `ReminderSummaryText` (mensagem única), revalida consentimento e conteúdo antes de cada tentativa e substitui `UnavailableWhatsAppProvider` pelo adapter da Meta (feito na H08.4: `MetaWhatsAppProvider`, com a mensagem em `WhatsAppSummaryTemplate`); H08.5 usa a identidade espaço + data + horário + canal e a janela de `ReminderWindow` para não acumular tentativas. Nenhuma tabela de tentativa, aceite ou entrega foi criada.
 
 Teste manual com datas controladas (não depende do relógio do servidor):
 
@@ -1061,7 +1062,7 @@ Testes: `ReminderSummaryPostgresIT` (matriz E1–E16 em PostgreSQL real, com rel
 Tela **Avisos** (`/avisos`, link em Despesas, Lembretes e na página do resumo). Não há configuração nova: os avisos seguem os horários da H08.1 e o job da H08.2. Nenhum push ou email é enviado.
 
 - **Quem recebe:** cada resumo gerado vira um aviso para cada membro ativo no momento da geração (administrador e convidado). O convidado recebe lembretes só por aqui. Um membro removido deixa de acessar (`403`) e não recebe avisos novos.
-- **Falhas do WhatsApp:** quando o canal está ativado com consentimento, mas o resumo não pôde seguir pelo WhatsApp, o administrador recebe um aviso “WhatsApp não enviado” (marcado “Somente administrador”). A mensagem vem de um catálogo fixo (`PROVIDER_UNAVAILABLE`, `PROVIDER_REJECTED`, `DELIVERY_FAILED`, `RECIPIENT_INVALID`, `RESULT_UNCERTAIN`), nunca da resposta do provedor. O convidado não recebe nem vê esses avisos; depois de uma transferência, o antigo administrador também deixa de vê-los. Nesta versão o único motivo que ocorre de verdade é `PROVIDER_UNAVAILABLE`; os demais são o contrato da H08.4.
+- **Falhas do WhatsApp:** quando o canal está ativado com consentimento, mas o resumo não pôde seguir pelo WhatsApp, o administrador recebe um aviso “WhatsApp não enviado” (marcado “Somente administrador”). A mensagem vem de um catálogo fixo (`PROVIDER_UNAVAILABLE`, `PROVIDER_REJECTED`, `DELIVERY_FAILED`, `RECIPIENT_INVALID`, `RESULT_UNCERTAIN`), nunca da resposta do provedor. O convidado não recebe nem vê esses avisos; depois de uma transferência, o antigo administrador também deixa de vê-los. Com a H08.4 todos os motivos passam a ocorrer, além de `NOT_SENT_IN_WINDOW` (o horário terminou antes do envio).
 - **Ler e dispensar:** estados individuais. “Marcar como lido” e “Dispensar” mudam só o aviso de quem clicou; dispensar também marca como lido e move o aviso para **Dispensados**. Repetir não muda o primeiro instante. Nada disso paga, cancela ou altera contas, nem interrompe os próximos lembretes.
 - **Histórico × atual:** o aviso e o resumo mostram as contas como estavam no horário. Na página do resumo, cada conta que mudou mostra a situação atual (“Agora: paga”, “Agora: cancelada”, “Agora vence em …”) e o link **Abrir conta** (`/despesas?despesa={id}`), que usa a autorização normal das despesas.
 - **Ordem e paginação:** mais recentes primeiro; 20 por página, até 100 (`size`). Contagem de não lidos na própria lista.
@@ -1084,3 +1085,64 @@ Teste manual:
 4. Abra o resumo, clique **Abrir conta**: a despesa continua pendente. Quite-a em Despesas e reabra o resumo: ela aparece com “Agora: paga”, e o próximo horário não a inclui.
 
 Testes: `MemberNotificationPostgresIT` (matriz N1–N14 em PostgreSQL real, com relógio controlado, concorrência, remoção e transferência), `MemberNotificationServiceTest`, `MemberNotificationHttpTest`, `ReminderSummaryServiceTest`, `notification-inbox.component.spec.ts`, `reminder-summary.component.spec.ts`, smoke E2E e E2E full-stack (job real gerando o aviso). O E2E full-stack usa o segundo horário de hoje e precisa rodar antes das 17:55 de São Paulo. Evidência: `docs/evidencias/H08.3.md`.
+
+### Enviar e acompanhar pelo WhatsApp (H08.4)
+
+**Estado: em validação.** O envio, o acompanhamento e o webhook estão implementados e testados contra uma Meta **simulada**. Nenhuma mensagem real foi enviada: faltam a P03 (número dedicado, credenciais, template aprovado, webhook HTTPS público e custo conhecido) e a autorização do Diego para o primeiro envio. Evidência: `docs/evidencias/H08.4.md`.
+
+**Como funciona**
+
+- Só o **administrador ativo** recebe, no número cadastrado e com o consentimento dele para esse número (H08.1). O convidado nunca recebe WhatsApp, nem como teste.
+- O job `WhatsAppDeliveryJob` roda a cada 30 s (`app.jobs.whatsapp.fixed-delay-ms`, desligável com `app.jobs.whatsapp.enabled=false`) e pega os resumos com canal `WHATSAPP` previsto. Para cada um: (1) numa transação curta, bloqueia a configuração do espaço e **revalida** administrador, consentimento, número, ativação, provedor, janela do horário e o conteúdo (as contas do resumo que continuam pendentes e elegíveis; nada novo entra); (2) chama a Meta **fora de transação**; (3) grava o resultado noutra transação curta.
+- **Uma entrega lógica por resumo** (espaço + data + horário + canal): índice único em `whatsapp_deliveries.summary_id`. Tentativas ficam em `whatsapp_attempts`; confirmações do webhook em `whatsapp_status_events` (uma por mensagem e situação).
+- **Aceite não é entrega.** Situações: `ATTEMPTING` (tentativa gravada), `ACCEPTED` (Meta aceitou e devolveu o id; **ainda não entregue**), `SENT`, `DELIVERED`, `READ` (confirmações do webhook), `FAILED`, `REJECTED`, `UNCERTAIN` (sem prova de aceite nem de recusa) e `SKIPPED` (bloqueado na revalidação, com o motivo).
+- **Nada é reenviado automaticamente.** Timeout depois de enviar, erro 5xx, resposta 200 sem id e tentativa interrompida (mais de 10 min em `ATTEMPTING`) viram `UNCERTAIN`, com aviso ao administrador. Retentativa e reconciliação são da H08.5. Não prometemos entrega exatamente uma vez.
+- Falhas viram aviso interno só para o administrador (H08.3): `PROVIDER_REJECTED`, `RECIPIENT_INVALID`, `PROVIDER_UNAVAILABLE`, `DELIVERY_FAILED`, `RESULT_UNCERTAIN`, `NOT_SENT_IN_WINDOW`. O aviso interno do resumo continua para os dois membros e o resto do aplicativo não depende da Meta.
+- Pagar é só no aplicativo: o webhook nunca altera despesas; mensagens recebidas (texto do usuário) são ignoradas e não são gravadas.
+- **Acompanhamento:** a página do resumo (`/lembretes/resumos/{id}`) mostra ao administrador a situação, o número mascarado, a quantidade enviada e os instantes de tentativa, aceite, envio, entrega, leitura ou falha (`GET /api/v1/notifications/reminders/summaries/{id}/whatsapp`; o convidado recebe `403`).
+- **Mensagem de teste:** em **Lembretes e WhatsApp**, com consentimento ativo e provedor configurado, o administrador pode enviar o template de teste (sem dados de contas) ao próprio número (`POST /api/v1/notifications/settings/whatsapp/test-message` com `Idempotency-Key`; repetir a chave não reenvia; um teste por minuto).
+
+**Classificação da resposta da Meta** (códigos a conferir na P03): 2xx com `messages[0].id` → `ACCEPTED`; 2xx sem id → `UNCERTAIN`; conexão recusada, DNS ou timeout de conexão → `FAILED` (`PROVIDER_UNAVAILABLE`); timeout depois de enviar ou 5xx → `UNCERTAIN`; 429 ou `130429`/`131048`/`131056`/`80007` → `FAILED` (`PROVIDER_UNAVAILABLE`); 4xx com `131026`/`131030` → `REJECTED` (`RECIPIENT_INVALID`); outro 4xx → `REJECTED` (`PROVIDER_REJECTED`). Só o código numérico é gravado; o texto da Meta nunca.
+
+**Configuração** (backend; nada disso vai para o banco ou para o Git)
+
+| Variável | Uso | Padrão |
+|---|---|---|
+| `META_WHATSAPP_ENABLED` | Liga o provedor. Só envia com todos os valores abaixo. | `false` |
+| `META_WHATSAPP_API_BASE_URL` | Graph API. Em produção precisa ser HTTPS. | `https://graph.facebook.com` |
+| `META_WHATSAPP_API_VERSION` | Versão da Graph API (`vNN.N`). Conferir a versão suportada na P03; a documentação consultada usa `v23.0` como exemplo. | vazio |
+| `META_WHATSAPP_PHONE_NUMBER_ID` | ID do número dedicado remetente. | vazio |
+| `META_WHATSAPP_SUMMARY_TEMPLATE` / `META_WHATSAPP_TEMPLATE_LANGUAGE` | Nome e idioma do template aprovado do resumo. | vazio / `pt_BR` |
+| `META_WHATSAPP_TEST_TEMPLATE` / `META_WHATSAPP_TEST_TEMPLATE_LANGUAGE` | Template de teste sem dados financeiros (opcional). | vazio / `pt_BR` |
+| `META_WHATSAPP_TOKEN` (`META_WHATSAPP_TOKEN_FILE`) | Token de acesso. **Segredo.** | vazio |
+| `META_WHATSAPP_APP_SECRET` (`META_WHATSAPP_APP_SECRET_FILE`) | App secret, usado só para validar a assinatura do webhook. **Segredo.** | vazio |
+| `META_WHATSAPP_VERIFY_TOKEN` (`META_WHATSAPP_VERIFY_TOKEN_FILE`) | Token que você define e informa no painel da Meta ao cadastrar o webhook. **Segredo.** | vazio |
+
+Em produção os três segredos ficam em `deploy/secrets/meta_whatsapp_token.txt`, `meta_whatsapp_app_secret.txt` e `meta_whatsapp_verify_token.txt` (Docker secrets montados em `/run/secrets/…`; o `docker-entrypoint.sh` os exporta). Os três arquivos precisam existir para o Compose subir; podem ficar vazios enquanto `META_WHATSAPP_ENABLED=false`. Com o provedor ligado e algum valor faltando, o log mostra `whatsapp_provider_incomplete missing=[…]` (só nomes, nunca valores) e nada é enviado.
+
+**Template do resumo proposto** (categoria utilidade, `pt_BR`; **precisa da aprovação do Diego e da Meta**, e o custo por mensagem depende da categoria e do mercado): corpo com quatro parâmetros de uma linha cada:
+
+```
+Contas a pagar em {{1}}.
+{{2}}
+{{3}}
+Lista completa: {{4}}
+```
+
+`{{1}}` data e horário (`05/10/2026, 09:00`); `{{2}}` quantidade, total, atrasadas e estimadas (`3 contas, total R$ 1.234,50, 1 atrasada (1 estimada: R$ 90,00)`); `{{3}}` até cinco contas separadas por `; `, descrições cortadas em 40 caracteres, e “e mais X contas”; `{{4}}` o link autenticado do resumo. Uma mensagem por resumo.
+
+**Webhook:** `https://contas.malyah.tech/api/v1/integrations/whatsapp/webhook` (campo `messages`). `GET` responde ao desafio (`hub.mode=subscribe`, `hub.verify_token`, `hub.challenge`) com o token certo, `403` com o errado e `404` com a integração desligada. `POST` valida `X-Hub-Signature-256` (HMAC-SHA256 do corpo bruto com o app secret) **antes** de ler qualquer coisa: sem assinatura válida → `401` e nada gravado. Só situações de mensagens conhecidas do número configurado são aplicadas, uma vez cada, sem voltar atrás (lido não volta para entregue; falha depois de entregue não rebaixa). Se chegar a situação de uma mensagem cujo id ainda não foi gravado enquanto há uma tentativa em andamento, a resposta é `503` para a Meta reenviar; erro de banco → `500` (reenvio deduplicado). É o único caminho sem sessão e sem CSRF; todas as outras mutações continuam exigindo CSRF.
+
+**Testes locais** (sem Meta real): `WhatsAppDeliveryPostgresIT` (matriz W1–W21 em PostgreSQL real com a Meta simulada por `FakeMetaServer`), `WhatsAppDeliveryServiceTest`, `WhatsAppDeliveryDomainTest`, `MetaWhatsAppProviderTest`, `WhatsAppHttpTest`, `WebhookSecurityHttpTest`, `reminder-summary.component.spec.ts`, `reminder-settings.component.spec.ts`, smoke E2E e E2E full-stack (webhook desligado responde `404` sem sessão/CSRF; acompanhamento `403` para o convidado). Nada disso comprova entrega real.
+
+**Validação real (pendente; somente com autorização do Diego)**
+
+1. P03 concluída: conta WhatsApp Business e número dedicado habilitados, versão da API definida, template do resumo e de teste aprovados, custo conhecido.
+2. Gravar os três segredos em `deploy/secrets/` (permissão `600`) e as variáveis no `.env` do servidor; `META_WHATSAPP_ENABLED=true`. Subir a versão e conferir no log que não há `whatsapp_provider_incomplete`.
+3. No painel da Meta, cadastrar o webhook acima com o mesmo verify token e assinar o campo `messages`. Esperado: verificação aceita (o backend respondeu o desafio).
+4. Em **Lembretes e WhatsApp**, como administrador com consentimento, **Enviar mensagem de teste**. Esperado: “Aceito pela Meta. A entrega ainda não foi confirmada.” e, depois do webhook, a entrega na página (ou a mensagem no celular). Registrar em `docs/evidencias/H08.4.md` só horário, situação e final do número; nunca token, id completo da mensagem ou número inteiro.
+5. Ativar o canal e aguardar um horário com contas de teste (sem dados financeiros reais). Conferir na página do resumo: `ACCEPTED` → `SENT` → `DELIVERED` (ou `READ`). Conferir que o convidado não recebeu nada.
+
+Diagnóstico: `docker compose logs backend | grep whatsapp_` mostra `whatsapp_delivery summaryId=… status=… errorCode=…`, `whatsapp_webhook applied=… duplicated=… stale=… ignored=…` e `whatsapp_webhook_rejected reason=signature`. Sem entrega confirmada: verifique o webhook no painel da Meta e o `401` por assinatura (app secret errado). `REJECTED` com `132001`: template inexistente ou idioma errado. `PROVIDER_UNAVAILABLE` repetido: Meta fora do ar ou limite; o aplicativo segue funcionando e os avisos internos continuam.
+
+**Pendente para a H08.5:** retentativas com espaçamento dentro da janela, reconciliação de `UNCERTAIN` (a partir de `whatsapp_attempts` e do id da Meta quando houver), suspensão do canal em falha permanente do destinatário e retomada. As tabelas já comportam várias tentativas por entrega (`attempt_number`).

@@ -80,7 +80,7 @@ class ReminderSettingsPostgresIT {
         dataSource = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(26);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(27);
         jdbc = new JdbcTemplate(dataSource);
         tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         insertSpace(SPACE, "Casa");
@@ -93,7 +93,7 @@ class ReminderSettingsPostgresIT {
                 Timestamp.from(NOW));
         contexts = IdentityTestFixtures.contexts(jdbc);
         handler = new ReminderSettingsService(new JdbcReminderSettingsRepository(jdbc), contexts,
-                new JdbcFinancialMemberAccess(jdbc), new UnavailableWhatsAppProvider(), Clock.fixed(NOW, ZoneOffset.UTC),
+                new JdbcFinancialMemberAccess(jdbc), new MetaWhatsAppProvider(MetaWhatsAppProperties.disabled()), Clock.fixed(NOW, ZoneOffset.UTC),
                 UUID::randomUUID);
         settings = new TransactionalReminderSettingsUseCase(handler, tx);
     }
@@ -110,7 +110,7 @@ class ReminderSettingsPostgresIT {
         assertThat(view.whatsapp().hasRecipient()).isFalse();
         assertThat(view.whatsapp().consent().active()).isFalse();
         assertThat(view.whatsapp().provider().available()).isFalse();
-        assertThat(view.whatsapp().provider().code()).isEqualTo("PROVIDER_NOT_IMPLEMENTED");
+        assertThat(view.whatsapp().provider().code()).isEqualTo("PROVIDER_DISABLED");
         assertThat(view.whatsapp().state()).isEqualTo("RECIPIENT_REQUIRED");
         assertThat(count("reminder_settings")).isZero();
     }

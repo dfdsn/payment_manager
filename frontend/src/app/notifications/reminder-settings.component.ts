@@ -9,11 +9,12 @@ import { RouterLink } from '@angular/router';
 import { Observable } from 'rxjs';
 import { ApiError } from '../identity/initial-setup.service';
 import { formatInstant } from '../reports/report.service';
+import { WhatsAppDelivery } from './reminder-summary.service';
 import {
   ReminderSettings, ReminderSettingsEvent, ReminderSettingsService, SETTINGS_EVENT_LABELS, WHATSAPP_STATE_LABELS,
 } from './reminder-settings.service';
 
-type Action = 'schedule' | 'recipient' | 'consent' | 'revoke' | 'enable' | 'disable';
+type Action = 'schedule' | 'recipient' | 'consent' | 'revoke' | 'enable' | 'disable' | 'test';
 
 /** The server moved on since the page was loaded: show its current state before asking again. */
 const RELOAD_CODES = new Set(['NOTIFICATION_SETTINGS_VERSION_CONFLICT', 'WHATSAPP_RECIPIENT_MISMATCH',
@@ -41,6 +42,8 @@ export class ReminderSettingsComponent implements OnInit {
   readonly success = signal<string | null>(null);
   readonly busy = signal<Action | null>(null);
   readonly consenting = signal(false);
+  readonly testResult = signal<WhatsAppDelivery | null>(null);
+  readonly testing = signal(false);
   readonly stateLabels = WHATSAPP_STATE_LABELS;
   readonly eventLabels = SETTINGS_EVENT_LABELS;
   readonly scheduleForm = this.fb.nonNullable.group({
@@ -112,6 +115,30 @@ export class ReminderSettingsComponent implements OnInit {
     if (!settings) return;
     this.run(enabled ? 'enable' : 'disable', key => this.api.changeChannel(settings.version, enabled, key),
       enabled ? 'Canal WhatsApp ativado.' : 'Canal WhatsApp desativado. Número e consentimento continuam salvos.');
+  }
+
+  /** H08.4: one test message to the consented number; the key is kept while the answer was lost. */
+  sendTest(): void {
+    if (this.testing() || this.busy()) return;
+    const key = this.keys.get('test') ?? this.api.newIdempotencyKey();
+    this.keys.set('test', key);
+    this.testing.set(true);
+    this.error.set(null);
+    this.success.set(null);
+    this.testResult.set(null);
+    this.api.sendTest(key).subscribe({
+      next: result => { this.keys.delete('test'); this.testing.set(false); this.testResult.set(result); },
+      error: (error: unknown) => {
+        this.testing.set(false);
+        if (error instanceof HttpErrorResponse && error.status === 0) {
+          this.error.set('Sem conexão com o servidor. Não sabemos se o teste saiu; tentar de novo não envia duas vezes.');
+          return;
+        }
+        this.keys.delete('test');
+        const body = error instanceof HttpErrorResponse ? error.error as ApiError | null : null;
+        this.error.set(body?.message ?? 'Não foi possível enviar o teste.');
+      },
+    });
   }
 
   reload(): void { this.load(); }

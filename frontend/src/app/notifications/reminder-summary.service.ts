@@ -26,11 +26,19 @@ export interface ReminderPreview {
 
 export const SLOT_LABELS: Record<ReminderSlot, string> = { FIRST: 'Primeiro horário', SECOND: 'Segundo horário' };
 
+/** H08.4, administrator only: the WhatsApp side of a summary or of a test. Acceptance is not delivery. */
+export interface WhatsAppDelivery {
+  state: string; stateMessage: string; kind: 'SUMMARY' | 'TEST'; reason: string | null; reasonMessage: string | null;
+  recipientMasked: string | null; itemCount: number | null; createdAt: string | null; attemptedAt: string | null;
+  acceptedAt: string | null; sentAt: string | null; deliveredAt: string | null; readAt: string | null; failedAt: string | null;
+  attempts: { number: number; startedAt: string; finishedAt: string | null; outcome: string | null }[];
+}
+
 export const CHANNEL_REASON_LABELS: Record<string, string> = {
   RECIPIENT_REQUIRED: 'sem número cadastrado',
   CONSENT_REQUIRED: 'sem consentimento do administrador atual',
   DISABLED: 'canal desativado',
-  PROVIDER_UNAVAILABLE: 'envio real ainda indisponível',
+  PROVIDER_UNAVAILABLE: 'envio pela Meta desligado ou incompleto no servidor',
 };
 
 @Injectable({ providedIn: 'root' })
@@ -46,5 +54,10 @@ export class ReminderSummaryService {
 
   summary(id: string): Observable<ReminderSummary> {
     return this.http.get<ReminderSummary>(`${this.endpoint}/summaries/${encodeURIComponent(id)}`);
+  }
+
+  /** H08.4: 403 for the guest, who never sees WhatsApp details. */
+  whatsapp(id: string): Observable<WhatsAppDelivery> {
+    return this.http.get<WhatsAppDelivery>(`${this.endpoint}/summaries/${encodeURIComponent(id)}/whatsapp`);
   }
 }

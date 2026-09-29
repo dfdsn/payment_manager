@@ -750,8 +750,8 @@ test('H07.3 generates a new version and still shows the first one as it was save
 
 test('H08.1 registers the number, an explicit consent and activation, and separates the channel from the provider', async ({ page }) => {
   const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
-  const provider = { available: false, code: 'PROVIDER_NOT_IMPLEMENTED',
-    message: 'O envio real pela Meta ainda não está disponível nesta versão (H08.4). A configuração fica salva e nenhum resumo é enviado pelo WhatsApp.' };
+  const provider = { available: false, code: 'PROVIDER_DISABLED',
+    message: 'O envio real pela Meta está desligado na configuração do servidor. A configuração fica salva e nenhum resumo é enviado pelo WhatsApp.' };
   const base = { canManage: true, timeZone: 'America/Sao_Paulo', updatedAt: '2026-09-29T12:00:00Z',
     schedule: { firstTime: '09:00', secondTime: '18:00', defaultFirstTime: '09:00', defaultSecondTime: '18:00' } };
   const whatsapp = { hasRecipient: false, recipient: null, recipientFormatted: null, recipientLastDigits: null, enabled: false,
@@ -797,7 +797,7 @@ test('H08.1 registers the number, an explicit consent and activation, and separa
   await expect(page.getByTestId('consent-status')).toContainText('Registrado por Diego');
   await page.getByRole('button', { name: 'Ativar canal' }).click();
   await expect(page.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'PROVIDER_UNAVAILABLE');
-  await expect(page.getByTestId('whatsapp-state')).toContainText('envio real ainda não está disponível');
+  await expect(page.getByTestId('whatsapp-state')).toContainText('envio pela Meta está desligado ou incompleto');
   expect(writes.map(write => write.path)).toEqual(['/schedule', '/whatsapp/recipient', '/whatsapp/consent', '/whatsapp/channel']);
   expect(writes.map(write => write.body)).toEqual([
     { expectedVersion: 0, firstTime: '08:30', secondTime: '20:00' },
@@ -834,7 +834,8 @@ test('H08.2 simulates a slot with the calendar of the server and opens a summary
     return route.fulfill(json({ date: '2026-10-05', slot: 'FIRST', scheduledTime: '09:00', timeZone: 'America/Sao_Paulo',
       today: '2026-10-05', summary: summary(null) }));
   });
-  await page.route('**/api/v1/notifications/reminders/summaries/**', route => route.fulfill(json(summary('s1'))));
+  await page.route('**/api/v1/notifications/reminders/summaries/**', route => route.request().url().endsWith('/whatsapp')
+    ? route.fulfill(json({ code: 'NOTIFICATION_ADMINISTRATOR_REQUIRED', message: 'x' }, 403)) : route.fulfill(json(summary('s1'))));
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/lembretes/previa');
@@ -845,7 +846,7 @@ test('H08.2 simulates a slot with the calendar of the server and opens a summary
   await expect(page.getByTestId('summary-details').locator('li').first()).toContainText('Atrasada');
   await expect(page.getByTestId('summary-remaining')).toHaveText('e mais 2 contas');
   await expect(page.getByTestId('summary-items').locator('li')).toHaveCount(7);
-  await expect(page.getByTestId('summary-channels')).toContainText('envio real ainda indisponível');
+  await expect(page.getByTestId('summary-channels')).toContainText('envio pela Meta desligado ou incompleto');
   await page.getByTestId('preview-date').fill('2026-10-12');
   await page.getByTestId('preview-second').check();
   await page.getByTestId('preview-submit').click();
@@ -918,6 +919,58 @@ test('H08.3 lists the member notifications, reads, dismisses and opens a summary
   await expect(page.getByTestId('summary-current')).toHaveText('Agora: paga');
   await expect(page.getByRole('link', { name: 'Abrir conta' })).toHaveAttribute('href', '/despesas?despesa=e1');
   expect(posts).toEqual(['POST n1 read', 'POST f1 dismiss']);
+  overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test('H08.4 sends the administrator test and tracks a summary on WhatsApp without calling acceptance a delivery', async ({ page }) => {
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  const settings = { canManage: true, timeZone: 'America/Sao_Paulo', version: 3, updatedAt: '2026-10-05T11:00:00Z',
+    schedule: { firstTime: '09:00', secondTime: '18:00', defaultFirstTime: '09:00', defaultSecondTime: '18:00' },
+    whatsapp: { hasRecipient: true, recipient: '+5511987654321', recipientFormatted: '+55 11 98765-4321', recipientLastDigits: '4321',
+      enabled: true, consent: { active: true, grantedAt: '2026-10-05T10:00:00Z', grantedByDisplayName: 'Admin', recipientLastDigits: '4321' },
+      provider: { available: true, code: 'PROVIDER_READY', message: 'Envio pela Meta configurado.' }, state: 'READY',
+      consentTextVersion: 'WHATSAPP-RESUMOS-V1', consentText: 'Autorizo.' } };
+  const delivery = (state: string, stateMessage: string, extra: Record<string, unknown> = {}) => ({ state, stateMessage,
+    kind: 'SUMMARY', reason: null, reasonMessage: null, recipientMasked: '+55 ** *****-4321', itemCount: 2,
+    createdAt: '2026-10-05T12:00:10Z', attemptedAt: '2026-10-05T12:00:10Z', acceptedAt: '2026-10-05T12:00:11Z', sentAt: null,
+    deliveredAt: null, readAt: null, failedAt: null, attempts: [], ...extra });
+  const keys: string[] = [];
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ token: 't' })));
+  await page.route('**/api/v1/notifications/settings**', route => route.fulfill(json(settings)));
+  await page.route('**/api/v1/notifications/settings/events', route => route.fulfill(json({ items: [] })));
+  await page.route('**/api/v1/notifications/settings/whatsapp/test-message', route => {
+    keys.push(route.request().headers()['idempotency-key']);
+    return route.fulfill(json(delivery('ACCEPTED', 'Aceito pela Meta. A entrega ainda não foi confirmada.', { kind: 'TEST', itemCount: null })));
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/lembretes');
+  await expect(page.getByTestId('whatsapp-state')).toHaveAttribute('data-state', 'READY');
+  await expect(page.getByTestId('whatsapp-state')).toContainText('Aceite da Meta não é entrega');
+  await page.getByTestId('send-test').click();
+  await expect(page.getByTestId('test-result')).toHaveAttribute('data-state', 'ACCEPTED');
+  await expect(page.getByTestId('test-result')).toContainText('A entrega ainda não foi confirmada');
+  expect(keys).toHaveLength(1);
+  let overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+
+  const item = (position: number, label: string) => ({ position, expenseId: `e${position}`, recurrenceId: null, description: label,
+    label, amount: '10.00', dueDate: '2026-10-05', estimated: false, overdue: false, forecast: false, origin: 'ONE_OFF',
+    installmentNumber: null, installmentCount: null, currentStatus: 'PENDING', currentDueDate: '2026-10-05' });
+  await page.route('**/api/v1/notifications/reminders/summaries/**', route => route.request().url().endsWith('/whatsapp')
+    ? route.fulfill(json(delivery('DELIVERED', 'Entregue no WhatsApp do administrador.', { sentAt: '2026-10-05T12:00:15Z',
+      deliveredAt: '2026-10-05T12:01:00Z' })))
+    : route.fulfill(json({ id: 's1', date: '2026-10-05', slot: 'FIRST', scheduledTime: '09:00', timeZone: 'America/Sao_Paulo',
+      generatedAt: '2026-10-05T12:00:05Z', count: 2, total: '20.00', estimatedCount: 0, estimatedTotal: '0.00', overdueCount: 0,
+      detailCount: 2, remaining: 0, items: [item(1, 'Luz'), item(2, 'Água')], link: 'http://localhost/lembretes/resumos/s1',
+      text: 'Contas a pagar', channels: [{ channel: 'IN_APP', status: 'PLANNED', reason: null },
+        { channel: 'WHATSAPP', status: 'PLANNED', reason: null }] })));
+  await page.goto('/lembretes/resumos/s1');
+  await expect(page.getByTestId('whatsapp-delivery')).toHaveAttribute('data-state', 'DELIVERED');
+  await expect(page.getByTestId('whatsapp-delivery-steps').locator('li')).toHaveCount(4);
+  await expect(page.getByTestId('whatsapp-delivery-steps')).toContainText('Aceito pela Meta');
+  await expect(page.getByTestId('whatsapp-delivery-steps')).toContainText('Entregue');
+  await expect(page.getByTestId('whatsapp-delivery')).toContainText('Aceito pela Meta não significa entregue');
   overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });

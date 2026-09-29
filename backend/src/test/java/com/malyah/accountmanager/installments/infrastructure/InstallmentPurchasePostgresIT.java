@@ -64,7 +64,7 @@ class InstallmentPurchasePostgresIT {
         var ds = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(ds).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(26);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(27);
         jdbc = new JdbcTemplate(ds);
         tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
         insertSpace(SPACE, "Casa"); insertSpace(OTHER, "Outra");
