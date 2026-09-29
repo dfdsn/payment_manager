@@ -16,7 +16,10 @@ import com.malyah.accountmanager.identity.application.AuthenticatedUserContextNo
 import com.malyah.accountmanager.reporting.application.ClosingIdempotencyConflictException;
 import com.malyah.accountmanager.reporting.application.ClosingPendingConfirmationRequiredException;
 import com.malyah.accountmanager.reporting.application.ExportLimitExceededException;
+import com.malyah.accountmanager.reporting.application.ClosingVersionConflictException;
+import com.malyah.accountmanager.reporting.application.ClosingVersionNotFoundException;
 import com.malyah.accountmanager.reporting.application.MonthAlreadyClosedException;
+import com.malyah.accountmanager.reporting.application.MonthNotClosedException;
 import com.malyah.accountmanager.reporting.application.ReportQueryValidationException;
 import com.malyah.accountmanager.reporting.domain.ClosingMonthNotAllowedException;
 
@@ -53,6 +56,22 @@ class ReportingApiExceptionHandler {
     @ExceptionHandler(MonthAlreadyClosedException.class)
     ResponseEntity<ApiError> alreadyClosed(MonthAlreadyClosedException exception) {
         return response(HttpStatus.CONFLICT, "MONTH_ALREADY_CLOSED", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(MonthNotClosedException.class)
+    ResponseEntity<ApiError> notClosed(MonthNotClosedException exception) {
+        return response(HttpStatus.CONFLICT, "MONTH_NOT_CLOSED", exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(ClosingVersionConflictException.class)
+    ResponseEntity<ApiError> versionConflict(ClosingVersionConflictException exception) {
+        return response(HttpStatus.CONFLICT, "CLOSING_VERSION_CONFLICT", exception.getMessage(),
+                List.of(new FieldError("expectedVersion", exception.getMessage())));
+    }
+
+    @ExceptionHandler(ClosingVersionNotFoundException.class)
+    ResponseEntity<ApiError> versionNotFound(ClosingVersionNotFoundException exception) {
+        return response(HttpStatus.NOT_FOUND, "CLOSING_VERSION_NOT_FOUND", exception.getMessage(), List.of());
     }
 
     @ExceptionHandler(ClosingIdempotencyConflictException.class)

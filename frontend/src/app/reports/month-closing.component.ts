@@ -8,15 +8,19 @@ import { AccountAccessService } from '../identity/account-access.service';
 import { ApiError } from '../identity/initial-setup.service';
 import { ClosingSnapshotComponent } from './closing-snapshot.component';
 import {
-  MonthClosing, MonthClosingList, ReportService, closingChangeDetails, closingChangeLabel, currentMonth,
+  ClosingVersion, ClosingVersionList, MonthClosing, MonthClosingList, ReportService, closingChangeDetails, closingChangeLabel, currentMonth,
   formatCurrency, formatDate, formatInstant, monthLabel, shiftMonth,
 } from './report.service';
 
 /**
  * E07: symbolic month closing by due date. Before closing, the page shows the current data of the month and asks for
  * a confirmation that names the pending entries; after closing, it shows the saved snapshot as stored by the server.
- * Closing never settles, hides or cancels an expense.
+ * Closing never settles, hides or cancels an expense. H07.2 shows what changed since the saved version; H07.3 saves a
+ * new version from the current data and lets every earlier version be read as it was saved.
  */
+const RELOAD_CODES = new Set(['MONTH_ALREADY_CLOSED', 'CLOSING_PENDING_CONFIRMATION_REQUIRED', 'CLOSING_VERSION_CONFLICT',
+  'MONTH_NOT_CLOSED']);
+
 @Component({
   selector: 'app-month-closing',
   imports: [ReactiveFormsModule, RouterLink, MatButtonModule, MatCardModule, ClosingSnapshotComponent],
@@ -36,6 +40,9 @@ export class MonthClosingComponent implements OnInit {
   readonly confirmError = signal<string | null>(null);
   readonly success = signal<string | null>(null);
   readonly list = signal<MonthClosingList | null>(null);
+  readonly versions = signal<ClosingVersionList | null>(null);
+  readonly shownVersion = signal<ClosingVersion | null>(null);
+  readonly mode = signal<'close' | 'version'>('close');
   readonly timeZone = signal('America/Sao_Paulo');
   readonly closingChangeDetails = closingChangeDetails;
   readonly closingChangeLabel = closingChangeLabel;
@@ -64,6 +71,8 @@ export class MonthClosingComponent implements OnInit {
 
   goTo(month: string): void {
     this.month.set(month);
+    this.versions.set(null);
+    this.shownVersion.set(null);
     this.monthControl.setValue(month, { emitEvent: false });
     this.cancelConfirmation();
     this.success.set(null);
@@ -83,11 +92,29 @@ export class MonthClosingComponent implements OnInit {
   reload(): void { this.load(); }
 
   startConfirmation(): void {
+    this.mode.set('close');
     this.key = crypto.randomUUID();
     this.acknowledge.setValue(false);
     this.confirmError.set(null);
     this.confirming.set(true);
   }
+
+  /** H07.3: a new version of the closed month, based on the version in force on screen. */
+  startVersion(): void {
+    this.startConfirmation();
+    this.mode.set('version');
+  }
+
+  showVersion(version: number): void {
+    const month = this.month();
+    if (!month) return;
+    this.reports.closingVersion(month, version).subscribe({
+      next: shown => { if (shown.month === this.month()) this.shownVersion.set(shown); },
+      error: error => this.fail(error, 'Não foi possível carregar a versão.'),
+    });
+  }
+
+  hideVersion(): void { this.shownVersion.set(null); }
 
   cancelConfirmation(): void {
     this.key = null;
@@ -97,32 +124,41 @@ export class MonthClosingComponent implements OnInit {
 
   confirm(): void {
     const month = this.month();
-    if (!month || !this.key || this.submitting()) return;
+    const expected = this.closing()?.saved?.version ?? null;
+    const generating = this.mode() === 'version';
+    if (!month || !this.key || this.submitting() || (generating && expected === null)) return;
     if (this.pendingCount() > 0 && !this.acknowledge.value) {
-      this.confirmError.set('Confirme que está ciente das contas pendentes para fechar o mês.');
+      this.confirmError.set('Confirme que está ciente das contas pendentes para continuar.');
       return;
     }
     this.submitting.set(true);
     this.confirmError.set(null);
-    this.reports.closeMonth(month, this.acknowledge.value, this.key).subscribe({
+    const request = generating
+      ? this.reports.generateClosingVersion(month, expected!, this.acknowledge.value, this.key)
+      : this.reports.closeMonth(month, this.acknowledge.value, this.key);
+    request.subscribe({
       next: closing => {
         this.submitting.set(false);
         this.key = null;
         this.confirming.set(false);
         if (closing.month === this.month()) this.closing.set(closing);
+        this.success.set(generating
+          ? `Versão ${closing.saved?.version} de ${monthLabel(closing.month)} gerada. As versões anteriores continuam salvas.`
+          : `${monthLabel(closing.month)} fechado. O retrato foi salvo; as contas continuam como estavam.`);
+        this.shownVersion.set(null);
+        this.loadVersions(closing);
         this.loadList();
-        this.success.set(`${monthLabel(closing.month)} fechado. O retrato foi salvo; as contas continuam como estavam.`);
       },
       error: error => {
         this.submitting.set(false);
         const body = error instanceof HttpErrorResponse ? error.error as ApiError | null : null;
         if (error instanceof HttpErrorResponse && error.status === 0) {
-          // Keep the key: sending again repeats the same request instead of creating another closing.
+          // Keep the key: sending again repeats the same request instead of saving twice.
           this.confirmError.set('Sem conexão com o servidor. Nada foi confirmado; tente novamente.');
           return;
         }
-        this.confirmError.set(body?.message ?? 'Não foi possível fechar o mês.');
-        if (body?.code === 'MONTH_ALREADY_CLOSED' || body?.code === 'CLOSING_PENDING_CONFIRMATION_REQUIRED') {
+        this.confirmError.set(body?.message ?? (generating ? 'Não foi possível gerar a versão.' : 'Não foi possível fechar o mês.'));
+        if (body?.code && RELOAD_CODES.has(body.code)) {
           // The month changed since it was loaded: show the server's current state before asking again.
           this.key = null;
           this.confirming.set(false);
@@ -144,6 +180,7 @@ export class MonthClosingComponent implements OnInit {
         if (sequence !== this.sequence) return;
         this.closing.set(closing);
         this.loading.set(false);
+        this.loadVersions(closing);
         if (notice) this.error.set(notice);
       },
       error: error => {
@@ -152,6 +189,14 @@ export class MonthClosingComponent implements OnInit {
         this.closing.set(null);
         this.fail(error, 'Não foi possível carregar o fechamento. Verifique a conexão e tente novamente.');
       },
+    });
+  }
+
+  private loadVersions(closing: MonthClosing): void {
+    if (!closing.saved) { this.versions.set(null); return; }
+    this.reports.closingVersions(closing.month).subscribe({
+      next: versions => { if (versions.month === this.month()) this.versions.set(versions); },
+      error: () => this.versions.set(null),
     });
   }
 

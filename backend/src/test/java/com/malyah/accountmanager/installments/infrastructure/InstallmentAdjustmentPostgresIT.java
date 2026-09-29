@@ -72,7 +72,7 @@ class InstallmentAdjustmentPostgresIT {
         var ds = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(ds).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(22);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
         jdbc = new JdbcTemplate(ds);
         tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
         insertSpace(SPACE, "Casa"); insertSpace(OTHER, "Outra");

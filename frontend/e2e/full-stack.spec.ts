@@ -563,6 +563,23 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await expect(page.getByTestId('current-planned')).not.toHaveText(currentPlanned!);
   await expect(page.getByTestId(`closing-item-${closedMonth}`)).toContainText('Alterado depois');
 
+  // H07.3: a new version takes the current data; version 1 keeps the values of the first closing.
+  const updatedPlanned = await page.getByTestId('current-planned').textContent();
+  await page.getByRole('button', { name: 'Gerar nova versão…' }).click();
+  if (await page.getByTestId('pending-warning').isVisible())
+    await page.getByLabel('Estou ciente das pendências e quero fechar mesmo assim.').check();
+  await page.getByRole('button', { name: 'Gerar versão 2' }).click();
+  await expect(page.getByTestId('closing-status')).toContainText('versão 2 (vigente)');
+  await expect(page.getByTestId('closing-up-to-date')).toBeVisible();
+  await expect(page.getByTestId('saved-planned')).toHaveText(updatedPlanned!);
+  await expect(page.getByTestId('version-2')).toContainText('Vigente');
+  await page.getByTestId('version-1').getByRole('button', { name: 'Ver retrato' }).click();
+  await expect(page.getByTestId('old-version')).toContainText('Versão 1 — anterior');
+  await expect(page.getByTestId('version-planned')).toHaveText(currentPlanned!);
+  await page.reload();
+  await expect(page.getByTestId('closing-status')).toContainText('versão 2 (vigente)');
+  await expect(page.getByTestId(`closing-item-${closedMonth}`)).toContainText('Atualizado');
+
   await page.goto('/entrar');
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);

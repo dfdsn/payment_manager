@@ -126,6 +126,18 @@ export interface MonthClosing {
   current: ClosingSnapshot;
 }
 
+/** H07.3: every version of a month, oldest first; {@code currentVersion} null while the month is not closed. */
+export interface ClosingVersionList {
+  month: string; currentVersion: number | null;
+  versions: {
+    version: number; authorUserId: string; authorDisplayName: string; closedAt: string; businessDate: string;
+    pendingAcknowledged: boolean; indicators: DueIndicators; current: boolean;
+  }[];
+}
+
+/** H07.3: the stored snapshot of one version. */
+export interface ClosingVersion { month: string; currentVersion: number; current: boolean; snapshot: ClosingSnapshot }
+
 /** H07.2: the closed months of a year with the situation of each. */
 export interface MonthClosingList {
   year: number;
@@ -163,6 +175,22 @@ export class ReportService {
   /** H07.2: closed months of the year and whether each one differs from its saved version. */
   closings(year: number) {
     return this.http.get<MonthClosingList>(`${this.endpoint}/closings`, { params: new HttpParams().set('year', year) });
+  }
+
+  /** H07.3: the versions of a closed month. */
+  closingVersions(month: string) {
+    return this.http.get<ClosingVersionList>(`${this.endpoint}/closings/${month}/versions`);
+  }
+
+  closingVersion(month: string, version: number) {
+    return this.http.get<ClosingVersion>(`${this.endpoint}/closings/${month}/versions/${version}`);
+  }
+
+  /** H07.3: {@code expectedVersion} is the version in force on screen; the key is reused on a retry. */
+  generateClosingVersion(month: string, expectedVersion: number, acknowledgePending: boolean, key: string) {
+    return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() => this.http.post<MonthClosing>(
+      `${this.endpoint}/closings/${month}/versions`, { expectedVersion, acknowledgePending },
+      { headers: new HttpHeaders({ 'Idempotency-Key': key }) })));
   }
 
   /** H07.1: the same key must be reused when the same confirmation is sent again after a failure. */

@@ -294,6 +294,118 @@ class MonthClosingServiceTest {
         assertThat(MonthClosingService.parseYear("2000")).isEqualTo(java.time.Year.of(2000));
     }
 
+    @Test
+    void aNewVersionIsTheCurrentContentAndBecomesTheVersionInForce() {
+        entries = List.of(pendingEntry(1, "180.00", 20, false, false));
+        var closed = service(NOW).close("ana@example.com", new CloseMonthCommand("2026-10", true, UUID.randomUUID()));
+        entries = List.of(new ReportedExpense(uuid(1), "RECURRENCE", null, "Conta 1", LocalDate.of(2026, 10, 20),
+                true, ExpenseStatus.PAID, new BigDecimal("180.00"), true, new BigDecimal("175.00"), false, null,
+                null));
+        assertThat(service(NOW).view("ana@example.com", "2026-10").status()).isEqualTo("OUTDATED");
+        var later = Instant.parse("2026-10-16T13:00:00Z");
+        var key = UUID.randomUUID();
+        locks.clear();
+
+        var result = service(later).generateVersion("ana@example.com",
+                new GenerateVersionCommand("2026-10", 1, false, key));
+
+        assertThat(result.replayed()).isFalse();
+        assertThat(locks).containsExactly(SPACE + "/" + USER + "/null");
+        assertThat(repository.locked).containsExactly(YearMonth.of(2026, 10));
+        var saved = result.closing().saved();
+        assertThat(saved.version()).isEqualTo(2);
+        assertThat(saved.closedAt()).isEqualTo(later);
+        assertThat(saved.businessDate()).isEqualTo(LocalDate.of(2026, 10, 16));
+        assertThat(saved.pendingAcknowledged()).isFalse();
+        assertThat(saved.indicators().paidTotal()).isEqualTo("175.00");
+        assertThat(result.closing().status()).isEqualTo("UP_TO_DATE");
+        assertThat(repository.headers.get(YearMonth.of(2026, 10)).currentVersion()).isEqualTo(2);
+        assertThat(repository.headers.get(YearMonth.of(2026, 10)).updatedAt()).isEqualTo(later);
+        assertThat(repository.events).containsExactly("MONTH_CLOSED/1/" + USER, "VERSION_GENERATED/2/" + USER);
+        assertThat(repository.hashes.get(key))
+                .isEqualTo(MonthClosingService.hash("GENERATE_VERSION", "2026-10", "1", "false"));
+
+        var list = service(later).versions("ana@example.com", "2026-10");
+        assertThat(list.currentVersion()).isEqualTo(2);
+        assertThat(list.versions()).extracting(ClosingVersionListView.Item::version,
+                ClosingVersionListView.Item::current).containsExactly(org.assertj.core.groups.Tuple.tuple(1, false),
+                org.assertj.core.groups.Tuple.tuple(2, true));
+        assertThat(list.versions().getFirst().indicators().pendingTotal()).isEqualTo("180.00");
+        assertThat(list.versions().getFirst().closedAt()).isEqualTo(NOW);
+        var first = service(later).version("ana@example.com", "2026-10", "1");
+        assertThat(first.current()).isFalse();
+        assertThat(first.currentVersion()).isEqualTo(2);
+        assertThat(first.snapshot()).isEqualTo(closed.closing().saved());
+        assertThat(service(later).version("ana@example.com", "2026-10", "2").current()).isTrue();
+
+        var repeated = service(later).generateVersion("ana@example.com",
+                new GenerateVersionCommand("2026-10", 1, false, key));
+        assertThat(repeated.replayed()).isTrue();
+        assertThat(repository.versions).hasSize(2);
+    }
+
+    @Test
+    void refusesStaleVersionsUnclosedMonthsPendingWithoutWarningAndInvalidRequests() {
+        var service = service(NOW);
+        assertThatThrownBy(() -> service.generateVersion("ana@example.com",
+                new GenerateVersionCommand("2026-10", 1, true, UUID.randomUUID())))
+                .isInstanceOf(MonthNotClosedException.class).hasMessageContaining("ainda não foi fechado");
+        service.close("ana@example.com", new CloseMonthCommand("2026-10", false, UUID.randomUUID()));
+        assertThatThrownBy(() -> service.generateVersion("ana@example.com",
+                new GenerateVersionCommand("2026-10", 2, true, UUID.randomUUID())))
+                .isInstanceOfSatisfying(ClosingVersionConflictException.class, error -> {
+                    assertThat(error.currentVersion()).isEqualTo(1);
+                    assertThat(error.getMessage()).contains("versão vigente: 1");
+                });
+        entries = List.of(pendingEntry(1, "10.00", 2, true, true), pendingEntry(2, "20.00", 3, true, true));
+        assertThatThrownBy(() -> service.generateVersion("ana@example.com",
+                new GenerateVersionCommand("2026-10", 1, false, UUID.randomUUID())))
+                .isInstanceOfSatisfying(ClosingPendingConfirmationRequiredException.class,
+                        error -> assertThat(error.pendingCount()).isEqualTo(2));
+        assertThat(repository.versions).hasSize(1);
+        for (var invalid : java.util.Arrays.asList(null, 0, -1))
+            assertThatThrownBy(() -> service.generateVersion("ana@example.com",
+                    new GenerateVersionCommand("2026-10", invalid, true, UUID.randomUUID())))
+                    .isInstanceOfSatisfying(ReportQueryValidationException.class,
+                            error -> assertThat(error.field()).isEqualTo("expectedVersion"));
+        assertThatThrownBy(() -> service.generateVersion("ana@example.com",
+                new GenerateVersionCommand("2026-10", 1, true, null)))
+                .isInstanceOfSatisfying(ReportQueryValidationException.class,
+                        error -> assertThat(error.field()).isEqualTo("Idempotency-Key"));
+        assertThatThrownBy(() -> service.generateVersion("ana@example.com",
+                new GenerateVersionCommand("out/2026", 1, true, UUID.randomUUID())))
+                .isInstanceOfSatisfying(ReportQueryValidationException.class,
+                        error -> assertThat(error.field()).isEqualTo("month"));
+        assertThatThrownBy(() -> service.generateVersion("ana@example.com", null))
+                .isInstanceOf(NullPointerException.class);
+        assertThat(repository.events).hasSize(1);
+        // Consulting versions.
+        assertThat(service.versions("ana@example.com", "2026-09").versions()).isEmpty();
+        assertThat(service.versions("ana@example.com", "2026-09").currentVersion()).isNull();
+        assertThatThrownBy(() -> service.versions("ana@example.com", null))
+                .isInstanceOf(ReportQueryValidationException.class);
+        assertThatThrownBy(() -> service.version("ana@example.com", "2026-10", "5"))
+                .isInstanceOf(ClosingVersionNotFoundException.class);
+        assertThatThrownBy(() -> service.version("ana@example.com", "2026-09", "1"))
+                .isInstanceOf(ClosingVersionNotFoundException.class);
+        for (var invalid : java.util.Arrays.asList(null, "0", "01", "x", "1234567"))
+            assertThatThrownBy(() -> service.version("ana@example.com", "2026-10", invalid))
+                    .isInstanceOfSatisfying(ReportQueryValidationException.class,
+                            error -> assertThat(error.field()).isEqualTo("version"));
+        assertThat(MonthClosingService.parseVersion("999999")).isEqualTo(999999);
+    }
+
+    @Test
+    void aVersionInForceThatCannotBeAdvancedIsAnError() {
+        var service = service(NOW);
+        service.close("ana@example.com", new CloseMonthCommand("2026-10", false, UUID.randomUUID()));
+        repository.refuseAdvance = true;
+        assertThatThrownBy(() -> service.generateVersion("ana@example.com",
+                new GenerateVersionCommand("2026-10", 1, false, UUID.randomUUID())))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(repository.events).hasSize(1);
+    }
+
     /** In-memory closing store with the same contract as the PostgreSQL adapter. */
     static final class InMemoryClosings implements MonthClosingRepository {
         final Map<YearMonth, StoredClosing> headers = new HashMap<>();
@@ -301,6 +413,8 @@ class MonthClosingServiceTest {
         final Map<UUID, String> hashes = new HashMap<>();
         final Map<UUID, UUID> completed = new HashMap<>();
         final List<String> events = new ArrayList<>();
+        final List<YearMonth> locked = new ArrayList<>();
+        boolean refuseAdvance;
 
         @Override
         public ClosingClaim claim(UUID spaceId, UUID actorId, String operation, UUID key, String requestHash,
@@ -336,6 +450,30 @@ class MonthClosingServiceTest {
         @Override
         public Optional<StoredClosing> find(UUID spaceId, YearMonth month) {
             return Optional.ofNullable(headers.get(month));
+        }
+
+        @Override
+        public Optional<StoredClosing> lock(UUID spaceId, YearMonth month) {
+            locked.add(month);
+            return find(spaceId, month);
+        }
+
+        @Override
+        public boolean advance(UUID spaceId, UUID closingId, int fromVersion, int toVersion, Instant at) {
+            if (refuseAdvance) return false;
+            var header = headers.values().stream().filter(h -> h.id().equals(closingId)).findFirst().orElseThrow();
+            if (header.currentVersion() != fromVersion || version(spaceId, closingId, toVersion).isEmpty())
+                return false;
+            headers.put(header.month(), new StoredClosing(closingId, header.month(), toVersion, header.createdAt(), at));
+            return true;
+        }
+
+        @Override
+        public List<VersionEntry> versions(UUID spaceId, UUID closingId) {
+            return versions.values().stream().filter(v -> v.closingId().equals(closingId))
+                    .sorted(java.util.Comparator.comparingInt(ClosingVersion::number))
+                    .map(v -> new VersionEntry(v.number(), v.authorUserId(), v.authorDisplayName(), v.createdAt(),
+                            v.businessDate(), v.pendingAcknowledged(), v.indicators())).toList();
         }
 
         @Override

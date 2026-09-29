@@ -33,17 +33,67 @@
 
     @if (c.saved; as saved) {
       <div class="status-card" [class.closed]="c.status === 'UP_TO_DATE'" [class.outdated]="c.status === 'OUTDATED'" data-testid="closing-status">
-        <p><strong>Mês fechado</strong> · versão {{ saved.version }}</p>
-        <p>Fechado por {{ saved.authorDisplayName }} em {{ formatInstant(saved.closedAt!, c.timeZone) }}.
+        <p><strong>Mês fechado</strong> · versão {{ saved.version }} (vigente)</p>
+        <p>{{ saved.version === 1 ? 'Fechado' : 'Versão gerada' }} por {{ saved.authorDisplayName }} em {{ formatInstant(saved.closedAt!, c.timeZone) }}.
           Atraso calculado em {{ formatDate(saved.businessDate) }}.
-          @if (saved.pendingAcknowledged) { Fechado com pendências, mediante aviso. }</p>
+          @if (saved.pendingAcknowledged) { Salvo com pendências, mediante aviso. }</p>
         @if (c.status === 'OUTDATED') {
           <p data-testid="closing-outdated"><strong>Alterado depois do fechamento:</strong> {{ c.changes.length }} diferença(s) entre o retrato salvo e os dados atuais.
-            O retrato salvo não muda; os dados atuais estão ao lado.</p>
+            O retrato salvo não muda; os dados atuais estão ao lado. Para atualizar o fechamento, gere uma nova versão.</p>
         } @else {
           <p data-testid="closing-up-to-date">Atualizado: os dados atuais têm os mesmos valores e classificações do retrato salvo.</p>
         }
       </div>
+      @if (!confirming()) {
+        <div><button matButton="filled" type="button" (click)="startVersion()" data-testid="generate-version">Gerar nova versão…</button></div>
+      }
+    } @else {
+      <div class="status-card" data-testid="closing-status">
+        <p><strong>Mês não fechado.</strong> Abaixo, os dados atuais do mês.</p>
+        @if (!c.closable) { <p data-testid="closing-not-allowed">Só é possível fechar o mês atual ou meses anteriores.</p> }
+      </div>
+
+      @if (c.closable && !confirming()) {
+        <div><button matButton="filled" type="button" (click)="startConfirmation()" data-testid="close-month">Fechar mês…</button></div>
+      }
+    }
+
+    @if (confirming()) {
+      <form class="confirm-panel" [formGroup]="confirmForm" (ngSubmit)="confirm()" aria-labelledby="confirm-title" data-testid="confirm-panel">
+        @if (mode() === 'version') {
+          <h3 id="confirm-title">Gerar a versão {{ (c.saved?.version ?? 0) + 1 }} de {{ monthLabel(c.month) }}</h3>
+          <p>A nova versão guarda os dados atuais e passa a ser a vigente. A versão {{ c.saved?.version }} e as anteriores continuam salvas e consultáveis.</p>
+          @if (c.status === 'UP_TO_DATE') {
+            <p class="warning" data-testid="no-changes-warning">Não há diferenças de valores ou classificações desde a versão {{ c.saved?.version }}.
+              A nova versão só atualizará nomes, descrições e a data usada para o atraso.</p>
+          }
+        } @else {
+          <h3 id="confirm-title">Confirmar o fechamento de {{ monthLabel(c.month) }}</h3>
+        }
+        <p>Será salvo o retrato com {{ c.current.indicators.plannedCount }} conta(s): previsto {{ formatCurrency(c.current.indicators.plannedTotal) }},
+          pago {{ formatCurrency(c.current.indicators.paidTotal) }}, pendente {{ formatCurrency(c.current.indicators.pendingTotal) }}.
+          O servidor lê os lançamentos de novo no momento da confirmação.</p>
+        @if (c.current.lines.length === 0) {
+          <p class="warning" data-testid="empty-warning">Não há lançamentos neste mês. O retrato ficará zerado.</p>
+        }
+        @if (pendingCount() > 0) {
+          <div class="warning" role="note" data-testid="pending-warning">
+            <p><strong>Há {{ pendingCount() }} conta(s) pendente(s)</strong> somando {{ formatCurrency(c.current.indicators.pendingTotal) }}.</p>
+            <p>O fechamento não quita, não esconde essas contas e não interrompe lembretes.</p>
+            <label class="checkbox-field"><input type="checkbox" formControlName="acknowledge" data-testid="acknowledge-pending" />
+              Estou ciente das pendências e quero fechar mesmo assim.</label>
+          </div>
+        }
+        @if (confirmError()) { <p class="error-summary" role="alert">{{ confirmError() }}</p> }
+        <div class="form-actions">
+          <button matButton="filled" type="submit" [disabled]="submitting() || (pendingCount() > 0 && !acknowledge.value)" data-testid="confirm-close">
+            @if (submitting()) { Salvando… } @else if (mode() === 'version') { Gerar versão {{ (c.saved?.version ?? 0) + 1 }} } @else { Confirmar fechamento }</button>
+          <button matButton="outlined" type="button" (click)="cancelConfirmation()" [disabled]="submitting()">Cancelar</button>
+        </div>
+      </form>
+    }
+
+    @if (c.saved; as saved) {
       @if (c.changes.length > 0) {
         <mat-card appearance="outlined">
           <mat-card-content>
@@ -66,7 +116,7 @@
       <div class="compare">
         <mat-card appearance="outlined">
           <mat-card-content>
-            <app-closing-snapshot [snapshot]="saved" prefix="saved" [heading]="'Retrato salvo (versão ' + saved.version + ')'" />
+            <app-closing-snapshot [snapshot]="saved" prefix="saved" [heading]="'Retrato salvo (versão ' + saved.version + ', vigente)'" />
           </mat-card-content>
         </mat-card>
         <mat-card appearance="outlined">
@@ -75,42 +125,40 @@
           </mat-card-content>
         </mat-card>
       </div>
+
+      @if (versions(); as v) {
+        <mat-card appearance="outlined">
+          <mat-card-content>
+            <h3 id="versions-title">Versões de {{ monthLabel(c.month) }}</h3>
+            <ul class="closing-months" aria-labelledby="versions-title" data-testid="closing-versions">
+              @for (item of v.versions; track item.version) {
+                <li [attr.aria-current]="item.version === shownVersion()?.snapshot?.version ? 'true' : null" [attr.data-testid]="'version-' + item.version">
+                  <strong>Versão {{ item.version }}</strong>
+                  <span>{{ item.authorDisplayName }} · {{ formatInstant(item.closedAt, c.timeZone) }}</span>
+                  <span>previsto {{ formatCurrency(item.indicators.plannedTotal) }} · pago {{ formatCurrency(item.indicators.paidTotal) }} · pendente {{ formatCurrency(item.indicators.pendingTotal) }}</span>
+                  @if (item.current) {
+                    <span class="badge">Vigente</span>
+                  } @else {
+                    <button matButton type="button" (click)="showVersion(item.version)">Ver retrato</button>
+                  }
+                </li>
+              }
+            </ul>
+          </mat-card-content>
+        </mat-card>
+      }
+
+      @if (shownVersion(); as old) {
+        <mat-card appearance="outlined" data-testid="old-version">
+          <mat-card-content>
+            <p class="status-card">Versão {{ old.snapshot.version }} — anterior, preservada como foi salva por {{ old.snapshot.authorDisplayName }}
+              em {{ formatInstant(old.snapshot.closedAt!, c.timeZone) }}. A versão vigente é a {{ old.currentVersion }}.
+              <button matButton type="button" (click)="hideVersion()">Fechar versão {{ old.snapshot.version }}</button></p>
+            <app-closing-snapshot [snapshot]="old.snapshot" prefix="version" [heading]="'Retrato da versão ' + old.snapshot.version" />
+          </mat-card-content>
+        </mat-card>
+      }
     } @else {
-      <div class="status-card" data-testid="closing-status">
-        <p><strong>Mês não fechado.</strong> Abaixo, os dados atuais do mês.</p>
-        @if (!c.closable) { <p data-testid="closing-not-allowed">Só é possível fechar o mês atual ou meses anteriores.</p> }
-      </div>
-
-      @if (c.closable && !confirming()) {
-        <div><button matButton="filled" type="button" (click)="startConfirmation()" data-testid="close-month">Fechar mês…</button></div>
-      }
-
-      @if (confirming()) {
-        <form class="confirm-panel" [formGroup]="confirmForm" (ngSubmit)="confirm()" aria-labelledby="confirm-title" data-testid="confirm-panel">
-          <h3 id="confirm-title">Confirmar o fechamento de {{ monthLabel(c.month) }}</h3>
-          <p>Será salvo o retrato com {{ c.current.indicators.plannedCount }} conta(s): previsto {{ formatCurrency(c.current.indicators.plannedTotal) }},
-            pago {{ formatCurrency(c.current.indicators.paidTotal) }}, pendente {{ formatCurrency(c.current.indicators.pendingTotal) }}.
-            O servidor lê os lançamentos de novo no momento da confirmação.</p>
-          @if (c.current.lines.length === 0) {
-            <p class="warning" data-testid="empty-warning">Não há lançamentos neste mês. O retrato ficará zerado.</p>
-          }
-          @if (pendingCount() > 0) {
-            <div class="warning" role="note" data-testid="pending-warning">
-              <p><strong>Há {{ pendingCount() }} conta(s) pendente(s)</strong> somando {{ formatCurrency(c.current.indicators.pendingTotal) }}.</p>
-              <p>O fechamento não quita, não esconde essas contas e não interrompe lembretes.</p>
-              <label class="checkbox-field"><input type="checkbox" formControlName="acknowledge" data-testid="acknowledge-pending" />
-                Estou ciente das pendências e quero fechar mesmo assim.</label>
-            </div>
-          }
-          @if (confirmError()) { <p class="error-summary" role="alert">{{ confirmError() }}</p> }
-          <div class="form-actions">
-            <button matButton="filled" type="submit" [disabled]="submitting() || (pendingCount() > 0 && !acknowledge.value)" data-testid="confirm-close">
-              {{ submitting() ? 'Fechando…' : 'Confirmar fechamento' }}</button>
-            <button matButton="outlined" type="button" (click)="cancelConfirmation()" [disabled]="submitting()">Cancelar</button>
-          </div>
-        </form>
-      }
-
       <mat-card appearance="outlined">
         <mat-card-content>
           <app-closing-snapshot [snapshot]="c.current" prefix="current" heading="Dados atuais do mês" />

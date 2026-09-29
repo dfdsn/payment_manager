@@ -11,6 +11,7 @@ import com.malyah.accountmanager.reporting.application.ClosingClaim;
 import com.malyah.accountmanager.reporting.application.ClosingHead;
 import com.malyah.accountmanager.reporting.application.ClosingVersion;
 import com.malyah.accountmanager.reporting.application.StoredClosing;
+import com.malyah.accountmanager.reporting.application.VersionEntry;
 
 /** Persistence of month closings; every write runs inside the caller's transaction. */
 public interface MonthClosingRepository {
@@ -29,6 +30,15 @@ public interface MonthClosingRepository {
     List<ClosingHead> list(UUID spaceId, Year year);
 
     Optional<StoredClosing> find(UUID spaceId, YearMonth month);
+
+    /** Reads the header of the month and locks it until the end of the transaction. */
+    Optional<StoredClosing> lock(UUID spaceId, YearMonth month);
+
+    /** Makes {@code toVersion} the version in force if {@code fromVersion} still is; false otherwise. */
+    boolean advance(UUID spaceId, UUID closingId, int fromVersion, int toVersion, Instant at);
+
+    /** Every version of the closing without categories and lines, oldest first. */
+    List<VersionEntry> versions(UUID spaceId, UUID closingId);
 
     /** Stores the version with its categories and lines. */
     void insertVersion(UUID spaceId, ClosingVersion version);

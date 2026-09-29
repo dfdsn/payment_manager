@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões. H07.1 fecha o mês guardando um retrato imutável do resumo por vencimento, sem bloquear correções, e H07.2 sinaliza quando os dados atuais passam a diferir do retrato salvo.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões. H07.1 fecha o mês guardando um retrato imutável do resumo por vencimento, sem bloquear correções, H07.2 sinaliza quando os dados atuais passam a diferir do retrato salvo e H07.3 gera novas versões do fechamento, preservando e permitindo consultar as anteriores.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -942,3 +942,31 @@ Teste manual (depois do teste da H07.1):
 4. Mude o vencimento de uma conta de um mês fechado para outro mês fechado: os dois aparecem como alterados em “Fechamentos de AAAA”.
 
 Testes: `MonthClosingChangesPostgresIT` (matriz D1–D17 em PostgreSQL real, com concorrência), `ClosingComparisonTest`, `MonthClosingServiceTest`, `MonthClosingHttpTest`, `month-closing.component.spec.ts`, smoke E2E e E2E full-stack (inclusão depois do fechamento). Evidência: `docs/evidencias/H07.2.md`.
+
+### Gerar e consultar versões (H07.3)
+
+- **Quem e quando:** administrador e convidado, em mês já fechado. Não há motivo obrigatório. A nova versão guarda os dados atuais com as mesmas regras do fechamento e passa a ser a **vigente**; as anteriores continuam salvas, imutáveis e consultáveis (não há exclusão). Gerar versão não bloqueia correções.
+- **Sem diferenças:** permitido; a tela avisa que a nova versão só atualizará nomes, descrições e a data usada para o atraso.
+- **Pendências:** mesma confirmação do fechamento.
+- **Concorrência e repetição:** o pedido leva a versão vigente que você revisou (`expectedVersion`). Se outro membro gerou uma versão antes, nada é gravado, aparece “Outra versão foi gerada enquanto você revisava” e a tela recarrega. A mesma `Idempotency-Key` devolve a versão já gerada. Versão, troca da vigente, evento `VERSION_GENERATED` e chave são gravados juntos; uma falha mantém a versão anterior vigente.
+- **Sinalização:** depois da nova versão, a comparação da H07.2 usa a vigente; só continua sinalizado o que mudou depois dela.
+- **Tela:** botão **Gerar nova versão…**, lista “Versões de <mês>” (autor, instante, totais, “Vigente”) e **Ver retrato** para abrir uma versão anterior exatamente como foi salva. Não há comparação visual entre versões nem exportação nova.
+
+```text
+POST /api/v1/reports/closings/2026-10/versions   Idempotency-Key: <uuid>   X-XSRF-TOKEN: <token>
+     { "expectedVersion": 1, "acknowledgePending": true }
+→ 201 Location: /api/v1/reports/closings/2026-10/versions/2   (200 na repetição da mesma chave)
+GET  /api/v1/reports/closings/2026-10/versions      → 200 { month, currentVersion: 2, versions: [ { version: 1, ..., current: false }, ... ] }
+GET  /api/v1/reports/closings/2026-10/versions/1    → 200 { month, currentVersion: 2, current: false, snapshot: {...} }
+```
+
+Erros: `409 MONTH_NOT_CLOSED`, `409 CLOSING_VERSION_CONFLICT`, `409 IDEMPOTENCY_CONFLICT`, `422 CLOSING_PENDING_CONFIRMATION_REQUIRED`, `404 CLOSING_VERSION_NOT_FOUND`, `400 REPORT_QUERY_INVALID`, `401` e `403`.
+
+Teste manual (continuação da H07.2):
+
+1. Com o mês “Alterado depois do fechamento”, clique **Gerar nova versão…**, marque a caixa de pendências se aparecer e confirme **Gerar versão 2**.
+2. Aparece “versão 2 (vigente)” e “Atualizado”; em “Versões de <mês>”, a versão 1 tem os totais originais e a 2 os novos.
+3. Clique **Ver retrato** na versão 1: o retrato mostra os valores do primeiro fechamento (por exemplo, o Aluguel ainda pendente).
+4. Em outra aba com a versão 1 ainda na tela, tente gerar outra versão: aparece o aviso de que outra versão foi gerada e a tela recarrega.
+
+Testes: `MonthClosingVersionsPostgresIT` (matriz V1–V13 em PostgreSQL real, com concorrência, repetição e falha), regressões `MonthClosingPostgresIT` e `MonthClosingChangesPostgresIT`, `MonthClosingServiceTest`, `MonthClosingHttpTest`, `month-closing.component.spec.ts`, smoke E2E e E2E full-stack (versão 2 e consulta da versão 1). Evidência: `docs/evidencias/H07.3.md`.

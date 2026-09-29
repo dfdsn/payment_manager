@@ -1632,7 +1632,7 @@ paths:
         "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND) ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "409":
           description: >-
-            MONTH_ALREADY_CLOSED (o mês já tem fechamento; atualizar é gerar nova versão) ou IDEMPOTENCY_CONFLICT
+            MONTH_ALREADY_CLOSED (o mês já tem fechamento; atualizar é gerar nova versão em /versions) ou IDEMPOTENCY_CONFLICT
             (chave usada para outro pedido).
           content:
             application/json:
@@ -1644,6 +1644,87 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
+  /reports/closings/{month}/versions:
+    parameters:
+      - { name: month, in: path, required: true, description: Mês AAAA-MM., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+    get:
+      operationId: monthClosingVersions
+      summary: Versões do fechamento do mês, da mais antiga para a mais recente (H07.3)
+      description: >-
+        Número, autor, instante, data do atraso, pendências confirmadas, totais e se é a vigente. Mês não fechado
+        devolve lista vazia e currentVersion null. Os dois papéis consultam.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Versões do mês.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClosingVersionList" }
+        "400": { description: Mês inválido (REPORT_QUERY_INVALID)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    post:
+      operationId: generateClosingVersion
+      summary: Gera nova versão do fechamento a partir dos dados atuais (H07.3)
+      description: >-
+        Os dois papéis geram, só em mês já fechado, sem motivo obrigatório e mesmo sem diferenças (atualiza rótulos e
+        a data do atraso). expectedVersion é a versão vigente que o membro revisou; se outra versão foi gerada antes,
+        409 CLOSING_VERSION_CONFLICT sem gravar. Com pendências, exige acknowledgePending = true. Versão, troca da
+        vigente, evento VERSION_GENERATED e chave de repetição são gravados numa transação; uma falha mantém a versão
+        anterior vigente. Versões anteriores continuam imutáveis e consultáveis; não há exclusão.
+      security:
+        - sessionCookie: []
+          xsrfCookie: []
+          xsrfHeader: []
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, description: Mesma chave e mesmo pedido devolvem a versão já gerada (200)., schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1, description: Versão vigente revisada. }
+                acknowledgePending: { type: boolean, default: false, description: Confirmação do aviso de pendências. }
+            example: { expectedVersion: 1, acknowledgePending: true }
+      responses:
+        "201":
+          description: Versão gerada; Location aponta para GET /reports/closings/{month}/versions/{number}. O corpo é o fechamento do mês com a nova versão em saved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthClosing" }
+        "200":
+          description: Repetição da mesma chave e do mesmo pedido.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthClosing" }
+        "400": { description: Mês, corpo, expectedVersion ou Idempotency-Key inválidos (REPORT_QUERY_INVALID)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND) ou CSRF ausente., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: MONTH_NOT_CLOSED, CLOSING_VERSION_CONFLICT (campo expectedVersion) ou IDEMPOTENCY_CONFLICT., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "422": { description: CLOSING_PENDING_CONFIRMATION_REQUIRED (campo acknowledgePending); nada é gravado., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /reports/closings/{month}/versions/{number}:
+    parameters:
+      - { name: month, in: path, required: true, description: Mês AAAA-MM., schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
+      - { name: number, in: path, required: true, description: Número da versão (1 ou mais)., schema: { type: string, pattern: '^[1-9][0-9]{0,5}$' } }
+    get:
+      operationId: monthClosingVersion
+      summary: Retrato de uma versão, exatamente como foi salvo (H07.3)
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Versão do fechamento.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClosingVersion" }
+        "400": { description: Mês ou número inválidos (REPORT_QUERY_INVALID)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Sem associação ativa a um espaço (ACTIVE_SPACE_ACCESS_NOT_FOUND)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: CLOSING_VERSION_NOT_FOUND (mês sem fechamento ou versão inexistente)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
 components:
   securitySchemes:
     sessionCookie:
@@ -2678,6 +2759,34 @@ components:
               authorDisplayName: { type: string, description: Autor da versão vigente. }
               closedAt: { type: string, format: date-time, description: Instante da versão vigente. }
               status: { type: string, enum: [UP_TO_DATE, OUTDATED] }
+    ClosingVersionList:
+      type: object
+      required: [month, versions]
+      properties:
+        month: { type: string, example: "2026-10" }
+        currentVersion: { type: [integer, 'null'], description: Versão vigente; null se o mês não foi fechado. }
+        versions:
+          type: array
+          items:
+            type: object
+            required: [version, authorUserId, authorDisplayName, closedAt, businessDate, pendingAcknowledged, indicators, current]
+            properties:
+              version: { type: integer }
+              authorUserId: { type: string, format: uuid }
+              authorDisplayName: { type: string }
+              closedAt: { type: string, format: date-time }
+              businessDate: { type: string, format: date, description: Data local usada para o atraso. }
+              pendingAcknowledged: { type: boolean }
+              indicators: { $ref: "#/components/schemas/DueIndicators" }
+              current: { type: boolean }
+    ClosingVersion:
+      type: object
+      required: [month, currentVersion, current, snapshot]
+      properties:
+        month: { type: string, example: "2026-10" }
+        currentVersion: { type: integer }
+        current: { type: boolean, description: Se esta é a versão vigente. }
+        snapshot: { $ref: "#/components/schemas/ClosingSnapshot" }
     ClosingSnapshot:
       type: object
       description: >-

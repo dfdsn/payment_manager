@@ -30,6 +30,12 @@ import com.malyah.accountmanager.reporting.application.ClosingIdempotencyConflic
 import com.malyah.accountmanager.reporting.application.ClosingLineView;
 import com.malyah.accountmanager.reporting.application.ClosingPendingConfirmationRequiredException;
 import com.malyah.accountmanager.reporting.application.ClosingSnapshotView;
+import com.malyah.accountmanager.reporting.application.ClosingVersionConflictException;
+import com.malyah.accountmanager.reporting.application.ClosingVersionListView;
+import com.malyah.accountmanager.reporting.application.ClosingVersionNotFoundException;
+import com.malyah.accountmanager.reporting.application.ClosingVersionView;
+import com.malyah.accountmanager.reporting.application.GenerateVersionCommand;
+import com.malyah.accountmanager.reporting.application.MonthNotClosedException;
 import com.malyah.accountmanager.reporting.application.CloseMonthCommand;
 import com.malyah.accountmanager.reporting.application.CloseMonthResult;
 import com.malyah.accountmanager.reporting.application.DueIndicatorsView;
@@ -89,6 +95,62 @@ class MonthClosingHttpTest {
                 .andExpect(jsonPath("$.changes[0].kind").value("CHANGED"))
                 .andExpect(jsonPath("$.changes[0].fields[1]").value("PAID_AMOUNT"))
                 .andExpect(jsonPath("$.changes[0].saved.chargeAmount").value("180.00"));
+    }
+
+    @Test
+    void generatesAVersionWithTheExpectedVersionAndReadsEveryVersion() throws Exception {
+        when(useCase.generateVersion(eq("ana@example.com"), any())).thenReturn(new CloseMonthResult(closed(), false))
+                .thenReturn(new CloseMonthResult(closed(), true));
+        mvc.perform(post("/reports/closings/2026-10/versions").principal(() -> "ana@example.com")
+                        .header("Idempotency-Key", KEY.toString()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":1,\"acknowledgePending\":true}"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "/api/v1/reports/closings/2026-10/versions/1"));
+        verify(useCase).generateVersion("ana@example.com", new GenerateVersionCommand("2026-10", 1, true, KEY));
+        mvc.perform(post("/reports/closings/2026-10/versions").principal(() -> "ana@example.com")
+                        .header("Idempotency-Key", KEY.toString()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":1,\"acknowledgePending\":true}"))
+                .andExpect(status().isOk());
+
+        var indicators = closed().saved().indicators();
+        when(useCase.versions("ana@example.com", "2026-10")).thenReturn(new ClosingVersionListView("2026-10", 2,
+                List.of(new ClosingVersionListView.Item(1, USER, "Ana", Instant.parse("2026-10-15T15:00:00Z"),
+                        LocalDate.of(2026, 10, 15), true, indicators, false))));
+        mvc.perform(get("/reports/closings/2026-10/versions").principal(() -> "ana@example.com"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.currentVersion").value(2))
+                .andExpect(jsonPath("$.versions[0].version").value(1))
+                .andExpect(jsonPath("$.versions[0].current").value(false))
+                .andExpect(jsonPath("$.versions[0].indicators.pendingTotal").value("180.00"));
+        when(useCase.version("ana@example.com", "2026-10", "1"))
+                .thenReturn(new ClosingVersionView("2026-10", 2, false, closed().saved()));
+        mvc.perform(get("/reports/closings/2026-10/versions/1").principal(() -> "ana@example.com"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.current").value(false))
+                .andExpect(jsonPath("$.snapshot.version").value(1));
+    }
+
+    @Test
+    void mapsEveryVersionRefusal() throws Exception {
+        when(useCase.generateVersion(eq("ana@example.com"), any()))
+                .thenThrow(new ClosingVersionConflictException(2))
+                .thenThrow(new MonthNotClosedException())
+                .thenThrow(new ClosingPendingConfirmationRequiredException(3));
+        expectVersion(409, "CLOSING_VERSION_CONFLICT", "expectedVersion");
+        expectVersion(409, "MONTH_NOT_CLOSED", null);
+        expectVersion(422, "CLOSING_PENDING_CONFIRMATION_REQUIRED", "acknowledgePending");
+        when(useCase.version("ana@example.com", "2026-10", "5")).thenThrow(new ClosingVersionNotFoundException());
+        mvc.perform(get("/reports/closings/2026-10/versions/5").principal(() -> "ana@example.com"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("CLOSING_VERSION_NOT_FOUND"));
+        mvc.perform(post("/reports/closings/2026-10/versions").principal(() -> "ana@example.com")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":1}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    private void expectVersion(int status, String code, String field) throws Exception {
+        var result = mvc.perform(post("/reports/closings/2026-10/versions").principal(() -> "ana@example.com")
+                        .header("Idempotency-Key", KEY.toString()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":1}"))
+                .andExpect(status().is(status)).andExpect(jsonPath("$.code").value(code));
+        if (field != null) result.andExpect(jsonPath("$.fieldErrors[0].field").value(field));
     }
 
     @Test

@@ -18,6 +18,7 @@ import com.malyah.accountmanager.reporting.application.ClosingHead;
 import com.malyah.accountmanager.reporting.application.ClosingIdempotencyConflictException;
 import com.malyah.accountmanager.reporting.application.ClosingVersion;
 import com.malyah.accountmanager.reporting.application.StoredClosing;
+import com.malyah.accountmanager.reporting.application.VersionEntry;
 import com.malyah.accountmanager.reporting.application.port.MonthClosingRepository;
 import com.malyah.accountmanager.reporting.domain.ClosingCategory;
 import com.malyah.accountmanager.reporting.domain.ClosingLine;
@@ -91,6 +92,44 @@ public final class JdbcMonthClosingRepository implements MonthClosingRepository 
                 """, (rs, row) -> new StoredClosing(rs.getObject(1, UUID.class),
                 YearMonth.from(rs.getObject(2, LocalDate.class)), rs.getInt(3), rs.getTimestamp(4).toInstant(),
                 rs.getTimestamp(5).toInstant()), spaceId, month.atDay(1)).stream().findFirst();
+    }
+
+    @Override
+    public Optional<StoredClosing> lock(UUID spaceId, YearMonth month) {
+        return jdbc.query("""
+                select id, month, current_version, created_at, updated_at from month_closings
+                 where space_id = ? and month = ? for update
+                """, (rs, row) -> new StoredClosing(rs.getObject(1, UUID.class),
+                YearMonth.from(rs.getObject(2, LocalDate.class)), rs.getInt(3), rs.getTimestamp(4).toInstant(),
+                rs.getTimestamp(5).toInstant()), spaceId, month.atDay(1)).stream().findFirst();
+    }
+
+    @Override
+    public boolean advance(UUID spaceId, UUID closingId, int fromVersion, int toVersion, Instant at) {
+        return jdbc.update("""
+                update month_closings set current_version = ?, updated_at = ?
+                 where space_id = ? and id = ? and current_version = ?
+                   and exists (select 1 from month_closing_versions
+                                where closing_id = ? and space_id = ? and version_number = ?)
+                """, toVersion, Timestamp.from(at), spaceId, closingId, fromVersion, closingId, spaceId,
+                toVersion) == 1;
+    }
+
+    @Override
+    public List<VersionEntry> versions(UUID spaceId, UUID closingId) {
+        return jdbc.query("""
+                select version_number, author_user_id, author_display_name, created_at, business_date,
+                       pending_acknowledged, planned_count, planned_total, planned_estimated, paid_count, paid_total,
+                       pending_count, pending_total, pending_estimated, overdue_count, overdue_total,
+                       overdue_estimated, adjustment_increase, adjustment_discount
+                  from month_closing_versions where space_id = ? and closing_id = ?
+                 order by version_number
+                """, (rs, row) -> new VersionEntry(rs.getInt(1), rs.getObject(2, UUID.class), rs.getString(3),
+                rs.getTimestamp(4).toInstant(), rs.getObject(5, LocalDate.class), rs.getBoolean(6),
+                new DueIndicators(rs.getLong(7), rs.getBigDecimal(8), rs.getBigDecimal(9), rs.getLong(10),
+                        rs.getBigDecimal(11), rs.getLong(12), rs.getBigDecimal(13), rs.getBigDecimal(14),
+                        rs.getLong(15), rs.getBigDecimal(16), rs.getBigDecimal(17), rs.getBigDecimal(18),
+                        rs.getBigDecimal(19))), spaceId, closingId);
     }
 
     @Override

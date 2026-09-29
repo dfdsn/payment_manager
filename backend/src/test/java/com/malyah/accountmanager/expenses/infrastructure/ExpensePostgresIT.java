@@ -68,7 +68,7 @@ class ExpensePostgresIT {
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource).cleanDisabled(false).load();
         flyway.clean();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(22);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
         jdbc = new JdbcTemplate(dataSource);
         insertSpaceAndMembers();
         var context = new AuthenticatedUserContextService(contextRepository());

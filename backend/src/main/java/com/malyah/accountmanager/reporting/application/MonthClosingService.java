@@ -41,6 +41,8 @@ import com.malyah.accountmanager.reporting.domain.Situation;
 public final class MonthClosingService implements MonthClosingUseCase {
     static final String CLOSE_OPERATION = "CLOSE_MONTH";
     static final String MONTH_CLOSED_EVENT = "MONTH_CLOSED";
+    static final String VERSION_OPERATION = "GENERATE_VERSION";
+    static final String VERSION_GENERATED_EVENT = "VERSION_GENERATED";
 
     private final MonthClosingRepository repository;
     private final ExpenseReportQueries expenses;
@@ -101,6 +103,89 @@ public final class MonthClosingService implements MonthClosingUseCase {
         repository.complete(actor.spaceId(), actor.userId(), CLOSE_OPERATION, command.idempotencyKey(), version.id(),
                 now);
         return new CloseMonthResult(view(actor, month, today), false);
+    }
+
+    /**
+     * H07.3 (RF-FEC-04): the new version is the content of the month now, with the rules of the closing. The
+     * header is locked and must still have {@code expectedVersion} in force, so two members never create two
+     * versions from the same view; version, switch of the version in force, event and idempotency record are
+     * written together or not at all.
+     */
+    @Override
+    public CloseMonthResult generateVersion(String actorEmail, GenerateVersionCommand command) {
+        Objects.requireNonNull(command, "command");
+        if (command.idempotencyKey() == null)
+            throw new ReportQueryValidationException("Idempotency-Key", "Informe uma chave de repetição válida.");
+        var month = ReportingService.parseMonth(command.month());
+        if (month == null) throw new ReportQueryValidationException("month", "Informe o mês no formato AAAA-MM.");
+        if (command.expectedVersion() == null || command.expectedVersion() < 1)
+            throw new ReportQueryValidationException("expectedVersion", "Informe a versão vigente que você revisou.");
+        var actor = contexts.findByEmail(actorEmail);
+        // Same lock as every financial write of the space: no expense change lands between the read and the save.
+        members.requireActiveParticipants(actor.spaceId(), actor.userId(), null);
+        var now = clock.instant();
+        var claim = repository.claim(actor.spaceId(), actor.userId(), VERSION_OPERATION, command.idempotencyKey(),
+                hash(VERSION_OPERATION, month.toString(), command.expectedVersion().toString(),
+                        Boolean.toString(command.acknowledgePending())), now);
+        var today = today(actor);
+        if (claim.replayed()) {
+            var version = repository.versionById(actor.spaceId(), claim.versionId())
+                    .orElseThrow(() -> new IllegalStateException("The replayed version no longer exists."));
+            return new CloseMonthResult(view(actor, version.month(), today), true);
+        }
+        var closing = repository.lock(actor.spaceId(), month).orElseThrow(MonthNotClosedException::new);
+        if (closing.currentVersion() != command.expectedVersion())
+            throw new ClosingVersionConflictException(closing.currentVersion());
+        var summary = ClosingSummary.of(lines(actor, month, today));
+        if (summary.hasPending() && !command.acknowledgePending())
+            throw new ClosingPendingConfirmationRequiredException(summary.indicators().pendingCount());
+        var version = ClosingVersion.of(identifiers.get(), closing.id(), month, closing.currentVersion() + 1,
+                actor.userId(), actor.displayName(), now, today, actor.timeZone(), command.acknowledgePending(),
+                summary);
+        repository.insertVersion(actor.spaceId(), version);
+        if (!repository.advance(actor.spaceId(), closing.id(), closing.currentVersion(), version.number(), now))
+            throw new IllegalStateException("The locked closing changed its version in force.");
+        repository.recordEvent(closing.id(), actor.spaceId(), version.number(), VERSION_GENERATED_EVENT,
+                actor.userId(), now);
+        repository.complete(actor.spaceId(), actor.userId(), VERSION_OPERATION, command.idempotencyKey(),
+                version.id(), now);
+        return new CloseMonthResult(view(actor, month, today), false);
+    }
+
+    @Override
+    public ClosingVersionListView versions(String actorEmail, String month) {
+        var yearMonth = requiredMonth(month);
+        var actor = contexts.findByEmail(actorEmail);
+        return repository.find(actor.spaceId(), yearMonth)
+                .map(closing -> new ClosingVersionListView(yearMonth.toString(), closing.currentVersion(),
+                        repository.versions(actor.spaceId(), closing.id()).stream()
+                                .map(entry -> ClosingVersionListView.Item.of(entry, closing.currentVersion()))
+                                .toList()))
+                .orElseGet(() -> new ClosingVersionListView(yearMonth.toString(), null, List.of()));
+    }
+
+    @Override
+    public ClosingVersionView version(String actorEmail, String month, String number) {
+        var yearMonth = requiredMonth(month);
+        var requested = parseVersion(number);
+        var actor = contexts.findByEmail(actorEmail);
+        var closing = repository.find(actor.spaceId(), yearMonth).orElseThrow(ClosingVersionNotFoundException::new);
+        var version = repository.version(actor.spaceId(), closing.id(), requested)
+                .orElseThrow(ClosingVersionNotFoundException::new);
+        return new ClosingVersionView(yearMonth.toString(), closing.currentVersion(),
+                requested == closing.currentVersion(), savedView(version));
+    }
+
+    private static YearMonth requiredMonth(String month) {
+        var parsed = ReportingService.parseMonth(month);
+        if (parsed == null) throw new ReportQueryValidationException("month", "Informe o mês no formato AAAA-MM.");
+        return parsed;
+    }
+
+    static int parseVersion(String value) {
+        if (value == null || !value.matches("[1-9][0-9]{0,5}"))
+            throw new ReportQueryValidationException("version", "Informe o número da versão.");
+        return Integer.parseInt(value);
     }
 
     MonthClosingView view(AuthenticatedUserContext actor, YearMonth month, LocalDate today) {
