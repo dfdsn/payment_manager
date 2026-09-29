@@ -29,7 +29,7 @@ class RecurrenceGenerationPostgresIT {
 
     @BeforeEach void reset(){
         var ds=new DriverManagerDataSource(POSTGRES.getJdbcUrl(),POSTGRES.getUsername(),POSTGRES.getPassword());
-        var flyway=Flyway.configure().dataSource(ds).cleanDisabled(false).load();flyway.clean();assertThat(flyway.migrate().migrationsExecuted).isEqualTo(23);
+        var flyway=Flyway.configure().dataSource(ds).cleanDisabled(false).load();flyway.clean();assertThat(flyway.migrate().migrationsExecuted).isEqualTo(24);
         jdbc=new JdbcTemplate(ds);insertSpaceAndUser();var tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         job=new JdbcRecurrenceGenerationJob(jdbc,tx,new JdbcRecurringExpenseMaterializer(jdbc,tx),
                 Clock.fixed(NOW,ZoneOffset.UTC),Duration.ofMinutes(2),25);

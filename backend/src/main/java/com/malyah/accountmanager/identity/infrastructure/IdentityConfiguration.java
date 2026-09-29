@@ -122,9 +122,10 @@ class IdentityConfiguration {
             IdentifierGenerator identifierGenerator,
             Clock applicationClock,
             java.util.List<com.malyah.accountmanager.identity.application.MembershipDepartureHandler> departureHandlers,
+            java.util.List<com.malyah.accountmanager.identity.application.AdministrationTransferHandler> transferHandlers,
             PlatformTransactionManager transactionManager) {
         var service = new MembershipManagementService(
-                repository, sessionRevoker, identifierGenerator, applicationClock, departureHandlers);
+                repository, sessionRevoker, identifierGenerator, applicationClock, departureHandlers, transferHandlers);
         return new TransactionalMembershipManagementUseCase(
                 service, new TransactionTemplate(transactionManager));
     }

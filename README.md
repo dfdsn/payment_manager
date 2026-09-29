@@ -339,7 +339,7 @@ npm run e2e
 
 - Email local: Mailpit, identificável e sem entrega externa. O backend usa SMTP em `SMTP_HOST`/`SMTP_PORT` e `SMTP_FROM`.
 - Email real: configure `SMTP_HOST=smtp.gmail.com`, porta 587, autenticação e STARTTLS; injete usuário por variável e senha de app pelo secret `smtp_password`. Não use a senha normal da conta nem registre o valor. P04 comprovou entrega real de confirmação, recuperação e convite; Mailpit continua sendo apenas a captura local reproduzível.
-- WhatsApp e IA: nenhum adapter falso foi criado nesta preparação; ficam indisponíveis até suas histórias.
+- WhatsApp e IA: nenhum adapter falso foi criado. A H08.1 guarda número, consentimento e ativação, mas o provedor é informado como indisponível (`PROVIDER_NOT_IMPLEMENTED`) até a H08.4; nenhum resumo é enviado. IA fica indisponível até o E10.
 - Produção: `APP_ENVIRONMENT=production` rejeita `APP_INTEGRATIONS_MODE` diferente de `real`.
 - Gmail real foi validado em P04; Meta e Groq reais continuam dependentes de P03/P05 e de credenciais fornecidas fora do Git.
 
@@ -970,3 +970,42 @@ Teste manual (continuação da H07.2):
 4. Em outra aba com a versão 1 ainda na tela, tente gerar outra versão: aparece o aviso de que outra versão foi gerada e a tela recarrega.
 
 Testes: `MonthClosingVersionsPostgresIT` (matriz V1–V13 em PostgreSQL real, com concorrência, repetição e falha), regressões `MonthClosingPostgresIT` e `MonthClosingChangesPostgresIT`, `MonthClosingServiceTest`, `MonthClosingHttpTest`, `month-closing.component.spec.ts`, smoke E2E e E2E full-stack (versão 2 e consulta da versão 1). Evidência: `docs/evidencias/H07.3.md`.
+
+## Lembretes e WhatsApp (E08)
+
+O E08 está em andamento. As histórias abaixo estão entregues; o envio real pelo WhatsApp (H08.4) não existe nesta versão e nenhum lembrete sai do sistema.
+
+### Configurar canal, consentimento e horários (H08.1)
+
+Tela **Lembretes e WhatsApp** (`/lembretes`, link em **Membros e acesso** e na barra de Despesas).
+
+- **Quem:** só o administrador altera horários, número, consentimento e ativação. O convidado vê a explicação, os horários e se o canal está configurado, sem controles, sem o número completo (só o final) e sem autor/data do consentimento. O convidado nunca recebe WhatsApp; responsável ou pagador de uma despesa não mudam o destinatário.
+- **Horários:** padrão 09:00 e 18:00, `HH:mm`, no fuso do espaço (`America/Sao_Paulo`). O segundo precisa ser posterior ao primeiro. Valem para os resumos do espaço (H08.2).
+- **Número:** celular brasileiro; a entrada aceita espaços, parênteses, hífen e `+55` opcional e é guardada em E.164 (`+5511987654321`). Trocar o número revoga o consentimento anterior e desativa o canal.
+- **Consentimento:** explícito. O administrador lê o texto (versão `WHATSAPP-RESUMOS-V1`), confirma o número e marca o aceite; o servidor grava autor, número, versão do texto e instante UTC. Informar número ou ativar nunca cria consentimento. A revogação desativa o canal na mesma operação e o histórico fica guardado.
+- **Ativar:** exige número e consentimento ativo do administrador atual. Desativar mantém número e consentimento.
+- **Canal x provedor:** a tela mostra separadamente o que foi configurado e a disponibilidade do envio. Nesta versão o provedor responde `PROVIDER_NOT_IMPLEMENTED` e o estado efetivo de um canal ativo é `PROVIDER_UNAVAILABLE`. Não existe tela nem campo de token; as credenciais da Meta ficarão só na configuração do backend (H08.4, P03).
+- **Transferência de administração:** na mesma transação da transferência, o consentimento é revogado (`ADMINISTRATION_TRANSFERRED`), o número é apagado e o canal desativado; os horários ficam. O novo administrador informa o próprio número e consente.
+- **Concorrência, repetição e auditoria:** toda alteração leva `expectedVersion` e `Idempotency-Key`; versão diferente dá `409 NOTIFICATION_SETTINGS_VERSION_CONFLICT` e a tela recarrega. Os eventos (horários, número mascarado, consentimento, ativação) aparecem para o administrador em “Alterações recentes”. Logs não contêm número.
+
+```text
+GET  /api/v1/notifications/settings                              → 200 { canManage, timeZone, version, schedule, whatsapp: { state, provider, consent, ... } }
+PUT  /api/v1/notifications/settings/schedule                     { "expectedVersion": 0, "firstTime": "08:30", "secondTime": "20:00" }
+PUT  /api/v1/notifications/settings/whatsapp/recipient           { "expectedVersion": 1, "phone": "(11) 98765-4321" }
+POST /api/v1/notifications/settings/whatsapp/consent             { "expectedVersion": 2, "phone": "(11) 98765-4321", "accepted": true }
+PUT  /api/v1/notifications/settings/whatsapp/channel             { "expectedVersion": 3, "enabled": true }
+POST /api/v1/notifications/settings/whatsapp/consent/revocation  { "expectedVersion": 4 }
+GET  /api/v1/notifications/settings/events                       → 200 { items: [...] } (só o administrador)
+```
+
+Todas as escritas exigem `Idempotency-Key` e `X-XSRF-TOKEN`. Erros: `400 WHATSAPP_RECIPIENT_INVALID`, `400 REMINDER_SCHEDULE_INVALID_FORMAT`, `400 REMINDER_SETTINGS_INVALID`, `422 REMINDER_SCHEDULE_INVALID`, `422 WHATSAPP_RECIPIENT_REQUIRED`, `422 WHATSAPP_CONSENT_REQUIRED`, `409 WHATSAPP_RECIPIENT_MISMATCH`, `409 WHATSAPP_CONSENT_NOT_ACTIVE`, `409 NOTIFICATION_SETTINGS_VERSION_CONFLICT`, `409 IDEMPOTENCY_CONFLICT`, `403 NOTIFICATION_ADMINISTRATOR_REQUIRED`, `401` e `403`.
+
+Teste manual (use um número fictício, por exemplo `(11) 98765-4321`):
+
+1. Como administrador, abra **Lembretes e WhatsApp**: 09:00/18:00, número “Não cadastrado”.
+2. Altere para 08:30 e 20:00 e salve; tente 20:00 e 08:30: aparece o erro do segundo horário.
+3. Informe o número e salve; clique **Autorizar recebimento…**, leia o texto, marque “Li e autorizo o envio para este número.” e clique **Registrar consentimento**. Clique **Ativar canal**: o estado diz “Canal configurado e ativo, mas o envio real ainda não está disponível”.
+4. Entre como convidado: horários visíveis, “terminado em 4321”, nenhum botão de alteração.
+5. Em **Membros e acesso**, transfira a administração ao convidado. Na tela de lembretes do novo administrador: número e consentimento vazios, horários 08:30/20:00 mantidos, evento “Consentimento revogado” em “Alterações recentes”.
+
+Testes: `ReminderSettingsPostgresIT` (matriz C1–C16 em PostgreSQL real, com transferência, concorrência e repetição), `ReminderSettingsDomainTest`, `ReminderSettingsServiceTest`, `ReminderSettingsHttpTest`, `MembershipManagementServiceTest`, `reminder-settings.component.spec.ts`, smoke E2E e E2E full-stack. Evidência: `docs/evidencias/H08.1.md`.

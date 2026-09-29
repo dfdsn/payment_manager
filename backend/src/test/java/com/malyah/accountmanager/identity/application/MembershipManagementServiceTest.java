@@ -115,6 +115,31 @@ class MembershipManagementServiceTest {
     }
 
     @Test
+    void transferNotifiesHandlersAfterTheRoleSwapInTheSameCall() {
+        var calls = new java.util.ArrayList<String>();
+        var handler = (AdministrationTransferHandler) (space, previous, next, at) ->
+                calls.add(space + ":" + previous + ":" + next + ":" + at);
+        service = new MembershipManagementService(repository, sessions, () -> EVENT, Clock.fixed(NOW, ZoneOffset.UTC),
+                List.of(), List.of(handler, handler));
+
+        service.transferAdministration("admin@example.com", GUEST);
+
+        var order = org.mockito.Mockito.inOrder(repository);
+        order.verify(repository).transferAdministration(SPACE, ADMIN, GUEST);
+        order.verify(repository).append(any());
+        assertThat(calls).containsExactly(SPACE + ":" + ADMIN + ":" + GUEST + ":" + NOW,
+                SPACE + ":" + ADMIN + ":" + GUEST + ":" + NOW);
+    }
+
+    @Test
+    void transferHandlerFailurePropagatesSoTheTransactionRollsBack() {
+        service = new MembershipManagementService(repository, sessions, () -> EVENT, Clock.fixed(NOW, ZoneOffset.UTC),
+                List.of(), List.of((space, previous, next, at) -> { throw new IllegalStateException("boom"); }));
+        assertThatThrownBy(() -> service.transferAdministration("admin@example.com", GUEST))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void transferRejectsSelfInactiveOrAlreadyAdministrativeTarget() {
         assertThatThrownBy(() -> service.transferAdministration("admin@example.com", ADMIN))
                 .isInstanceOf(MembershipConflictException.class);
