@@ -3,7 +3,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, Subject, throwError } from 'rxjs';
 import { ExpenseComponent } from './expense.component';
 import { ExpenseService } from './expense.service';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
 import { AccountAccessService } from '../identity/account-access.service';
 import { CategoryService } from './category.service';
 import { CsvExportService } from '../reports/csv-export.service';
@@ -466,5 +467,47 @@ describe('ExpenseComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Valor da parcela definido pela compra parcelada');
     const amount = fixture.nativeElement.querySelector('input[formcontrolname="amount"][readonly]');
     expect(amount).not.toBeNull();
+  });
+});
+
+describe('ExpenseComponent quick add (H09.1)', () => {
+  const api = {
+    newIdempotencyKey: vi.fn(() => 'key'), filterOptions: vi.fn(() => of({ responsiblePeople: [], payerPeople: [] })),
+    list: vi.fn(() => of({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0, sort: 'REFERENCE_DATE', direction: 'ASC' })),
+  };
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      providers: [{ provide: ExpenseService, useValue: api },
+        provideRouter([{ path: 'despesas', component: ExpenseComponent }]),
+        { provide: CsvExportService, useValue: { expenses: vi.fn() } },
+        { provide: CategoryService, useValue: { list: () => of([]) } },
+        { provide: AccountAccessService, useValue: {
+          context: () => of({ userId: 'actor', timeZone: 'America/Sao_Paulo' }), members: () => of([]),
+        } }],
+    }).compileComponents();
+  });
+
+  it('focuses the description of a new expense and frees ?nova for the next use', async () => {
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/despesas?nova=1');
+    await new Promise(resolve => setTimeout(resolve));
+    harness.detectChanges();
+    const input = harness.routeNativeElement!.querySelector('[data-testid="new-expense-description"]');
+    expect(document.activeElement).toBe(input);
+    expect(TestBed.inject(Router).url).toBe('/despesas');
+
+    (input as HTMLInputElement).blur();
+    await harness.navigateByUrl('/despesas?nova=1');
+    await new Promise(resolve => setTimeout(resolve));
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('opens without moving focus when the quick action was not used', async () => {
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/despesas');
+    await new Promise(resolve => setTimeout(resolve));
+    const input = harness.routeNativeElement!.querySelector('[data-testid="new-expense-description"]');
+    expect(document.activeElement).not.toBe(input);
   });
 });

@@ -1,12 +1,87 @@
 :host {
-  display: block;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   background: #f5f7fb;
+}
+
+.app-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  gap: 0.5rem;
+  padding-top: env(safe-area-inset-top);
 }
 
 main {
   box-sizing: border-box;
   padding: 2rem 1rem;
+  outline: none;
+}
+
+main:focus-visible {
+  outline: 3px solid #132f4c;
+  outline-offset: -3px;
+}
+
+.shell {
+  flex: 1;
+  background: transparent;
+}
+
+.app-nav {
+  width: 16rem;
+  background: white;
+}
+
+.app-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0;
+}
+
+.app-nav a {
+  display: flex;
+  flex-direction: column;
+  min-height: 3rem;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  color: #132f4c;
+  text-decoration: none;
+  border-left: 4px solid transparent;
+}
+
+.app-nav a:hover {
+  background: #eef2f8;
+}
+
+.app-nav a:focus-visible {
+  outline: 3px solid #132f4c;
+  outline-offset: -3px;
+}
+
+// The active section is marked by weight and border too, not only by color.
+.app-nav a.active {
+  background: #e3ebf6;
+  border-left-color: #132f4c;
+  font-weight: 600;
+}
+
+.nav-hint {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: #4a5b6e;
+}
+
+.update-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: #fff4d6;
+  color: #3d2f00;
 }
 
 .skip-link {
@@ -25,6 +100,9 @@ main {
 
 .brand {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toolbar-spacer {
@@ -35,6 +113,14 @@ main {
   font-size: 0.9rem;
 }
 
+.quick-add {
+  flex-shrink: 0;
+}
+
+.brand-short {
+  display: none;
+}
+
 @media (max-width: 36rem) {
   main {
     padding: 1rem 0.75rem;
@@ -42,5 +128,19 @@ main {
 
   .section-label {
     display: none;
+  }
+
+  .brand-full {
+    // Visually replaced by the short name; still read by screen readers.
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .brand-short {
+    display: inline;
   }
 }

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, request as playwrightRequest, test } from '@playwright/test';
+import { BrowserContext, expect, request as playwrightRequest, test } from '@playwright/test';
 
 const email = 'admin@example.com';
 const initialPassword = 'frase segura 2026';
@@ -7,8 +7,18 @@ const newPassword = 'nova senha segura 2026';
 const guestEmail = 'guest@example.com';
 const guestPassword = 'senha convidada 2026';
 
+// The scenario was written for late September 2026 (fixed dates below). To run it on another day, start the backend
+// with its clock shifted (libfaketime, README) and pass the same shift here: E2E_CLOCK_OFFSET_DAYS=-40 makes the
+// test and every browser context live on the backend's day, at the real time of day.
+const clockOffsetMs = Number(process.env['E2E_CLOCK_OFFSET_DAYS'] ?? 0) * 86_400_000;
+const scenarioNow = () => new Date(Date.now() + clockOffsetMs);
+async function alignClock(context: BrowserContext) {
+  if (clockOffsetMs) await context.clock.install({ time: scenarioNow() });
+}
+
 test('runs setup, email confirmation, login, reset and session revocation against real services', async ({ browser, page }) => {
   test.setTimeout(330_000); // H08.3 waits for the real reminder job (runs every 60 s).
+  await alignClock(page.context());
   await page.goto('/configuracao-inicial');
   await page.getByLabel('Segredo temporário').fill('local-only-setup-secret-change-me');
   await page.getByLabel('Nome do administrador').fill('Diego');
@@ -37,6 +47,35 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
 
+  // H09.1: installable shell served by nginx, worker in control, menu and quick action with the real session.
+  const navigation = page.getByRole('navigation', { name: 'Seções' });
+  await expect(navigation).toBeVisible();
+  await expect(navigation.getByRole('link', { name: /Minha sessão/ })).toHaveAttribute('aria-current', 'page');
+  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+  await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
+  for (const [path, expected] of [['/ngsw-worker.js', 'no-cache'], ['/ngsw.json', 'no-cache'],
+    ['/manifest.webmanifest', 'no-cache'], ['/index.html', 'no-cache']] as const) {
+    const response = await page.request.get(path);
+    expect(response.status(), path).toBe(200);
+    expect(response.headers()['cache-control'], path).toBe(expected);
+  }
+  expect((await page.request.get('/manifest.webmanifest')).headers()['content-type']).toContain('application/manifest+json');
+  const mainBundle = await page.evaluate(() => document.querySelector<HTMLScriptElement>('script[src^="main-"]')!.getAttribute('src'));
+  expect((await page.request.get(`/${mainBundle}`)).headers()['cache-control']).toContain('immutable');
+  expect((await page.request.get('/chunk-NAOEXISTE.js')).status()).toBe(404);
+  expect((await page.request.get('/api/v1/identity/me')).headers()['cache-control']).toContain('no-store');
+  const apiNavigation = await page.goto('/api/v1/identity/me');
+  expect(apiNavigation!.headers()['content-type']).toContain('application/json');
+  await page.goto('/entrar');
+  await page.getByTestId('quick-add').click();
+  await expect(page).toHaveURL(/\/despesas$/);
+  await expect(page.getByTestId('new-expense-description')).toBeFocused();
+  await navigation.getByRole('link', { name: /Categorias/ }).click();
+  await expect(page).toHaveURL(/\/categorias$/);
+  await expect(page.locator('#main-content')).toBeFocused();
+
   await page.goto('/categorias');
   for (const initial of ['Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Educação', 'Lazer', 'Outros']) {
     await expect(page.getByText(initial, { exact: true })).toBeVisible();
@@ -60,6 +99,21 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByRole('button', { name: 'Limpar' }).click();
   await expect(page.getByText('Energia')).toBeVisible();
 
+  // H09.1: after real financial screens, every cache holds only the app shell: no /api answer, no expense.
+  const cached = await page.evaluate(async () => {
+    const entries: { url: string; body: string }[] = [];
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      for (const request of await cache.keys()) {
+        entries.push({ url: request.url, body: await (await cache.match(request))!.text() });
+      }
+    }
+    return entries;
+  });
+  expect(cached.map(entry => new URL(entry.url).pathname)).toContain('/index.html');
+  expect(cached.filter(entry => new URL(entry.url).pathname.startsWith('/api/'))).toEqual([]);
+  expect(cached.filter(entry => entry.body.includes('150.25') || entry.body.includes('admin@example.com'))).toEqual([]);
+
   await page.goto('/membros');
   await page.getByLabel('Email do convidado').fill(guestEmail);
   await page.getByRole('button', { name: 'Enviar convite' }).click();
@@ -70,6 +124,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   const invitationLink = await mailLink('aceitar-convite', oldInvitationLink);
 
   const guestContext = await browser.newContext();
+  await alignClock(guestContext);
   const guestPage = await guestContext.newPage();
   await guestPage.goto(oldInvitationLink);
   await expect(guestPage.getByText(/inválido, expirou, já foi utilizado ou foi substituído/)).toBeVisible();
@@ -259,6 +314,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   })).status);
   expect(anonymousPaymentsStatus).toBe(401);
   const anonymousContext = await browser.newContext();
+  await alignClock(anonymousContext);
   const anonymousPage = await anonymousContext.newPage();
   await anonymousPage.goto('/entrar');
   const anonymousDashboardStatus = await anonymousPage.evaluate(async () => (await fetch('/api/v1/reports/due-dashboard?month=2026-09', {
@@ -297,11 +353,11 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   // the WhatsApp failure (enabled channel, provider not implemented), and reading or dismissing changes one member only.
   // Today's second slot is moved to the next minute, which is still unprocessed only before 17:55 in São Paulo.
   const clockNow = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit',
-    hourCycle: 'h23' }).format(new Date()).split(':').map(Number);
+    hourCycle: 'h23' }).format(scenarioNow()).split(':').map(Number);
   const slotMinute = clockNow[0] * 60 + clockNow[1] + 1;
   if (slotMinute > 17 * 60 + 55) throw new Error('Run the full-stack E2E before 17:55 in America/Sao_Paulo (H08.3 uses today\'s second slot).');
   const hhmm = (minute: number) => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
-  const spToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  const spToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(scenarioNow());
   await page.goto('/despesas');
   await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Aviso E2E');
   await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('15,00');
@@ -422,6 +478,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await guestContext.close();
 
   const recoveryContext = await browser.newContext();
+  await alignClock(recoveryContext);
   const recoveryPage = await recoveryContext.newPage();
   await recoveryPage.goto('/recuperar-acesso');
   await recoveryPage.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
@@ -627,10 +684,16 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   await page.getByLabel('Data inicial').fill('2027-01-01');
   await page.getByLabel('Data final').fill('2027-04-30');
   await page.locator('select[formcontrolname="status"]').last().selectOption('ALL');
+  // Wait for the filtered list itself: the unfiltered month may also show "5 despesas" and the export follows the
+  // list on screen.
+  const filteredList = page.waitForResponse(response => response.url().includes('dateFrom=2027-01-01') && response.ok());
   await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+  await filteredList;
   await expect(page.getByText('5 despesas')).toBeVisible();
   const expenseDownload = page.waitForEvent('download');
+  const exportRequest = page.waitForRequest(request => request.url().includes('/api/v1/reports/expenses/export'));
   await page.getByRole('button', { name: 'Exportar CSV' }).click();
+  expect((await exportRequest).url()).toContain('dateFrom=2027-01-01');
   const download = await expenseDownload;
   expect(download.suggestedFilename()).toBe('despesas_vencimento_2027-01-01_a_2027-04-30.csv');
   const expenseCsv = readFileSync((await download.path())!).toString('utf8');
@@ -672,7 +735,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
 
   // H07.2: a later inclusion in the closed month flags the closing and never rewrites the saved snapshot.
   const closedMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' })
-    .format(new Date());
+    .format(scenarioNow());
   await page.goto('/despesas');
   await page.getByRole('textbox', { name: 'Descrição', exact: true }).fill('Ajuste pós-fechamento');
   await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('12,34');
@@ -708,7 +771,7 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   // H08.2: a bill due in two days is in today's first slot, not in today's second, and in the second slot of its due
   // date; the server computes the calendar in the space time zone and nothing is saved by the simulation.
   const localDay = (offset: number) => {
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(scenarioNow());
     const date = new Date(`${today}T12:00:00Z`);
     date.setUTCDate(date.getUTCDate() + offset);
     return date.toISOString().slice(0, 10);
@@ -736,12 +799,18 @@ test('runs setup, email confirmation, login, reset and session revocation agains
   })).status);
   expect(anonymousPreview).toBe(401);
 
+  // H09.1: the installed app opens on /entrar; an existing session shows its summary instead of the login form.
   await page.goto('/entrar');
+  await expect(page.getByRole('heading', { name: 'Olá, Diego' })).toBeVisible();
+  await page.getByRole('button', { name: 'Encerrar todas as sessões' }).click();
+  await expect(page.getByRole('region', { name: 'Entrar' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Seções' })).toHaveCount(0);
+  await expect(page.getByTestId('quick-add')).toHaveCount(0);
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email);
   await page.getByLabel('Senha').fill(newPassword);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await page.getByRole('button', { name: 'Encerrar todas as sessões' }).click();
-  await expect(page.getByRole('region', { name: 'Entrar' })).toBeVisible();
+  await expect(page.getByText(/Você entrou em/)).toContainText('Minha casa');
+  await expect(page.getByRole('navigation', { name: 'Seções' })).toBeVisible();
 });
 
 async function mailLink(

@@ -1,10 +1,60 @@
 <a class="skip-link" href="#main-content">Ir para o conteúdo</a>
-<mat-toolbar color="primary" role="banner">
-  <span class="brand">account_Manager</span>
+<mat-toolbar color="primary" role="banner" class="app-toolbar">
+  @if (showNavigation() && compact()) {
+    <button type="button" class="menu-button" matIconButton (click)="toggleMenu()"
+            [attr.aria-expanded]="menuOpen()" aria-controls="app-navigation" aria-label="Abrir menu de seções"
+            data-testid="menu-button">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
+        <path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z" />
+      </svg>
+    </button>
+  }
+  <span class="brand"><span class="brand-full">account_Manager</span><span class="brand-short" aria-hidden="true">Contas</span></span>
   <span class="toolbar-spacer"></span>
-  <span class="section-label">Despesas familiares</span>
+  @if (showNavigation()) {
+    <a class="quick-add" matButton="filled" routerLink="/despesas" [queryParams]="{ nova: 1 }"
+       data-testid="quick-add">
+      <span aria-hidden="true">+</span> Adicionar despesa
+    </a>
+  } @else {
+    <span class="section-label">Despesas familiares</span>
+  }
 </mat-toolbar>
 
-<main id="main-content" tabindex="-1">
-  <router-outlet />
-</main>
+@if (updateReady() || updateBroken()) {
+  <div class="update-banner" role="status" data-testid="update-banner">
+    @if (updateBroken()) {
+      <span>Esta cópia do aplicativo não pode mais ser usada. Recarregue para continuar; o que não foi salvo será perdido.</span>
+    } @else {
+      <span>Nova versão disponível. Salve o que estiver preenchendo antes de atualizar.</span>
+    }
+    <button type="button" matButton="outlined" (click)="reload()">Atualizar agora</button>
+  </div>
+}
+
+<mat-sidenav-container class="shell" [hasBackdrop]="compact()">
+  @if (showNavigation()) {
+    <mat-sidenav class="app-nav" [mode]="compact() ? 'over' : 'side'"
+                 [opened]="compact() ? menuOpen() : true" (openedChange)="menuChanged($event)"
+                 [fixedInViewport]="compact()" fixedTopGap="0" autoFocus="first-tabbable">
+      <nav id="app-navigation" aria-label="Seções" data-testid="app-navigation">
+        <ul>
+          @for (item of navigation; track item.path) {
+            <li>
+              <a [routerLink]="item.path" routerLinkActive="active" ariaCurrentWhenActive="page"
+                 [routerLinkActiveOptions]="{ exact: false }" (click)="chooseSection()">
+                <span class="nav-label">{{ item.label }}</span>
+                <span class="nav-hint">{{ item.hint }}</span>
+              </a>
+            </li>
+          }
+        </ul>
+      </nav>
+    </mat-sidenav>
+  }
+  <mat-sidenav-content>
+    <main id="main-content" #main tabindex="-1">
+      <router-outlet />
+    </main>
+  </mat-sidenav-content>
+</mat-sidenav-container>

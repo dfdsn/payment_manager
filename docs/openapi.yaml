@@ -2,7 +2,13 @@ openapi: 3.1.0
 info:
   title: account_Manager API
   version: 0.1.0
-  description: Contrato versionado dos endpoints implementados até H04.1.
+  description: |
+    Contrato versionado dos endpoints implementados.
+
+    Cache (H09.1): toda resposta da API, autenticada ou não, inclusive `401` de sessão ausente ou expirada,
+    traz `Cache-Control: no-cache, no-store, max-age=0, must-revalidate`, `Pragma: no-cache` e `Expires: 0`.
+    O service worker da PWA guarda somente o app shell e nunca intercepta nem guarda `/api/**`;
+    nenhum endpoint novo foi criado para a PWA.
 servers:
   - url: /api/v1
 paths:

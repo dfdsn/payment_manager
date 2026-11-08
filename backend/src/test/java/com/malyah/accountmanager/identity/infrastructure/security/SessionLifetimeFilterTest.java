@@ -36,6 +36,9 @@ class SessionLifetimeFilterTest {
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(response.getContentAsString()).contains("SESSION_EXPIRED");
         assertThat(response.getContentAsString()).contains("operationId");
+        assertThat(response.getHeader("Cache-Control")).isEqualTo("no-cache, no-store, max-age=0, must-revalidate");
+        assertThat(response.getHeader("Pragma")).isEqualTo("no-cache");
+        assertThat(response.getHeader("Expires")).isEqualTo("0");
     }
 
     @Test

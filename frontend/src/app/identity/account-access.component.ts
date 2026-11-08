@@ -9,6 +9,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { finalize, switchMap } from 'rxjs';
 import { ApiError } from './initial-setup.service';
 import { AccountAccessService, AuthenticatedUserContext } from './account-access.service';
+import { SessionStateService } from './session-state.service';
 
 type AccessMode = 'login' | 'confirm' | 'forgot' | 'reset';
 
@@ -23,6 +24,7 @@ export class AccountAccessComponent {
   private readonly access = inject(AccountAccessService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly session = inject(SessionStateService);
 
   readonly mode = this.route.snapshot.data['mode'] as AccessMode;
   readonly token = this.route.snapshot.queryParamMap.get('token') ?? '';
@@ -31,6 +33,20 @@ export class AccountAccessComponent {
   readonly message = signal<string | null>(null);
   readonly errorMessage = signal<string | null>(null);
   readonly context = signal<AuthenticatedUserContext | null>(null);
+
+  constructor() {
+    // H09.1: the installed app opens here; an existing session shows its summary instead of the login form.
+    // Without a session (401) or without connection the login form stays, with no message.
+    if (this.mode === 'login' && !this.returnUrl) {
+      this.access.context().subscribe({
+        next: context => {
+          this.context.set(context);
+          this.session.signedIn(context);
+        },
+        error: () => undefined,
+      });
+    }
+  }
 
   readonly loginForm = this.formBuilder.nonNullable.group({
     email: ['', [Validators.required, Validators.email]],
@@ -56,6 +72,7 @@ export class AccountAccessComponent {
     ).subscribe({
       next: context => {
         this.context.set(context);
+        this.session.signedIn(context);
         this.loginForm.reset();
         if (this.returnUrl) {
           void this.router.navigateByUrl(this.returnUrl);
@@ -116,6 +133,7 @@ export class AccountAccessComponent {
     action.pipe(finalize(() => this.submitting.set(false))).subscribe({
       next: () => {
         this.context.set(null);
+        this.session.signedOut();
         void this.router.navigate(['/entrar']);
       },
       error: error => this.handleError(error, 'Não foi possível encerrar a sessão.'),

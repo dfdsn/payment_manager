@@ -1,8 +1,8 @@
 # Progresso de implementação — account_Manager
 
-Versão 1.0 • Atualizado em 29/09/2026.
+Versão 1.0 • Atualizado em 08/11/2026.
 
-**Estado atual: E08 em andamento (H08.1, H08.2 e H08.3 concluídas; H08.4 e H08.5 em validação, sem envio real).** E07 concluído (H07.1–H07.3). H07.1 (fechar mês com retrato imutável), H07.2 (sinalizar alterações posteriores, calculada a cada consulta) e H07.3 (gerar e consultar versões) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04, E05, E06 e E07 estão concluídos; H03.3 mantém validação independente.
+**Estado atual: E09 iniciado (H09.1 em validação, falta instalar nos celulares reais); E08 em andamento (H08.1, H08.2 e H08.3 concluídas; H08.4 e H08.5 em validação, sem envio real).** E07 concluído (H07.1–H07.3). H07.1 (fechar mês com retrato imutável), H07.2 (sinalizar alterações posteriores, calculada a cada consulta) e H07.3 (gerar e consultar versões) estão concluídas com matrizes conferidas em PostgreSQL 17.6, gates, smoke e E2E full-stack. E01, E02, E04, E05, E06 e E07 estão concluídos; H03.3 mantém validação independente.
 
 ## Resumo
 
@@ -10,10 +10,10 @@ Versão 1.0 • Atualizado em 29/09/2026.
 |---|---|
 | PRD v2.0 e backlog | Documentados anteriormente; acompanhar esta entrega em `docs/`. |
 | Especificação, decisões e AGENTS | Preservados e atualizados com a baseline efetiva e seus limites de validação. |
-| Histórias | 30 de 46 concluídas (H08.4 e H08.5 em validação); E01, E02, E04, E05, E06 e E07 concluídos; E03 depende da validação final de H03.3. |
+| Histórias | 30 de 46 concluídas (H08.4, H08.5 e H09.1 em validação); E01, E02, E04, E05, E06 e E07 concluídos; E03 depende da validação final de H03.3. |
 | Critérios do PRD | CA-01 aprovado. CA-02 comprova uso, quitação individual/em lote, correção, reversão e cancelamento pelos dois papéis, mantendo WhatsApp para E08; CA-03 segue parcialmente validado; CA-04 tem cadastro, quitação, correção, reversão/cancelamento, lote atômico, histórico e conflitos aprovados, restando reflexos de dashboard/fechamento para E06/E07. CA-06 está aprovado no escopo existente; totais e alertas serão revalidados quando E06/E08 existirem. |
 | Provedores e infraestrutura | P00 e P04 encerradas. Gmail real validado para confirmação, recuperação e convite. P01–P03 e P05–P09 mantêm seus estados em `decisoes-pendentes.md`. |
-| Próxima ação | Revisão do PR da H08.5 por Diego. Para concluir a H08.4 e a H08.5 (e fechar o E08): itens da P03 (número, segredos no servidor, templates aprovados, custo, webhook HTTPS) e autorização do primeiro envio real. H09.1 só depois de autorizada. |
+| Próxima ação | Revisão do PR da H09.1 por Diego e instalação nos dois celulares Android (roteiro no README). Depois, H09.2 (câmera/galeria). Pendentes em paralelo: itens da P03 e autorização do primeiro envio real para concluir H08.4/H08.5 e o E08. |
 
 ## Estados permitidos
 
@@ -75,7 +75,7 @@ Títulos e IDs preservados do backlog. Consulte cada história para critérios c
 | H08.3 | Disponibilizar notificações internas | Concluído | Tela **Avisos** e `/notifications/inbox`: um aviso por resumo para cada membro ativo (convidado só no app), falha de WhatsApp só para o administrador atual com catálogo fixo, ler/dispensar individuais e idempotentes sem quitar nem interromper lembretes, paginação, situação atual separada do resumo histórico e link protegido para a conta (V26, T33). 431 Java, JaCoCo 98,33%/93,70%, PIT 91%, 199 ITs em Testcontainers 17.6 (12 da matriz N1–N14), 143 frontend, smoke 16/16 e E2E full-stack com o job real aprovados. Evidência: `docs/evidencias/H08.3.md`. |
 | H08.4 | Enviar e acompanhar WhatsApp real | Em validação | Envio pela Meta Cloud API ao administrador com consentimento, revalidado imediatamente antes da chamada (fora de transação), aceite distinto de entrega, incerteza sem reenvio, webhook assinado e deduplicado sem regressão, mensagem de teste e acompanhamento na página do resumo (V27, T34). Desligado por padrão. 455 Java, JaCoCo 98,38%/94,06%, PIT 91%, 216 ITs em Testcontainers 17.6 (17 da matriz W1–W21 com servidor Meta **simulado**), 147 frontend, smoke 17/17 e E2E full-stack aprovados. **Sem envio real:** depende da P03 e da autorização do Diego. Evidência: `docs/evidencias/H08.4.md`. |
 | H08.5 | Revalidar e tratar falhas sem acúmulo | Em validação | Revalidação antes de cada tentativa (conteúdo recomposto, vazio não sai), novas tentativas só após recusa certa com esperas 1/5/15/30 min (máx. 5) dentro da janela não extensível, `RETRY_WAITING` na mesma entrega, expiração `NOT_SENT_IN_WINDOW`, incerto nunca reenviado e reconciliado pelo webhook (`biz_opaque_callback_data`), suspensão do canal em falha permanente mantendo número e consentimento, retomada segura após reinício e visibilidade ao administrador (V28, T35). 477 Java, JaCoCo 98,44%/94,15%, PIT 91%, 229 ITs em Testcontainers 17.6 (30 de `WhatsAppDeliveryPostgresIT`, matriz R1–R21 com Meta **simulada**), 149 frontend e smoke 18/18 aprovados; E2E full-stack não executado nesta sessão (restrição de horário do teste). **Sem envio real:** depende da P03 e da autorização do Diego. Evidência: `docs/evidencias/H08.5.md`. |
-| H09.1 | Instalar e navegar pelo celular | Não iniciado | — |
+| H09.1 | Instalar e navegar pelo celular | Em validação | PWA instalável (manifesto, ícones, service worker do Angular só com o app shell, sem cache de `/api`), menu responsivo acessível, **Adicionar despesa** em toda tela e atalho no ícone, `/entrar` reconhece sessão, aviso de nova versão; `no-store` também no `401` de sessão expirada; cabeçalhos do nginx (T36). Dependências do frontend atualizadas por alertas do `npm audit`. 480 Java, 229 ITs em Testcontainers 17.6, JaCoCo 98,46%/94,15%, PIT 91%, 162 frontend, smoke 19/19, `e2e:pwa` 6/6 (instalabilidade sem erros no Chromium) e E2E full-stack com nginx aprovados. **Falta instalar nos dois Android reais.** Evidência: `docs/evidencias/H09.1.md`. |
 | H09.2 | Capturar ou selecionar imagem | Não iniciado | — |
 | H09.3 | Tratar desconexão de forma clara | Não iniciado | — |
 | H10.1 | Solicitar análise e revisar sugestões | Não iniciado | — |
@@ -639,3 +639,22 @@ Publicação de uma imagem isolada não fecha a release. Uma restauração deve 
 | 29/09/2026 | H08.3 concluída: avisos internos por membro na transação do resumo, falhas de WhatsApp só para o administrador atual, ler/dispensar idempotentes e situação atual separada do resumo; matriz N1–N14 conferida em PostgreSQL 17.6, gates (JaCoCo 98,33%/93,70%, PIT 91%), 143 frontend, smoke 16/16 e E2E full-stack com o job real. Checkpoint atendido; H08.4 iniciada.
 | 29/09/2026 | H08.4 em validação: envio pela Meta Cloud API com revalidação antes da chamada, aceite distinto de entrega, incerteza sem reenvio, webhook assinado e mensagem de teste; matriz W1–W22 conferida com servidor Meta simulado em PostgreSQL 17.6, gates (JaCoCo 98,38%/94,06%, PIT 91%), 147 frontend, smoke 17/17 e E2E full-stack. Sem envio real: depende da P03 e da autorização do Diego.
 | 29/09/2026 | H08.5 em validação: revalidação antes de cada tentativa, novas tentativas só após recusa certa dentro da janela não extensível, incerto nunca reenviado e reconciliado pelo webhook, suspensão do canal em falha permanente e retomada segura após reinício; matriz R1–R21 com Meta simulada em PostgreSQL 17.6, gates (JaCoCo 98,44%/94,15%, PIT 91%), 149 frontend e smoke 18/18. Sem envio real (P03); E08 não concluído. |
+
+## Registro H09.1
+
+```text
+História / objetivo: H09.1 — Instalar e navegar pelo celular.
+Estado / responsável / data: Em validação / desenvolvimento / 08/11/2026. Falta instalar e usar nos dois celulares Android reais (RNF-UX-04, D24).
+Requisitos e critérios de aceite relacionados: H09.1 do backlog; PRD RF-WEB-01, RF-WEB-02, RF-WEB-04, RNF-UX-02 a RNF-UX-04, CA-22; especificação (PWA e arquivos privados).
+Decisões e pendências aplicáveis: T36 registrada; D24 aplicada. P02 (HTTPS) necessária para instalar em produção. Diego autorizou seguir com o backlog deixando H08.4/H08.5 em validação (08/11/2026).
+Branch / commit / PR: branch `claude/proxima-historia-c82qdo` a partir de `main` em `13edda6` (PR #15 integrado); PR para `main`. Nada foi publicado ou implantado.
+Arquivos e comportamento alterados: frontend (service worker, manifesto, ícones, casca com menu e "Adicionar despesa", estado de sessão, /entrar com sessão, ?nova=1 em Despesas, nginx.conf, E2E da PWA); backend (`SessionLifetimeFilter` com no-store no 401); CI (passo e2e:pwa); dependências do frontend atualizadas por alertas do npm audit.
+Migrações e impacto sobre dados: nenhuma.
+Testes executados: 480 unitários/HTTP/ArchUnit; 229 ITs Failsafe em Testcontainers `postgres:17.6-alpine`; JaCoCo e PIT; 162 Vitest; build Angular; 19 smoke; 6 e2e:pwa no build de produção; E2E full-stack 1/1 com nginx real e backend com relógio deslocado para 29/09/2026. Todos aprovados.
+Cobertura e mutação aplicáveis: JaCoCo 3765/3824 linhas (98,46%) e 2141/2274 branches (94,15%); PIT 1702/1863 (91%), força 95%; limites mantidos.
+Validação manual / integração real: instalação nos celulares reais não executada (sem aparelho no ambiente). Instalabilidade conferida pelo Chromium (sem erros).
+Limitações e cenários futuros: Chrome Android real; desconexão clara é a H09.3; câmera/galeria é a H09.2.
+Documentação atualizada: README.md, docs/openapi.yaml, docs/decisoes-pendentes.md, docs/evidencias/H09.1.md e este arquivo.
+Condição de conclusão ou desbloqueio: instalar, abrir pela tela inicial, navegar e cadastrar nos dois Android (I18), registrando modelo e versões.
+Próximo passo: revisão do PR por Diego e teste nos celulares; depois H09.2.
+```
