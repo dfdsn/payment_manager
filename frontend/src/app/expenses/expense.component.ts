@@ -1,11 +1,12 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit, inject, signal, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { ApiError } from '../identity/initial-setup.service';
 import { AccountAccessService, SpaceMember } from '../identity/account-access.service';
@@ -36,6 +37,9 @@ export class ExpenseComponent implements OnInit {
   private readonly categoryApi = inject(CategoryService);
   private readonly csvExports = inject(CsvExportService);
   private readonly route = inject(ActivatedRoute, { optional: true });
+  private readonly router = inject(Router, { optional: true });
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly newDescription = viewChild<ElementRef<HTMLInputElement>>('newDescription');
   readonly categories = signal<Category[]>([]);
   readonly members = signal<SpaceMember[]>([]);
   readonly responsibleFilterPeople = signal<import('./expense.service').ExpenseFilterPerson[]>([]);
@@ -142,6 +146,22 @@ export class ExpenseComponent implements OnInit {
     // H08.3: a notification links here with ?despesa=<id>; the backend authorizes the read (404 outside the space).
     const linked = this.route?.snapshot?.queryParamMap?.get('despesa');
     if (linked) this.loadDetail(linked);
+    // H09.1: "Adicionar despesa" (toolbar and home-screen shortcut) opens here with ?nova=1.
+    this.route?.queryParamMap?.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(params => {
+      if (params.get('nova') === '1') this.startQuickAdd();
+    });
+  }
+
+  /** Brings the new-expense form into view with the description focused, then drops ?nova so it can be used again. */
+  startQuickAdd(): void {
+    setTimeout(() => {
+      const input = this.newDescription()?.nativeElement;
+      input?.scrollIntoView?.({ block: 'center' });
+      input?.focus();
+    });
+    void this.router?.navigate([], {
+      relativeTo: this.route, queryParams: { nova: null }, queryParamsHandling: 'merge', replaceUrl: true,
+    });
   }
 
   submit(): void {

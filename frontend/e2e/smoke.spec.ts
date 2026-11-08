@@ -555,6 +555,8 @@ test('H06.4 downloads the CSV of the selection on screen and explains a refused 
 });
 
 test('H07.1 closes a month with pending entries only after the warning is confirmed', async ({ page }) => {
+  // The fixture describes September 2026; the page opens on the current month of the space.
+  await page.clock.setFixedTime(new Date('2026-09-29T13:00:00Z'));
   const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
   const indicators = { plannedCount: 3, plannedTotal: '1790.00', plannedEstimated: '180.00', paidCount: 1, paidTotal: '110.00',
     pendingCount: 2, pendingTotal: '1680.00', pendingEstimated: '180.00', overdueCount: 1, overdueTotal: '1500.00',
@@ -673,6 +675,8 @@ test('H07.2 distinguishes the saved snapshot from current data changed after the
 });
 
 test('H07.3 generates a new version and still shows the first one as it was saved', async ({ page }) => {
+  // The fixture describes September 2026; the page opens on the current month of the space.
+  await page.clock.setFixedTime(new Date('2026-09-29T13:00:00Z'));
   const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
   const indicators = { plannedCount: 3, plannedTotal: '1790.00', plannedEstimated: '180.00', paidCount: 1, paidTotal: '110.00',
     pendingCount: 2, pendingTotal: '1680.00', pendingEstimated: '180.00', overdueCount: 1, overdueTotal: '1500.00',
@@ -1031,5 +1035,73 @@ test('H08.5 shows a suspended channel with its correction and a summary waiting 
   await expect(page.getByTestId('whatsapp-attempts')).toContainText('não recebida pela Meta');
   await expect(page.getByRole('button', { name: /reenviar/i })).toHaveCount(0);
   overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test('H09.1 navigates on a phone by keyboard and adds an expense from the quick action', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  await page.route('**/api/v1/identity/me', route => route.fulfill(json({ userId: 'actor', displayName: 'Diego',
+    email: 'diego@example.com', spaceId: 's', spaceName: 'Minha casa', role: 'ADMINISTRATOR', currency: 'BRL',
+    locale: 'pt-BR', timeZone: 'America/Sao_Paulo' })));
+  await page.route('**/api/v1/identity/members', route => route.fulfill(json([{ userId: 'actor', displayName: 'Diego', currentUser: true }])));
+  await page.route('**/api/v1/categories**', route => route.fulfill(json([])));
+  await page.route('**/api/v1/auth/csrf', route => route.fulfill(json({ headerName: 'X-XSRF-TOKEN' })));
+  await page.route('**/api/v1/expenses/filter-options', route => route.fulfill(json({ responsiblePeople: [], payerPeople: [] })));
+  const created: unknown[] = [];
+  await page.route('**/api/v1/expenses?**', route => route.fulfill(json({ content: [], page: 0, size: 20,
+    totalElements: 0, totalPages: 0, sort: 'REFERENCE_DATE', direction: 'ASC' })));
+  await page.route('**/api/v1/expenses', async route => {
+    created.push(route.request().postDataJSON());
+    await route.fulfill(json({ id: 'new' }, 201));
+  });
+  await page.route('**/api/v1/notifications/inbox**', route => route.fulfill(json({ items: [], page: 0, size: 20,
+    totalItems: 0, totalPages: 0, unreadCount: 0, view: 'ACTIVE' })));
+
+  await page.goto('/entrar');
+  await expect(page.getByRole('heading', { name: 'Olá, Diego' })).toBeVisible();
+  const navigation = page.getByRole('navigation', { name: 'Seções' });
+  const menu = page.getByRole('button', { name: 'Abrir menu de seções' });
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
+  await expect(navigation).toBeHidden();
+
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('link', { name: 'Ir para o conteúdo' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(menu).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(navigation).toBeVisible();
+  await expect(menu).toHaveAttribute('aria-expanded', 'true');
+  await expect(navigation.getByRole('link', { name: /Painel/ })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(navigation).toBeHidden();
+  await expect(menu).toBeFocused();
+
+  await page.keyboard.press('Enter');
+  await expect(navigation.getByRole('link', { name: /Minha sessão/ })).toHaveAttribute('aria-current', 'page');
+  await navigation.getByRole('link', { name: /Avisos/ }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/avisos$/);
+  await expect(navigation).toBeHidden();
+  await expect(page.locator('#main-content')).toBeFocused();
+
+  const quickAdd = page.getByRole('link', { name: 'Adicionar despesa' });
+  await quickAdd.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/despesas$/);
+  const description = page.getByTestId('new-expense-description');
+  await expect(description).toBeFocused();
+  await page.keyboard.type('Gás pelo celular');
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('textbox', { name: 'Valor', exact: true })).toBeFocused();
+  await page.keyboard.type('-5');
+  await page.keyboard.press('Tab');
+  await expect(page.getByText('Informe um valor positivo com até duas casas decimais.')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Valor', exact: true }).fill('89,90');
+  await page.getByRole('textbox', { name: 'Vencimento', exact: true }).fill('2026-11-20');
+  await page.getByRole('textbox', { name: 'Vencimento', exact: true }).press('Enter');
+  await expect(page.getByRole('status').filter({ hasText: 'Despesa cadastrada com sucesso.' })).toBeVisible();
+  expect(created).toEqual([expect.objectContaining({ description: 'Gás pelo celular', amount: '89.90', dueDate: '2026-11-20', status: 'PENDING' })]);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });

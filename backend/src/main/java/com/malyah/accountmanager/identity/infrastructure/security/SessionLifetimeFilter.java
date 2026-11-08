@@ -83,6 +83,11 @@ public final class SessionLifetimeFilter extends OncePerRequestFilter {
 
     private void unauthorized(HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        // H09.1: this filter answers before Spring Security's header writer runs, so it sets the same
+        // "never store" policy itself; no browser, proxy or service worker may keep a private answer.
+        response.setHeader("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate");
+        response.setHeader("Pragma", "no-cache");
+        response.setHeader("Expires", "0");
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write("{\"code\":\"SESSION_EXPIRED\",\"message\":\"" + message
                 + "\",\"fieldErrors\":[],\"operationId\":\"" + UUID.randomUUID() + "\"}");

@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "account_Manager — Despesas familiares",
+  "short_name": "Contas",
+  "description": "Despesas, vencimentos e pagamentos do espaço familiar. Requer internet.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "/entrar",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f7fb",
+  "theme_color": "#132f4c",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Adicionar despesa", "short_name": "Adicionar", "url": "/despesas?nova=1", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Painel por vencimento", "short_name": "Painel", "url": "/painel", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}

@@ -7,7 +7,7 @@
     <div><a routerLink="/painel">Painel por vencimento</a> · <a routerLink="/pagamentos">Pagamentos do mês</a> · <a routerLink="/planejamento">Planejamento</a> · <a routerLink="/categorias">Gerenciar categorias</a> · <a routerLink="/recorrencias">Gerenciar recorrências</a> · <a routerLink="/compras-parceladas">Compras parceladas</a> · <a routerLink="/lembretes">Lembretes</a> · <a routerLink="/avisos" data-testid="expenses-inbox-link">Avisos</a> · <a routerLink="/entrar">Voltar ao início</a></div>
   </header>
 
-  <mat-card appearance="outlined" class="expense-form-card">
+  <mat-card appearance="outlined" class="expense-form-card" id="nova-despesa">
     <mat-card-header>
       <mat-card-title>Adicionar despesa</mat-card-title>
       <mat-card-subtitle>A categoria é opcional; sem escolha, será exibida como “Sem categoria”.</mat-card-subtitle>
@@ -18,7 +18,7 @@
       <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
         <mat-form-field appearance="outline" class="wide-field">
           <mat-label>Descrição</mat-label>
-          <input matInput formControlName="description" maxlength="200" autocomplete="off" />
+          <input matInput #newDescription formControlName="description" maxlength="200" autocomplete="off" data-testid="new-expense-description" />
           @if (form.controls.description.invalid && form.controls.description.touched) {
             <mat-error>Informe uma descrição com até 200 caracteres.</mat-error>
           }

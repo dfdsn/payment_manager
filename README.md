@@ -1,6 +1,6 @@
 # account_Manager
 
-Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões. H07.1 fecha o mês guardando um retrato imutável do resumo por vencimento, sem bloquear correções, H07.2 sinaliza quando os dados atuais passam a diferir do retrato salvo e H07.3 gera novas versões do fechamento, preservando e permitindo consultar as anteriores.
+Gerenciador pessoal de despesas para um administrador e um convidado. A fundação técnica, o E01, o E02 e o E04 estão validados. Além dos fluxos manuais, H04.1–H04.3 cadastram recorrências, calculam o calendário, geram com segurança a ocorrência vigente e permitem visualizar/antecipar previsões. H04.4 permite confirmar o valor real de cobranças variáveis e H04.5 permite alterar “este e os próximos” e encerrar recorrências (veja `docs/progresso.md`). H05.1 cadastra compras parceladas, com cada parcela lançada em Despesas, H05.2 mostra o progresso de cada compra e quita as parcelas selecionadas, e H05.3 altera ou cancela parcelas pendentes preservando as pagas. H06.1 mostra o painel do mês por vencimento (previsto, pago, pendente, atrasado e ajustes) H06.2 mostra os pagamentos do mês pela data efetiva, com pagador, autor e correções, H06.3 mostra o planejamento do mês atual e dos 12 seguintes, somando lançamentos e previsões sem contar duas vezes, e H06.4 exporta em CSV, para o Excel, a seleção de Despesas e, em arquivo separado, as previsões. H07.1 fecha o mês guardando um retrato imutável do resumo por vencimento, sem bloquear correções, H07.2 sinaliza quando os dados atuais passam a diferir do retrato salvo e H07.3 gera novas versões do fechamento, preservando e permitindo consultar as anteriores. H09.1 torna o aplicativo instalável como PWA no Chrome do Android, com menu responsivo e o atalho **Adicionar despesa** em todas as telas, sem guardar dados financeiros no aparelho.
 
 As regras do produto estão em [`docs/prd.md`](docs/prd.md), a sequência em [`docs/epicos-desenvolvimento.md`](docs/epicos-desenvolvimento.md), as decisões em [`docs/decisoes-pendentes.md`](docs/decisoes-pendentes.md) e a evidência atual em [`docs/progresso.md`](docs/progresso.md).
 
@@ -17,12 +17,13 @@ O contrato HTTP implementado está versionado em [`docs/openapi.yaml`](docs/open
 | JaCoCo / PIT / plugin PIT JUnit | 0.8.15 / 1.20.5 / 1.2.3 |
 | ArchUnit / Testcontainers | 1.4.2 / 2.0.5 |
 | PostgreSQL | 17.6 Alpine na preparação; major 17 é o contrato |
-| Angular Core/CLI/build | 21.2.24 |
+| Angular Core / CLI e build | 21.2.26 / 21.2.29 (atualizados na H09.1 por alertas do `npm audit`) |
+| Angular Service Worker | 21.2.26 (H09.1; ativo só no build de produção) |
 | Angular Material/CDK | 21.2.14 |
 | Node / TypeScript / RxJS | 24.18.0 / 5.9.3 / 7.8.2 |
-| Vitest / Playwright | 4.1.11 / 1.63.0 |
+| Vitest / Playwright | 4.1.12 / 1.63.0 |
 
-Material/CDK e Core estão na mesma família 21 LTS; seus patches mais recentes publicados não possuem o mesmo número. O `package-lock.json` fixa toda a árvore. `npm audit` terminou sem vulnerabilidades conhecidas nesta execução.
+Material/CDK e Core estão na mesma família 21 LTS; seus patches mais recentes publicados não possuem o mesmo número. O `package-lock.json` fixa toda a árvore e foi gerado com npm 11.16.0 (o `packageManager` do projeto; npm 10 remove os campos `libc` do lockfile). Em 08/11/2026, `npm audit --audit-level=moderate` passou a reprovar a árvore anterior (Angular 21.2.24, Vite, Vitest 4.1.11 e dependências do CLI): a H09.1 atualizou os pacotes acima e fixou por `overrides` `glob@14.0.4` e `minimatch@11.0.5`, usados só pelo `pacote` do Angular CLI (comandos `ng add`/`ng update`), não pelo build nem pelo aplicativo. Resultado: 0 vulnerabilidades.
 
 ## Estrutura
 
@@ -329,11 +330,26 @@ npm audit --audit-level=moderate
 npm run test:ci
 npm run build
 npm run e2e:smoke
+npm run e2e:pwa
 npm run e2e:full-stack
 npm run e2e
 ```
 
-`e2e:smoke` usa respostas simuladas pelo próprio Playwright (nunca em produção) e cobre a configuração inicial e a confirmação de valor variável com conflito. `e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de criar/usar/renomear/arquivar categoria, atribuir responsável, consultar histórico, cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface, além de confirmar uma cobrança variável na despesa e numa previsão. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada e pertence a H09.
+`e2e:pwa` (H09.1) roda depois de `npm run build`: serve o build **de produção**, com o service worker ativo, por `e2e/support/pwa-server.mjs`, que imita os cabeçalhos do `nginx.conf` e responde algumas rotas `/api` com um **dublê de teste** (nunca em produção). Ele confere no Chromium do Playwright, emulando um Pixel 7, que o Chrome não aponta erro de instalação (`Page.getInstallabilityErrors` vazio), que nenhum cache guarda resposta da API ou dado financeiro, que sem conexão nada antigo é servido e que a navegação para `/api` chega ao servidor. Relatório em `frontend/playwright-report-pwa/`.
+
+O roteiro do `e2e:full-stack` tem datas fixas de setembro de 2026 e o backend calcula o “mês atual” pelo próprio relógio. Em outra data, rode o backend com o relógio deslocado por libfaketime (Linux) e passe o mesmo deslocamento ao teste; o navegador e o teste passam a viver no dia do backend, na hora real (necessário para o job de lembretes). Exemplo executado em 08/11/2026 (40 dias depois de 29/09):
+
+```bash
+sudo apt-get install -y libfaketime
+# backend (APP_MODE=runtime, mesmas variáveis do compose.full-local.yml):
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/faketime/libfaketimeMT.so.1 FAKETIME=-40d FAKETIME_DONT_FAKE_MONOTONIC=1 java -jar backend.jar
+# frontend:
+E2E_CLOCK_OFFSET_DAYS=-40 npm run e2e:full-stack
+```
+
+`FAKETIME_DONT_FAKE_MONOTONIC=1` evita a lentidão observada antes com libfaketime. Sem `E2E_CLOCK_OFFSET_DAYS` o teste usa o relógio real. Os smokes H07.1 e H07.3 fixam o relógio do navegador em 29/09/2026 pelo mesmo motivo.
+
+`e2e:smoke` usa respostas simuladas pelo próprio Playwright (nunca em produção) e cobre a configuração inicial e a confirmação de valor variável com conflito. `e2e:full-stack` pressupõe `compose.full-local.yml` saudável e banco vazio; ele percorre configuração, confirmação, login, convite e papéis, além de criar/usar/renomear/arquivar categoria, atribuir responsável, consultar histórico, cadastrar/quitar despesas, validar a correção obrigatória antes de reverter uma paga sem vencimento, reverter/cancelar, simular duas edições concorrentes e provar a rejeição integral e o sucesso de um lote pela interface, além de confirmar uma cobrança variável na despesa e numa previsão. Depois valida transferência, saída/revogação e recuperação de senha. O E2E local usa Chrome instalado. A CI instala Chromium fixado pelo Playwright. Relatórios ficam em `frontend/test-results/` e `frontend/playwright-report/`. Instalação PWA/câmera em Android não é simulada: a instalação no celular real segue o roteiro da seção “Instalar e navegar pelo celular (H09.1)”.
 
 ## Integrações locais e reais
 
@@ -351,7 +367,7 @@ Nunca versione `.env`, arquivos em `deploy/secrets/`, banco, backups, anexos, to
 `.github/workflows/ci.yml` executa em PR e em `main`:
 
 1. Java 21, `verify` com Testcontainers/PostgreSQL, JaCoCo, ArchUnit e PIT.
-2. Node 24.18, `npm ci`, audit, Vitest, build e smoke Playwright.
+2. Node 24.18, `npm ci`, audit, Vitest, build, smoke Playwright e E2E da PWA sobre o build de produção.
 3. Upload dos relatórios mesmo em falha.
 
 No GitHub, configure `main` protegida, exija PR e os jobs `backend` e `frontend`, proíba force-push e merge sem checks. A execução CI do commit `737f46a` passou em Java 21/Node 24.18; proteção de branch continua sendo configuração externa a conferir no repositório.
@@ -1175,3 +1191,45 @@ Uma nova tentativa **não é um novo resumo**: continua sendo a mesma entrega (`
 Diagnóstico H08.5: `whatsapp_delivery … attempt=N status=RETRY_WAITING`, `whatsapp_retry_failed deliveryId=…`, `whatsapp_retry_closed deliveryId=… reason=…` e `whatsapp_webhook … reconciled=N`. Os logs usam ids internos e nunca número, token ou texto da Meta.
 
 Testes: `WhatsAppRetryDomainTest`, `WhatsAppRetryServiceTest`, `MetaWhatsAppProviderTest` e os cenários R1–R14 de `WhatsAppDeliveryPostgresIT` (PostgreSQL real, relógio controlado, falhas **simuladas** pelo `FakeMetaServer`).
+
+## Celular e PWA (E09)
+
+### Instalar e navegar pelo celular (H09.1)
+
+**Estado: em validação.** Tudo foi testado em navegador automatizado; falta instalar nos dois celulares Android reais (RNF-UX-04, D24). Evidência: `docs/evidencias/H09.1.md`; decisão T36 em `docs/decisoes-pendentes.md`.
+
+**O que muda para o usuário**
+
+- Com sessão, toda tela (menos as de entrar, confirmar email, recuperar senha, aceitar convite e configuração inicial) mostra o menu de seções e o botão **Adicionar despesa** na barra superior. Em telas com menos de 60rem (celular ou janela estreita), o menu abre pelo botão ☰ (“Abrir menu de seções”); no computador ele fica fixo à esquerda. A seção atual é marcada por negrito e borda, além da cor (`aria-current="page"`).
+- **Adicionar despesa** abre `/despesas?nova=1`: a tela leva o formulário à vista e coloca o cursor na descrição. O mesmo atalho aparece ao tocar e segurar o ícone instalado, junto com **Painel por vencimento**.
+- O aplicativo instalado abre em `/entrar`. Com sessão, mostra “Olá, …”, o espaço, o papel e os atalhos; sem sessão, o formulário de entrada (sem mensagem de erro).
+- Quando uma nova versão é publicada, aparece “Nova versão disponível” com **Atualizar agora**. A página nunca recarrega sozinha, para não perder o que está sendo preenchido.
+
+**O que fica guardado no aparelho.** O service worker do Angular (`frontend/ngsw-config.json`) guarda **somente o app shell**: `index.html`, os pacotes `.js`/`.css` com hash, o manifesto, o favicon e os ícones. Não há `dataGroups`: nenhuma resposta de `/api` é guardada, e navegações para `/api/**` vão direto ao servidor. O backend envia `Cache-Control: no-cache, no-store, max-age=0, must-revalidate` em todas as respostas da API, inclusive `401` de sessão expirada. Sem internet, nenhuma tela mostra dados antigos como atuais (o tratamento completo da desconexão é a H09.3). Não há modo offline, fila de alterações, push nem aplicativo nativo.
+
+**Cabeçalhos do nginx (`frontend/nginx.conf`):** `ngsw-worker.js`, `ngsw.json`, `safety-worker.js`, `manifest.webmanifest` e `index.html` com `Cache-Control: no-cache` (a nova versão chega aos aplicativos instalados); pacotes com hash com `public, max-age=31536000, immutable`; arquivo estático inexistente responde `404` em vez de `index.html`.
+
+**Requisitos para instalar.** Chrome no Android (os dois celulares, D24) ou Chrome/Edge no Windows, em **HTTPS** (produção: `https://contas.malyah.tech`, que depende da P02) ou em `localhost`. Um endereço `http://` da rede local (por exemplo `http://192.168.0.10:8080`) **não** permite instalar nem registra o service worker. Safari/iOS não é alvo do MVP.
+
+**Instalar no celular antes da produção (teste local, sem expor nada na rede):**
+
+1. No computador, suba a stack local: `docker compose -f deploy/compose.full-local.yml up --build` e confira `http://localhost:8080`.
+2. No celular Android: **Configurações → Sobre o telefone →** toque 7 vezes em **Número da versão**; depois **Opções do desenvolvedor → Depuração USB** ligada. Conecte o cabo e autorize o computador.
+3. No Chrome do computador, abra `chrome://inspect/#devices`, clique **Port forwarding…**, adicione `8080` → `localhost:8080`, marque **Enable port forwarding** e clique **Done**. O celular deve aparecer na lista.
+4. No Chrome do celular, abra `http://localhost:8080/entrar` (o encaminhamento faz o celular tratar o endereço como local e seguro).
+5. Menu ⋮ do Chrome → **Adicionar à tela inicial → Instalar** (ou o aviso “Instalar app”, se aparecer). Confirme o nome **Contas** e o ícone.
+6. Feche o Chrome, abra **Contas** pela tela inicial e confira: abre sem barra de endereço; entra; o menu ☰ lista as seções; **Adicionar despesa** põe o cursor na descrição; cadastrar uma despesa mostra “Despesa cadastrada com sucesso.”; tocar e segurar o ícone mostra os atalhos.
+7. Ative o modo avião e abra **Contas** de novo: o app abre, mas nenhuma lista ou valor aparece como atual (chamadas falham). Desative o modo avião.
+
+Resultado esperado: tudo acima funciona nos dois celulares. Registre modelo, versão do Android e do Chrome em `docs/evidencias/H09.1.md`. Em produção, os passos 2–4 são substituídos por abrir `https://contas.malyah.tech`.
+
+**Diagnóstico**
+
+| Sintoma | Causa provável | O que fazer |
+|---|---|---|
+| Não aparece “Instalar” | Endereço `http://` que não é `localhost`, ou build de desenvolvimento (`npm start`, service worker desligado) | Use HTTPS ou o encaminhamento de porta; use a imagem/`npm run build` |
+| Continua a versão antiga depois de publicar | `ngsw.json` ou `ngsw-worker.js` em cache intermediário | Confira `curl -sI https://contas.malyah.tech/ngsw.json` → `Cache-Control: no-cache`; aguarde o aviso “Nova versão disponível” e toque **Atualizar agora** |
+| Tela em branco depois de uma publicação | Pacote antigo removido enquanto o app estava aberto (o aviso “não pode mais ser usada” aparece) | Toque **Atualizar agora**. Persistindo: Chrome → Configurações do site → Limpar e redefinir, e abra de novo |
+| Quero remover o service worker | — | Desinstale o app (tocar e segurar → Desinstalar) e limpe os dados do site; ou, em emergência para todos, publique o `safety-worker.js` do Angular como `ngsw-worker.js` |
+
+Testes: `app.spec.ts`, `session-state.service.spec.ts`, cenários H09.1 de `expense.component.spec.ts` e `account-access.component.spec.ts`, `PrivateResponseCacheHttpTest`, `SessionLifetimeFilterTest`, smoke H09.1 (390 px, só teclado), `e2e:pwa` (build de produção) e o trecho H09.1 do E2E full-stack (nginx + backend + PostgreSQL reais).
