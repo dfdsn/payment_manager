@@ -30,20 +30,14 @@ app:
     root: ${APP_FILES_ROOT:/var/lib/account-manager/files}
   mail:
     from: ${SMTP_FROM:account-manager@localhost}
-  # H08.4: Meta WhatsApp Cloud API. Off by default; secrets come from the environment (filled from *_FILE secrets
-  # by the container entrypoint), never from this file.
+  # T36: WhatsApp through the Evolution API (self-hosted). Off by default; the key and the webhook secret come from
+  # the environment (filled from *_FILE secrets by the container entrypoint), never from this file.
   whatsapp:
-    enabled: ${META_WHATSAPP_ENABLED:false}
-    api-base-url: ${META_WHATSAPP_API_BASE_URL:https://graph.facebook.com}
-    api-version: ${META_WHATSAPP_API_VERSION:}
-    phone-number-id: ${META_WHATSAPP_PHONE_NUMBER_ID:}
-    access-token: ${META_WHATSAPP_TOKEN:}
-    app-secret: ${META_WHATSAPP_APP_SECRET:}
-    verify-token: ${META_WHATSAPP_VERIFY_TOKEN:}
-    summary-template: ${META_WHATSAPP_SUMMARY_TEMPLATE:}
-    template-language: ${META_WHATSAPP_TEMPLATE_LANGUAGE:pt_BR}
-    test-template: ${META_WHATSAPP_TEST_TEMPLATE:}
-    test-template-language: ${META_WHATSAPP_TEST_TEMPLATE_LANGUAGE:pt_BR}
+    enabled: ${EVOLUTION_API_ENABLED:false}
+    api-base-url: ${EVOLUTION_API_BASE_URL:}
+    api-key: ${EVOLUTION_API_KEY:}
+    instance: ${EVOLUTION_API_INSTANCE:}
+    webhook-token: ${EVOLUTION_WEBHOOK_TOKEN:}
 
 management:
   endpoints:

@@ -133,7 +133,7 @@ class ReminderSummaryPostgresIT {
         generation = new JdbcRecurrenceGenerationJob(jdbc, tx, materializer, clock, Duration.ofMinutes(2), 25);
         WhatsAppProviderStatus provider = () -> providerAvailable
                 ? new WhatsAppProviderStatus.Availability(true, "TEST_PROVIDER", "Porta de teste.")
-                : new MetaWhatsAppProvider(MetaWhatsAppProperties.disabled()).availability();
+                : new EvolutionWhatsAppProvider(EvolutionWhatsAppProperties.disabled()).availability();
         settings = new TransactionalReminderSettingsUseCase(new ReminderSettingsService(
                 new JdbcReminderSettingsRepository(jdbc), context, members, provider, clock, UUID::randomUUID), tx);
         service = new ReminderSummaryService(new JdbcReminderSummaryRepository(jdbc),
@@ -278,7 +278,7 @@ class ReminderSummaryPostgresIT {
                 new RecurrenceForecastCatalog(RecurrenceTestFixtures.service(jdbc, context, categories, members, clock,
                         new JdbcRecurringExpenseMaterializer(jdbc, tx), null)),
                 (space, through) -> { throw new IllegalStateException("generation down"); },
-                new MetaWhatsAppProvider(MetaWhatsAppProperties.disabled()), context, clock, UUID::randomUUID, "https://x"), tx, clock);
+                new EvolutionWhatsAppProvider(EvolutionWhatsAppProperties.disabled()), context, clock, UUID::randomUUID, "https://x"), tx, clock);
         withoutGeneration.poll();
         var stored = only(LocalDate.of(2026, 9, 28), "FIRST");
         assertThat(stored.items()).singleElement().extracting(ReminderSummaryView.Item::forecast).isEqualTo(true);

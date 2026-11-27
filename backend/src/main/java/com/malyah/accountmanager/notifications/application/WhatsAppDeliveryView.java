@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * H08.4: what the administrator sees about the WhatsApp side of a summary or a test. {@code state} is a delivery
  * state, or {@code NOT_PLANNED} (the channel was not ready when the summary was generated) or {@code WAITING}
- * (planned, not attempted yet). Acceptance by Meta and confirmed delivery are separate states and messages. The
+ * (planned, not attempted yet). Acceptance by the provider and confirmed delivery are separate states and messages. The
  * number is always masked and no provider id, token or provider text is included. H08.5: {@code nextAttemptAt} while
  * a retry of the same summary waits; {@code reconciledAt} when an uncertain result was later confirmed by the webhook.
  */

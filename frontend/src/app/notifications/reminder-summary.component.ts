@@ -8,7 +8,7 @@ import { ReminderSummaryCardComponent } from './reminder-summary-card.component'
 import { ReminderSummary, ReminderSummaryService, SLOT_LABELS, WhatsAppDelivery } from './reminder-summary.service';
 
 const ATTEMPT_OUTCOMES: Record<string, string> = {
-  ACCEPTED: 'aceita pela Meta', FAILED: 'não recebida pela Meta', REJECTED: 'recusada pela Meta', UNCERTAIN: 'resultado incerto',
+  ACCEPTED: 'aceita pela Evolution API', FAILED: 'não recebida pela Evolution API', REJECTED: 'recusada pela Evolution API', UNCERTAIN: 'resultado incerto',
 };
 
 /**
@@ -51,7 +51,7 @@ export class ReminderSummaryComponent implements OnInit {
   /** Instants of the WhatsApp delivery that exist, in order; acceptance and delivery stay separate lines. */
   whatsappSteps(w: WhatsAppDelivery): { label: string; at: string }[] {
     const zone = this.summary()?.timeZone ?? 'America/Sao_Paulo';
-    const steps: [string, string | null][] = [['Tentativa', w.attemptedAt], ['Aceito pela Meta', w.acceptedAt],
+    const steps: [string, string | null][] = [['Tentativa', w.attemptedAt], ['Aceito pela Evolution API', w.acceptedAt],
       ['Confirmado depois pelo webhook', w.reconciledAt ?? null], ['Enviado', w.sentAt], ['Entregue', w.deliveredAt],
       ['Lido', w.readAt], ['Falha', w.failedAt], ['Próxima tentativa', w.nextAttemptAt ?? null]];
     return steps.filter(([, at]) => !!at).map(([label, at]) => ({ label, at: formatInstant(at!, zone) }));

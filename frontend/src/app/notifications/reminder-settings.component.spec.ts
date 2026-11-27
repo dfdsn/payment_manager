@@ -11,7 +11,7 @@ const settings = (overrides: Partial<ReminderSettings> = {}, whatsapp: Partial<R
   whatsapp: {
     hasRecipient: false, recipient: null, recipientFormatted: null, recipientLastDigits: null, enabled: false,
     consent: { active: false, grantedAt: null, grantedByDisplayName: null, recipientLastDigits: null },
-    provider: { available: false, code: 'PROVIDER_DISABLED', message: 'O envio real pela Meta está desligado na configuração do servidor.' },
+    provider: { available: false, code: 'PROVIDER_DISABLED', message: 'O envio real pela Evolution API está desligado na configuração do servidor.' },
     state: 'RECIPIENT_REQUIRED', consentTextVersion: 'WHATSAPP-RESUMOS-V1', consentText: 'Autorizo o account_Manager a enviar resumos.',
     suspension: null,
     ...whatsapp,
@@ -122,7 +122,7 @@ describe('ReminderSettingsComponent', () => {
     await click('enable-channel');
     expect(api.changeChannel).toHaveBeenCalledWith(2, true, 'key-3');
     expect(byTestId('whatsapp-state')!.dataset['state']).toBe('PROVIDER_UNAVAILABLE');
-    expect(byTestId('whatsapp-state')!.textContent).toContain('envio pela Meta está desligado ou incompleto');
+    expect(byTestId('whatsapp-state')!.textContent).toContain('envio pela Evolution API está desligado ou incompleto');
     expect(byTestId('channel-status')!.textContent).toContain('Ativado');
   });
 
@@ -178,13 +178,13 @@ describe('ReminderSettingsComponent', () => {
   });
   it('sends one test to the consented number and says acceptance is not delivery (H08.4)', async () => {
     const ready = consented(3, false);
-    ready.whatsapp.provider = { available: true, code: 'PROVIDER_READY', message: 'Envio pela Meta configurado.' };
+    ready.whatsapp.provider = { available: true, code: 'PROVIDER_READY', message: 'Envio pela Evolution API configurado.' };
     await start(ready);
     expect(byTestId('whatsapp-test')!.textContent).toContain('sem dados de contas');
     api.sendTest.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 0 })));
     await click('send-test');
     expect(text()).toContain('tentar de novo não envia duas vezes');
-    api.sendTest.mockReturnValueOnce(of({ state: 'ACCEPTED', stateMessage: 'Aceito pela Meta. A entrega ainda não foi confirmada.',
+    api.sendTest.mockReturnValueOnce(of({ state: 'ACCEPTED', stateMessage: 'Aceito pela Evolution API. A entrega ainda não foi confirmada.',
       kind: 'TEST', reason: null, reasonMessage: null, recipientMasked: '+55 ** *****-4321', itemCount: null, createdAt: null,
       attemptedAt: null, acceptedAt: null, sentAt: null, deliveredAt: null, readAt: null, failedAt: null, attempts: [] }));
     await click('send-test');

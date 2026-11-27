@@ -66,17 +66,18 @@ import com.malyah.accountmanager.notifications.application.WhatsAppAdministrator
 import com.malyah.accountmanager.notifications.application.WhatsAppDeliveryService;
 import com.malyah.accountmanager.notifications.application.WhatsAppDeliveryUseCase;
 import com.malyah.accountmanager.notifications.application.WhatsAppTestUnavailableException;
-import com.malyah.accountmanager.notifications.domain.WebhookSignature;
 import com.malyah.accountmanager.notifications.domain.WhatsAppFailureReason;
+import com.malyah.accountmanager.notifications.domain.WhatsAppSummaryMessage;
 import com.malyah.accountmanager.recurrences.application.RecurrenceForecastCatalog;
 import com.malyah.accountmanager.recurrences.infrastructure.JdbcRecurrenceGenerationJob;
 import com.malyah.accountmanager.recurrences.infrastructure.RecurrenceTestFixtures;
 
 /**
- * H08.4 against real PostgreSQL and a SIMULATED Meta Cloud API ({@link FakeMetaServer}, a local HTTP server that
- * only exists in tests). The real adapter, job, webhook and use cases run unchanged; summaries come from the H08.2
- * job with a controllable clock. Every expected value comes from the matrix W1–W21 in docs/evidencias/H08.4.md.
- * Nothing here talks to Meta, so nothing here proves a real delivery. "Today" is 05/10/2026 in São Paulo: first
+ * H08.4/H08.5, as changed by T36, against real PostgreSQL and a SIMULATED Evolution API ({@link FakeEvolutionServer},
+ * a local HTTP server that only exists in tests). The real adapter, job, webhook and use cases run unchanged;
+ * summaries come from the H08.2 job with a controllable clock. Expected values come from the matrices W1–W21 and
+ * R1–R19 as revised in docs/evidencias/T36-evolution.md. Nothing here talks to a real Evolution API or WhatsApp, so
+ * nothing here proves a real delivery. "Today" is 05/10/2026 in São Paulo: first
  * slot 12:00 UTC, second 21:00 UTC.
  */
 @Testcontainers
@@ -91,10 +92,9 @@ class WhatsAppDeliveryPostgresIT {
     static final String A = "admin@example.com";
     static final String G = "guest@example.com";
     static final String O = "other@example.com";
-    static final String PHONE_ID = "123456789012345";
-    static final String TOKEN = "test-token-not-real";
-    static final String APP_SECRET = "test-app-secret-not-real";
-    static final String VERIFY = "test-verify-token-not-real";
+    static final String INSTANCE = "contas";
+    static final String TOKEN = "test-evolution-key-not-real";
+    static final String HOOK_TOKEN = "test-hook-token-not-real";
     static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Container
@@ -102,7 +102,7 @@ class WhatsAppDeliveryPostgresIT {
             .withDatabaseName("account_manager_whatsapp_test").withUsername("account_manager")
             .withPassword("test-only-password");
 
-    private FakeMetaServer meta;
+    private FakeEvolutionServer meta;
     private JdbcTemplate jdbc;
     private TransactionTemplate tx;
     private MutableClock clock;
@@ -115,9 +115,9 @@ class WhatsAppDeliveryPostgresIT {
     private ReminderSummaryJob summaryJob;
     private WhatsAppDeliveryService deliveries;
     private WhatsAppDeliveryJob job;
-    private MetaWhatsAppProvider sender;
+    private EvolutionWhatsAppProvider sender;
     private WhatsAppDeliveryUseCase tracking;
-    private MetaWhatsAppWebhook webhook;
+    private EvolutionWhatsAppWebhook webhook;
     private ListAppender<ILoggingEvent> logs;
 
     @BeforeEach
@@ -135,8 +135,8 @@ class WhatsAppDeliveryPostgresIT {
         insertUser(GUEST, "Convidado", G, SPACE, "GUEST");
         insertUser(OUTSIDER, "Outro", O, OTHER, "ADMINISTRATOR");
         clock = new MutableClock(FIRST.minusSeconds(3600));
-        meta = new FakeMetaServer();
-        build(properties(meta.baseUrl(), true, "teste_conexao"));
+        meta = new FakeEvolutionServer();
+        build(properties(meta.baseUrl(), true));
         logs = new ListAppender<>();
         logs.start();
         ((Logger) LoggerFactory.getLogger("com.malyah.accountmanager.notifications")).addAppender(logs);
@@ -162,21 +162,19 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(meta.requests()).hasSize(1);
         var request = meta.requests().getFirst();
         assertThat(request.method()).isEqualTo("POST");
-        assertThat(request.path()).isEqualTo("/v23.0/" + PHONE_ID + "/messages");
-        assertThat(request.authorization()).isEqualTo("Bearer " + TOKEN);
+        assertThat(request.path()).isEqualTo("/message/sendText/" + INSTANCE);
+        assertThat(request.apiKey()).isEqualTo(TOKEN);
+        assertThat(meta.stateChecks()).singleElement().extracting(FakeEvolutionServer.Request::path)
+                .isEqualTo("/instance/connectionState/" + INSTANCE);
         var body = JSON.readTree(request.body());
-        assertThat(body.path("messaging_product").asString()).isEqualTo("whatsapp");
-        assertThat(body.path("to").asString()).isEqualTo("5511987654321");
-        assertThat(body.path("type").asString()).isEqualTo("template");
-        assertThat(body.path("template").path("name").asString()).isEqualTo("resumo_contas");
-        assertThat(body.path("template").path("language").path("code").asString()).isEqualTo("pt_BR");
-        assertThat(parameters(body)).containsExactly("05/10/2026, 09:00", "1 conta, total R$ 120,00",
-                "05/10 Luz R$ 120,00", "https://contas.malyah.tech/lembretes/resumos/" + summaryId);
+        assertThat(body.path("number").asString()).isEqualTo("5511987654321");
+        assertThat(lines(body)).containsExactly("Contas a pagar em 05/10/2026, 09:00.", "1 conta, total R$ 120,00",
+                "• 05/10 Luz R$ 120,00", "Lista completa: https://contas.malyah.tech/lembretes/resumos/" + summaryId);
 
         var row = jdbc.queryForMap("select status, provider_message_id, accepted_at, delivered_at, item_count, "
                 + "recipient_user_id from whatsapp_deliveries where summary_id = ?", summaryId);
         assertThat(row.get("status")).isEqualTo("ACCEPTED");
-        assertThat(row.get("provider_message_id")).isEqualTo("wamid.FAKE-1");
+        assertThat(row.get("provider_message_id")).isEqualTo("FAKE-1");
         assertThat(((Timestamp) row.get("accepted_at")).toInstant()).isEqualTo(FIRST.plusSeconds(20));
         assertThat(row.get("delivered_at")).isNull();
         assertThat(row.get("item_count")).isEqualTo(1);
@@ -185,7 +183,7 @@ class WhatsAppDeliveryPostgresIT {
 
         var view = tracking.summaryDelivery(A, summaryId);
         assertThat(view.state()).isEqualTo("ACCEPTED");
-        assertThat(view.stateMessage()).isEqualTo("Aceito pela Meta. A entrega ainda não foi confirmada.");
+        assertThat(view.stateMessage()).isEqualTo("Aceito pela Evolution API. A entrega ainda não foi confirmada.");
         assertThat(view.recipientMasked()).isEqualTo("+55 ** *****-4321");
         assertThat(view.deliveredAt()).isNull();
         assertThat(view.attempts()).hasSize(1);
@@ -277,9 +275,9 @@ class WhatsAppDeliveryPostgresIT {
         pending("Nova depois do horário", "10.00", d(10, 6));
         job.poll();
         assertThat(meta.requests()).hasSize(1);
-        assertThat(parameters(JSON.readTree(meta.requests().getFirst().body()))).containsExactly(
-                "05/10/2026, 18:00", "1 conta, total R$ 99,90", "06/10 Internet R$ 99,90",
-                "https://contas.malyah.tech/lembretes/resumos/" + summaryId(SECOND));
+        assertThat(lines(JSON.readTree(meta.requests().getFirst().body()))).containsExactly(
+                "Contas a pagar em 05/10/2026, 18:00.", "1 conta, total R$ 99,90", "• 06/10 Internet R$ 99,90",
+                "Lista completa: https://contas.malyah.tech/lembretes/resumos/" + summaryId(SECOND));
         assertThat(jdbc.queryForObject("select item_count from whatsapp_deliveries where summary_id = ?",
                 Integer.class, summaryId(SECOND))).isOne();
     }
@@ -307,7 +305,7 @@ class WhatsAppDeliveryPostgresIT {
         var summaryId = summaryId();
         clock.set(FIRST.plusSeconds(10));
         meta.enqueueDelayed(200, """
-                {"messages":[{"id":"wamid.SLOW"}]}
+                {"key":{"id":"SLOW"}}
                 """, 300);
         race(() -> {
             job.deliver(summaryId);
@@ -326,35 +324,37 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(delivery(summaryId)).isEqualTo("ACCEPTED/-");
     }
 
-    /** W8: a refusal is recorded with the code only; recipient codes are told apart. */
+    /** W8: a refusal is recorded with the code only; a number without WhatsApp is told apart. */
     @Test
     void w8RejectionsAreRecordedWithoutProviderText() {
         enableWhatsApp();
         pending("Luz", "120.00", d(10, 5));
         summaryAt(FIRST);
-        meta.enqueue(400, """
-                {"error":{"message":"(#132001) Template name does not exist in the translation","type":"OAuthException",
-                 "code":132001,"fbtrace_id":"TRACE-SECRET"}}
+        meta.enqueue(401, """
+                {"status":401,"error":"Unauthorized","response":{"message":"Unauthorized TRACE-SECRET"}}
                 """);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
         assertThat(delivery(summaryId(FIRST))).isEqualTo("REJECTED/PROVIDER_REJECTED");
         assertThat(jdbc.queryForObject("select provider_error_code from whatsapp_deliveries", String.class))
-                .isEqualTo("132001");
+                .isEqualTo("401");
         // H08.5: a permanent refusal suspends the channel; the administrator enables it again after the fix.
         assertThat(settings.view(A).whatsapp().state()).isEqualTo("SUSPENDED");
         tx.execute(s -> settings.changeChannel(A, ReminderSettingsCommand.channel(4L, true, UUID.randomUUID())));
 
         summaryAt(SECOND);
         meta.enqueue(400, """
-                {"error":{"message":"Message undeliverable","code":131026,"fbtrace_id":"T"}}
+                {"status":400,"error":"Bad Request","response":{"message":[{"jid":"5511987654321@s.whatsapp.net",
+                 "exists":false,"number":"5511987654321 undeliverable"}]}}
                 """);
         clock.set(SECOND.plusSeconds(10));
         job.poll();
         assertThat(delivery(summaryId(SECOND))).isEqualTo("REJECTED/RECIPIENT_INVALID");
         assertThat(failureCodes()).containsExactlyInAnyOrder("PROVIDER_REJECTED", "RECIPIENT_INVALID");
         var stored = String.join("\n", jdbc.queryForList("select row_to_json(d)::text from whatsapp_deliveries d", String.class));
-        assertThat(stored).doesNotContain("Template name", "TRACE-SECRET", "undeliverable");
+        assertThat(stored).doesNotContain("Unauthorized", "TRACE-SECRET", "undeliverable");
+        assertThat(jdbc.queryForList("select provider_error_code from whatsapp_deliveries order by created_at",
+                String.class)).containsExactly("401", "NOT_ON_WHATSAPP");
         assertThat(meta.requests()).hasSize(2);
     }
 
@@ -368,7 +368,7 @@ class WhatsAppDeliveryPostgresIT {
         try (var socket = new ServerSocket(0)) {
             closedPort = socket.getLocalPort();
         }
-        build(properties("http://127.0.0.1:" + closedPort, true, "teste_conexao"));
+        build(properties("http://127.0.0.1:" + closedPort, true));
         enableWhatsApp();
         pending("Luz", "120.00", d(10, 5));
         summaryAt(FIRST);
@@ -377,14 +377,26 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(delivery(summaryId(FIRST))).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
         assertThat(attemptOutcomes(summaryId(FIRST))).containsExactly("FAILED");
 
-        build(properties(meta.baseUrl(), true, "teste_conexao"));
-        meta.enqueue(429, """
-                {"error":{"message":"rate","code":130429}}
-                """);
+        build(properties(meta.baseUrl(), true));
+        meta.enqueue(429, THROTTLED);
         clock.set(FIRST.plusSeconds(70));
         job.poll();
         assertThat(delivery(summaryId(FIRST))).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
         assertThat(meta.requests()).hasSize(1);
+        // T36: an instance disconnected from WhatsApp (QR code pending) receives nothing and the delivery waits.
+        meta.state("close");
+        clock.set(FIRST.plusSeconds(370));
+        job.poll();
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
+        assertThat(meta.requests()).hasSize(1);
+        assertThat(jdbc.queryForObject("select provider_error_code from whatsapp_deliveries", String.class))
+                .isEqualTo("CONN_CLOSE");
+        meta.state("open");
+        clock.set(FIRST.plusSeconds(1270));
+        job.poll();
+        assertThat(delivery(summaryId(FIRST))).isEqualTo("ACCEPTED/-");
+        assertThat(attemptOutcomes(summaryId(FIRST))).containsExactly("FAILED", "FAILED", "FAILED", "ACCEPTED");
+        assertThat(meta.requests()).hasSize(2);
         assertThat(failureCodes()).isEmpty();
         assertThat(settings.view(A).whatsapp().state()).isEqualTo("READY");
     }
@@ -395,14 +407,14 @@ class WhatsAppDeliveryPostgresIT {
         enableWhatsApp();
         pending("Luz", "120.00", d(10, 5));
         summaryAt(FIRST);
-        meta.enqueueDelayed(200, """
-                {"messages":[{"id":"wamid.TOO-LATE"}]}
+        meta.enqueueDelayed(201, """
+                {"key":{"id":"TOO-LATE"}}
                 """, 1500);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
         assertThat(delivery(summaryId(FIRST))).isEqualTo("UNCERTAIN/RESULT_UNCERTAIN");
         assertThat(tracking.summaryDelivery(A, summaryId(FIRST)).stateMessage())
-                .isEqualTo("Resultado incerto: não há confirmação de que a Meta recebeu. Nada foi reenviado.");
+                .isEqualTo("Resultado incerto: não há confirmação de que a Evolution API recebeu. Nada foi reenviado.");
 
         summaryAt(SECOND);
         meta.enqueue(500, "{}");
@@ -420,7 +432,7 @@ class WhatsAppDeliveryPostgresIT {
         enableWhatsApp();
         pending("Luz", "120.00", d(10, 5));
         summaryAt(FIRST);
-        meta.enqueue(200, "{\"messages\":[]}");
+        meta.enqueue(201, "{\"key\":{}}");
         clock.set(FIRST.plusSeconds(10));
         job.poll();
         assertThat(delivery(summaryId(FIRST))).isEqualTo("UNCERTAIN/RESULT_UNCERTAIN");
@@ -445,14 +457,14 @@ class WhatsAppDeliveryPostgresIT {
     @Test
     void w11w13WebhookConfirmsForwardOnlyAndOnce() {
         var summaryId = acceptedSummary();
-        assertThat(post(statuses("wamid.FAKE-1", "sent", 1_791_201_700L)).status()).isEqualTo(200);
+        assertThat(post(statuses("FAKE-1", "sent", 1_791_201_700L)).status()).isEqualTo(200);
         assertThat(delivery(summaryId)).isEqualTo("SENT/-");
-        assertThat(post(statuses("wamid.FAKE-1", "read", 1_791_201_900L)).status()).isEqualTo(200);
+        assertThat(post(statuses("FAKE-1", "read", 1_791_201_900L)).status()).isEqualTo(200);
         assertThat(delivery(summaryId)).isEqualTo("READ/-");
-        assertThat(post(statuses("wamid.FAKE-1", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
+        assertThat(post(statuses("FAKE-1", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
         assertThat(delivery(summaryId)).isEqualTo("READ/-");
-        assertThat(post(statuses("wamid.FAKE-1", "read", 1_791_201_999L)).status()).isEqualTo(200);
-        assertThat(post(failed("wamid.FAKE-1", 131026)).status()).isEqualTo(200);
+        assertThat(post(statuses("FAKE-1", "read", 1_791_201_999L)).status()).isEqualTo(200);
+        assertThat(post(failed("FAKE-1")).status()).isEqualTo(200);
         var row = jdbc.queryForMap("select status, sent_at, delivered_at, read_at, failed_at from whatsapp_deliveries");
         assertThat(row.get("status")).isEqualTo("READ");
         assertThat(((Timestamp) row.get("sent_at")).toInstant()).isEqualTo(Instant.ofEpochSecond(1_791_201_700L));
@@ -466,16 +478,16 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(view.stateMessage()).isEqualTo("Entregue e lido no WhatsApp do administrador.");
     }
 
-    /** W12: nothing is applied without a valid signature over the exact body. */
+    /** W12 (T36): nothing is applied without the exact webhook secret in the header. */
     @Test
-    void w12InvalidSignaturesAreRejected() {
+    void w12WrongSecretsAreRejected() {
         acceptedSummary();
-        var body = statuses("wamid.FAKE-1", "delivered", 1_791_201_800L);
+        var body = statuses("FAKE-1", "delivered", 1_791_201_800L);
         assertThat(webhook.receive(body, null).status()).isEqualTo(401);
-        assertThat(webhook.receive(body, WebhookSignature.header("outro-segredo", body)).status()).isEqualTo(401);
-        assertThat(webhook.receive(body, "sha256=zz").status()).isEqualTo(401);
-        var tampered = statuses("wamid.FAKE-1", "read", 1_791_201_800L);
-        assertThat(webhook.receive(tampered, WebhookSignature.header(APP_SECRET, body)).status()).isEqualTo(401);
+        assertThat(webhook.receive(body, "").status()).isEqualTo(401);
+        assertThat(webhook.receive(body, "outro-segredo").status()).isEqualTo(401);
+        assertThat(webhook.receive(body, HOOK_TOKEN + " ").status()).isEqualTo(401);
+        assertThat(webhook.receive(body, TOKEN).status()).isEqualTo(401);
         assertThat(count("whatsapp_status_events")).isZero();
         assertThat(delivery(summaryId(FIRST))).isEqualTo("ACCEPTED/-");
     }
@@ -484,26 +496,36 @@ class WhatsAppDeliveryPostgresIT {
     @Test
     void w14OnlyKnownMessagesAreCorrelated() {
         acceptedSummary();
-        assertThat(post(statuses("wamid.UNKNOWN", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
-        var otherNumber = new String(statuses("wamid.FAKE-1", "delivered", 1_791_201_800L), StandardCharsets.UTF_8)
-                .replace(PHONE_ID, "999999999999999").getBytes(StandardCharsets.UTF_8);
-        assertThat(post(otherNumber).status()).isEqualTo(200);
+        assertThat(post(statuses("UNKNOWN", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
+        var otherInstance = new String(statuses("FAKE-1", "delivered", 1_791_201_800L), StandardCharsets.UTF_8)
+                .replace("\"instance\":\"" + INSTANCE + "\"", "\"instance\":\"outra\"")
+                .getBytes(StandardCharsets.UTF_8);
+        assertThat(post(otherInstance).status()).isEqualTo(200);
+        var notFromMe = new String(statuses("FAKE-1", "delivered", 1_791_201_800L), StandardCharsets.UTF_8)
+                .replace("\"fromMe\":true", "\"fromMe\":false").getBytes(StandardCharsets.UTF_8);
+        assertThat(post(notFromMe).status()).isEqualTo(200);
         var inbound = """
-                {"object":"whatsapp_business_account","entry":[{"id":"1","changes":[{"field":"messages","value":{
-                 "messaging_product":"whatsapp","metadata":{"phone_number_id":"%s"},
-                 "messages":[{"from":"5511987654321","id":"wamid.IN","timestamp":"1791201800","type":"text",
-                 "text":{"body":"Paguei a conta de luz"}}]}}]}]}
-                """.formatted(PHONE_ID).getBytes(StandardCharsets.UTF_8);
+                {"event":"messages.upsert","instance":"%s","data":{"key":{"remoteJid":"5511987654321@s.whatsapp.net",
+                 "fromMe":false,"id":"IN-1"},"pushName":"Admin","message":{"conversation":"Paguei a conta de luz"},
+                 "messageType":"conversation","messageTimestamp":1791201800},"date_time":"2026-10-05T09:10:00.000-03:00"}
+                """.formatted(INSTANCE).getBytes(StandardCharsets.UTF_8);
         assertThat(post(inbound).status()).isEqualTo(200);
+        var connection = """
+                {"event":"connection.update","instance":"%s","data":{"state":"close","statusReason":401}}
+                """.formatted(INSTANCE).getBytes(StandardCharsets.UTF_8);
+        assertThat(post(connection).status()).isEqualTo(200);
+        var pendingAck = new String(statuses("FAKE-1", "delivered", 1_791_201_800L), StandardCharsets.UTF_8)
+                .replace("DELIVERY_ACK", "PENDING").getBytes(StandardCharsets.UTF_8);
+        assertThat(post(pendingAck).status()).isEqualTo(200);
         assertThat(post("não é json".getBytes(StandardCharsets.UTF_8)).status()).isEqualTo(200);
         assertThat(count("whatsapp_status_events")).isZero();
         assertThat(delivery(summaryId(FIRST))).isEqualTo("ACCEPTED/-");
 
-        // A status for an id not recorded yet while an attempt waits for its answer: ask Meta to deliver it again.
+        // A status for an id not recorded yet while an attempt waits for its answer: ask for it again (503).
         summaryAt(SECOND);
         clock.set(SECOND.plusSeconds(10));
         tx.execute(s -> deliveries.prepare(summaryId(SECOND), clock.instant()));
-        assertThat(post(statuses("wamid.NOT-YET", "sent", 1_791_201_800L)).status()).isEqualTo(503);
+        assertThat(post(statuses("NOT-YET", "sent", 1_791_201_800L)).status()).isEqualTo(503);
     }
 
     /** W15: a reported failure tells the administrator; bills are never touched by the webhook. */
@@ -515,11 +537,11 @@ class WhatsAppDeliveryPostgresIT {
         summaryAt(FIRST);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
-        // A failure that is not about the recipient (131049, "healthy ecosystem"): no suspension (H08.5, see R14).
-        assertThat(post(failed("wamid.FAKE-1", 131049)).status()).isEqualTo(200);
+        // T36: the Evolution API reports a failure without saying why: never a suspension (see R14).
+        assertThat(post(failed("FAKE-1")).status()).isEqualTo(200);
         assertThat(delivery(summaryId(FIRST))).isEqualTo("FAILED/DELIVERY_FAILED");
         assertThat(jdbc.queryForObject("select provider_error_code from whatsapp_deliveries", String.class))
-                .isEqualTo("131049");
+                .isEqualTo("ERROR");
         assertThat(settings.view(A).whatsapp().state()).isEqualTo("READY");
         assertThat(failureCodes()).containsExactly("DELIVERY_FAILED");
         assertThat(recipients("WHATSAPP_DELIVERY_FAILURE")).containsExactly(ADMIN);
@@ -530,22 +552,20 @@ class WhatsAppDeliveryPostgresIT {
         var after = expenses.get(A, luz);
         assertThat(after.status()).isEqualTo(before.status());
         assertThat(after.version()).isEqualTo(before.version());
-        assertThat(post(statuses("wamid.FAKE-1", "delivered", 1_791_201_999L)).status()).isEqualTo(200);
+        assertThat(post(statuses("FAKE-1", "delivered", 1_791_201_999L)).status()).isEqualTo(200);
         assertThat(delivery(summaryId(FIRST))).isEqualTo("FAILED/DELIVERY_FAILED");
     }
 
-    /** W16: the verification handshake, and a webhook that is off answers nothing. */
+    /** W16 (T36): a webhook that is off answers nothing; an oversized body is refused before it is read. */
     @Test
-    void w16VerificationFollowsTheProtocol() {
-        assertThat(webhook.verify("subscribe", VERIFY, "1158201444")).isEqualTo(
-                new MetaWhatsAppWebhook.Reply(200, "1158201444"));
-        assertThat(webhook.verify("subscribe", "errado", "1158201444").status()).isEqualTo(403);
-        assertThat(webhook.verify("unsubscribe", VERIFY, "1158201444").status()).isEqualTo(403);
-        assertThat(webhook.verify("subscribe", VERIFY, null).status()).isEqualTo(403);
-        build(properties(meta.baseUrl(), false, "teste_conexao"));
-        assertThat(webhook.verify("subscribe", VERIFY, "1158201444").status()).isEqualTo(404);
-        var body = statuses("wamid.FAKE-1", "sent", 1L);
-        assertThat(webhook.receive(body, WebhookSignature.header(APP_SECRET, body)).status()).isEqualTo(404);
+    void w16WebhookOffOrOversizedAnswersNothing() {
+        acceptedSummary();
+        assertThat(webhook.receive(null, HOOK_TOKEN).status()).isEqualTo(413);
+        assertThat(webhook.receive(new byte[EvolutionWhatsAppWebhook.MAX_BODY_BYTES + 1], HOOK_TOKEN).status())
+                .isEqualTo(413);
+        build(properties(meta.baseUrl(), false));
+        assertThat(post(statuses("FAKE-1", "sent", 1L)).status()).isEqualTo(404);
+        assertThat(count("whatsapp_status_events")).isZero();
     }
 
     /** W19: the administrator test is idempotent, spaced and only to the consented number; no financial data. */
@@ -564,9 +584,8 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(first.recipientMasked()).isEqualTo("+55 ** *****-4321");
         assertThat(meta.requests()).hasSize(1);
         var body = JSON.readTree(meta.requests().getFirst().body());
-        assertThat(body.path("template").path("name").asString()).isEqualTo("teste_conexao");
-        assertThat(body.path("template").path("components").isMissingNode()).isTrue();
-        assertThat(body.path("to").asString()).isEqualTo("5511987654321");
+        assertThat(body.path("text").asString()).isEqualTo(WhatsAppSummaryMessage.TEST);
+        assertThat(body.path("number").asString()).isEqualTo("5511987654321");
         assertThat(tracking.sendTest(A, key)).isEqualTo(first);
         assertThat(meta.requests()).hasSize(1);
         clock.set(FIRST.plusSeconds(30));
@@ -575,13 +594,15 @@ class WhatsAppDeliveryPostgresIT {
                 .extracting(e -> ((WhatsAppTestUnavailableException) e).code()).isEqualTo("WHATSAPP_TEST_TOO_SOON");
         assertThat(recipients("WHATSAPP_DELIVERY_FAILURE")).isEmpty();
 
-        build(properties(meta.baseUrl(), true, ""));
+        // T36: a disconnected instance answers the test as not received; nothing is sent.
+        meta.state("connecting");
         clock.set(FIRST.plusSeconds(120));
-        assertThatThrownBy(() -> tracking.sendTest(A, UUID.randomUUID()))
-                .isInstanceOf(WhatsAppTestUnavailableException.class)
-                .extracting(e -> ((WhatsAppTestUnavailableException) e).code())
-                .isEqualTo("WHATSAPP_TEST_TEMPLATE_MISSING");
-        build(properties(meta.baseUrl(), false, "teste_conexao"));
+        var disconnected = tracking.sendTest(A, UUID.randomUUID());
+        assertThat(disconnected.state()).isEqualTo("FAILED");
+        assertThat(meta.requests()).hasSize(1);
+        meta.state("open");
+        build(properties(meta.baseUrl(), false));
+        clock.set(FIRST.plusSeconds(240));
         assertThatThrownBy(() -> tracking.sendTest(A, UUID.randomUUID()))
                 .isInstanceOf(WhatsAppTestUnavailableException.class)
                 .extracting(e -> ((WhatsAppTestUnavailableException) e).code()).isEqualTo("PROVIDER_DISABLED");
@@ -604,11 +625,11 @@ class WhatsAppDeliveryPostgresIT {
 
     // ---------------------------------------------------------------------------------------------------------
     // H08.5 (matrix R1–R19 in docs/evidencias/H08.5.md): retries, expiry, suspension and reconciliation, with the
-    // SIMULATED Meta server answering failures on purpose. Nothing here makes Meta itself unavailable.
+    // SIMULATED Evolution API answering failures on purpose. Nothing here makes a real server unavailable.
     // ---------------------------------------------------------------------------------------------------------
 
     static final String THROTTLED = """
-            {"error":{"message":"rate","code":130429}}
+            {"status":429,"error":"Too Many Requests","response":{"message":["rate"]}}
             """;
 
     /** R6 + R15 + R17: a certain transient failure is retried in the same delivery until accepted. */
@@ -637,8 +658,9 @@ class WhatsAppDeliveryPostgresIT {
         clock.set(FIRST.plusSeconds(69));
         job.poll();
         assertThat(meta.requests()).hasSize(1);
-        meta.enqueue(503, """
-                {"error":{"message":"Service temporarily unavailable","code":131016}}
+        // T36: the instance is reconnecting to WhatsApp: nothing is sent and the same delivery waits again.
+        meta.enqueueState(200, """
+                {"instance":{"instanceName":"contas","state":"connecting"}}
                 """);
         clock.set(FIRST.plusSeconds(70));
         job.poll();
@@ -646,22 +668,22 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(nextAttempt(summaryId)).isEqualTo(FIRST.plusSeconds(370));
         clock.set(FIRST.plusSeconds(370));
         job.poll();
-        assertThat(meta.requests()).hasSize(3);
+        assertThat(meta.requests()).hasSize(2);
         assertThat(delivery(summaryId)).isEqualTo("ACCEPTED/-");
         assertThat(attemptOutcomes(summaryId)).containsExactly("FAILED", "FAILED", "ACCEPTED");
         assertThat(count("whatsapp_deliveries")).isOne();
         assertThat(count("reminder_summaries")).isOne();
-        // Each attempt carries its own reference; the same template and content every time.
-        var references = meta.requests().stream().map(r -> reference(r.body())).toList();
-        assertThat(references).doesNotHaveDuplicates().containsExactlyElementsOf(jdbc.queryForList(
-                "select a.id::text from whatsapp_attempts a order by a.attempt_number", String.class));
-        for (var request : meta.requests())
-            assertThat(parameters(JSON.readTree(request.body())).get(1)).isEqualTo("1 conta, total R$ 120,00");
+        // The same content every time; the attempt id never leaves (the Evolution API does not echo it).
+        var attemptIds = jdbc.queryForList("select id::text from whatsapp_attempts", String.class);
+        for (var request : meta.requests()) {
+            assertThat(lines(JSON.readTree(request.body())).get(1)).isEqualTo("1 conta, total R$ 120,00");
+            assertThat(request.body()).doesNotContain(attemptIds.toArray(String[]::new));
+        }
         assertThat(failureCodes()).isEmpty();
         assertThat(recipients("REMINDER_SUMMARY")).containsExactlyInAnyOrder(ADMIN, GUEST);
         clock.set(FIRST.plusSeconds(900));
         job.poll();
-        assertThat(meta.requests()).hasSize(3);
+        assertThat(meta.requests()).hasSize(2);
     }
 
     /** R7: the window never grows; after the last attempt that fits, the summary expires and is never sent. */
@@ -711,8 +733,8 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(delivery(firstId)).isEqualTo("FAILED/NOT_SENT_IN_WINDOW");
         assertThat(delivery(summaryId(nextSlot))).isEqualTo("ACCEPTED/-");
         assertThat(meta.requests()).hasSize(2);
-        assertThat(parameters(JSON.readTree(meta.requests().get(1).body())).getFirst())
-                .isEqualTo("05/10/2026, 09:30");
+        assertThat(lines(JSON.readTree(meta.requests().get(1).body())).getFirst())
+                .isEqualTo("Contas a pagar em 05/10/2026, 09:30.");
         assertThat(attemptOutcomes(firstId)).containsExactly("FAILED");
     }
 
@@ -725,7 +747,7 @@ class WhatsAppDeliveryPostgresIT {
         meta.enqueue(429, THROTTLED);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
-        build(properties(meta.baseUrl(), true, "teste_conexao"));
+        build(properties(meta.baseUrl(), true));
         clock.set(FIRST.plusSeconds(120));
         job.poll();
         assertThat(delivery(summaryId(FIRST))).isEqualTo("ACCEPTED/-");
@@ -736,7 +758,7 @@ class WhatsAppDeliveryPostgresIT {
         clock.set(SECOND.plusSeconds(10));
         job.poll();
         assertThat(delivery(summaryId(SECOND))).isEqualTo("RETRY_WAITING/PROVIDER_UNAVAILABLE");
-        build(properties(meta.baseUrl(), true, "teste_conexao"));
+        build(properties(meta.baseUrl(), true));
         clock.set(SECOND.plusSeconds(3601));
         job.poll();
         assertThat(delivery(summaryId(SECOND))).isEqualTo("FAILED/NOT_SENT_IN_WINDOW");
@@ -787,7 +809,7 @@ class WhatsAppDeliveryPostgresIT {
         meta.enqueue(429, THROTTLED);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
-        assertThat(parameters(JSON.readTree(meta.requests().getFirst().body())).get(1))
+        assertThat(lines(JSON.readTree(meta.requests().getFirst().body())).get(1))
                 .isEqualTo("4 contas, total R$ 349,90");
         clock.set(FIRST.plusSeconds(30));
         settle(luz);
@@ -797,9 +819,9 @@ class WhatsAppDeliveryPostgresIT {
         clock.set(FIRST.plusSeconds(70));
         job.poll();
         assertThat(meta.requests()).hasSize(2);
-        assertThat(parameters(JSON.readTree(meta.requests().get(1).body()))).containsExactly("05/10/2026, 09:00",
-                "1 conta, total R$ 55,00", "07/10 Gás R$ 55,00",
-                "https://contas.malyah.tech/lembretes/resumos/" + summaryId);
+        assertThat(lines(JSON.readTree(meta.requests().get(1).body()))).containsExactly(
+                "Contas a pagar em 05/10/2026, 09:00.", "1 conta, total R$ 55,00", "• 07/10 Gás R$ 55,00",
+                "Lista completa: https://contas.malyah.tech/lembretes/resumos/" + summaryId);
         assertThat(jdbc.queryForObject("select item_count from whatsapp_deliveries", Integer.class)).isOne();
         // RF-ALT-14: moving a due date into today after the send does not trigger another message.
         correct(net, "99.90", d(10, 5));
@@ -883,7 +905,7 @@ class WhatsAppDeliveryPostgresIT {
         var deliveryId = deliveryId(summaryId);
         clock.set(FIRST.plusSeconds(70));
         meta.enqueueDelayed(200, """
-                {"messages":[{"id":"wamid.SLOW"}]}
+                {"key":{"id":"SLOW"}}
                 """, 300);
         race(() -> {
             job.retry(deliveryId);
@@ -901,9 +923,12 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(delivery(summaryId)).isEqualTo("ACCEPTED/-");
     }
 
-    /** R12: a lease recovered after a possibly accepted retry is never resent; the webhook reconciles it. */
+    /**
+     * R12 (T36): a lease recovered after a possibly accepted retry is never resent. The Evolution API does not echo
+     * the attempt reference, so a later status of that message cannot be matched and the delivery stays uncertain.
+     */
     @Test
-    void r12ARecoveredLeaseIsNeverResentAndTheWebhookReconcilesIt() {
+    void r12ARecoveredLeaseIsNeverResent() {
         enableWhatsApp();
         pending("Luz", "120.00", d(10, 5));
         summaryAt(FIRST);
@@ -912,10 +937,10 @@ class WhatsAppDeliveryPostgresIT {
         clock.set(FIRST.plusSeconds(10));
         job.poll();
         clock.set(FIRST.plusSeconds(70));
-        // The worker claims attempt 2 and Meta accepts it, but the process stops before recording the answer.
+        // The worker claims attempt 2 and the Evolution API accepts it, but the process stops before recording it.
         var ready = (WhatsAppDeliveryService.Ready) tx.execute(s -> deliveries.prepareRetry(deliveryId(summaryId),
                 clock.instant()));
-        assertThat(sender.send(ready.message()).providerMessageId()).isEqualTo("wamid.FAKE-1");
+        assertThat(sender.send(ready.message()).providerMessageId()).isEqualTo("FAKE-1");
         clock.set(FIRST.plusSeconds(70 + 601));
         job.poll();
         assertThat(delivery(summaryId)).isEqualTo("UNCERTAIN/RESULT_UNCERTAIN");
@@ -924,30 +949,22 @@ class WhatsAppDeliveryPostgresIT {
         assertThat(meta.requests()).hasSize(2);
         assertThat(failureCodes()).containsExactly("RESULT_UNCERTAIN");
 
-        assertThat(post(statusesWithReference("wamid.FAKE-1", "sent", 1_791_201_700L, ready.attemptId().toString()))
-                .status()).isEqualTo(200);
-        assertThat(delivery(summaryId)).isEqualTo("SENT/-");
-        var view = tracking.summaryDelivery(A, summaryId);
-        assertThat(view.state()).isEqualTo("SENT");
-        assertThat(view.reconciledAt()).isEqualTo(FIRST.plusSeconds(1500));
-        assertThat(attemptOutcomes(summaryId)).containsExactly("FAILED", "ACCEPTED");
-        // Later statuses find the message by its id; repeated or older ones change nothing.
-        assertThat(post(statuses("wamid.FAKE-1", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
-        assertThat(post(statusesWithReference("wamid.FAKE-1", "sent", 1_791_201_700L, ready.attemptId().toString()))
-                .status()).isEqualTo(200);
-        assertThat(delivery(summaryId)).isEqualTo("DELIVERED/-");
+        assertThat(post(statuses("FAKE-1", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
+        assertThat(delivery(summaryId)).isEqualTo("UNCERTAIN/RESULT_UNCERTAIN");
+        assertThat(tracking.summaryDelivery(A, summaryId).reconciledAt()).isNull();
+        assertThat(count("whatsapp_status_events")).isZero();
         assertThat(meta.requests()).hasSize(2);
     }
 
-    /** R13: a timeout is ambiguous: no automatic resend inside the window; the echoed reference reconciles it. */
+    /** R13: a timeout is ambiguous: no automatic resend inside the window, and a late status changes nothing. */
     @Test
-    void r13AnAmbiguousTimeoutIsNotResentAndIsReconciledByItsReference() {
+    void r13AnAmbiguousTimeoutIsNotResent() {
         enableWhatsApp();
         pending("Luz", "120.00", d(10, 5));
         summaryAt(FIRST);
         var summaryId = summaryId();
-        meta.enqueueDelayed(200, """
-                {"messages":[{"id":"wamid.LATE"}]}
+        meta.enqueueDelayed(201, """
+                {"key":{"id":"LATE"}}
                 """, 1500);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
@@ -957,15 +974,9 @@ class WhatsAppDeliveryPostgresIT {
             job.poll();
         }
         assertThat(meta.requests()).hasSize(1);
-        // A status of an unknown id without reference is ignored; with the echoed reference it reconciles.
-        assertThat(post(statuses("wamid.LATE", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
+        assertThat(post(statuses("LATE", "delivered", 1_791_201_800L)).status()).isEqualTo(200);
         assertThat(delivery(summaryId)).isEqualTo("UNCERTAIN/RESULT_UNCERTAIN");
-        var reference = reference(meta.requests().getFirst().body());
-        assertThat(post(statusesWithReference("wamid.LATE", "delivered", 1_791_201_800L, reference)).status())
-                .isEqualTo(200);
-        assertThat(delivery(summaryId)).isEqualTo("DELIVERED/-");
-        assertThat(jdbc.queryForObject("select provider_message_id from whatsapp_deliveries", String.class))
-                .isEqualTo("wamid.LATE");
+        assertThat(jdbc.queryForObject("select provider_message_id from whatsapp_deliveries", String.class)).isNull();
     }
 
     /** R14 + R16: a permanent failure suspends the channel with guidance; re-enabling resumes it next slot. */
@@ -975,7 +986,7 @@ class WhatsAppDeliveryPostgresIT {
         pending("Luz", "120.00", d(10, 5));
         summaryAt(FIRST);
         meta.enqueue(400, """
-                {"error":{"message":"Message undeliverable","code":131026}}
+                {"status":400,"error":"Bad Request","response":{"message":[{"exists":false,"number":"5511987654321"}]}}
                 """);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
@@ -1012,34 +1023,37 @@ class WhatsAppDeliveryPostgresIT {
         job.poll();
         assertThat(delivery(summaryId(nextDay))).isEqualTo("ACCEPTED/-");
 
-        // R16: Meta reports a recipient failure later by webhook: suspended again, once; out of order changes nothing.
-        assertThat(post(failed("wamid.FAKE-1", 131026)).status()).isEqualTo(200);
-        assertThat(post(failed("wamid.FAKE-1", 131026)).status()).isEqualTo(200);
-        assertThat(post(statuses("wamid.FAKE-1", "delivered", 1_791_201_999L)).status()).isEqualTo(200);
+        // R16 (T36): a later failure by webhook carries no reason, so it is told once and never suspends;
+        // repeated or out of order events change nothing.
+        assertThat(post(failed("FAKE-1")).status()).isEqualTo(200);
+        assertThat(post(failed("FAKE-1")).status()).isEqualTo(200);
+        assertThat(post(statuses("FAKE-1", "delivered", 1_791_201_999L)).status()).isEqualTo(200);
         assertThat(delivery(summaryId(nextDay))).isEqualTo("FAILED/DELIVERY_FAILED");
-        assertThat(settings.view(A).whatsapp().suspension().reason()).isEqualTo("RECIPIENT_INVALID");
+        assertThat(settings.view(A).whatsapp().state()).isEqualTo("READY");
         assertThat(jdbc.queryForObject("select count(*) from reminder_settings_events where event_type = "
-                + "'CHANNEL_SUSPENDED'", Long.class)).isEqualTo(2);
-        assertThat(jdbc.queryForObject("select failure_code from member_notifications where summary_id = ? and "
+                + "'CHANNEL_SUSPENDED'", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForList("select failure_code from member_notifications where summary_id = ? and "
                 + "type = 'WHATSAPP_DELIVERY_FAILURE'", String.class, summaryId(nextDay)))
-                .isEqualTo("RECIPIENT_UNREACHABLE");
+                .containsExactly("DELIVERY_FAILED");
     }
 
-    /** R14b: a permanent refusal of the channel (template, sender, token) suspends it too; nothing is retried. */
+    /** R14b (T36): an unknown instance or a refused key suspends the channel too; nothing is sent or retried. */
     @Test
     void r14bAPermanentRefusalOfTheChannelSuspendsWithoutRetry() {
         enableWhatsApp();
         pending("Luz", "120.00", d(10, 5));
         summaryAt(FIRST);
-        meta.enqueue(400, """
-                {"error":{"message":"(#132001) Template name does not exist","code":132001}}
+        meta.enqueueState(404, """
+                {"status":404,"error":"Not Found","response":{"message":["The contas instance does not exist"]}}
                 """);
         clock.set(FIRST.plusSeconds(10));
         job.poll();
         clock.set(FIRST.plusSeconds(600));
         job.poll();
         assertThat(delivery(summaryId(FIRST))).isEqualTo("REJECTED/PROVIDER_REJECTED");
-        assertThat(meta.requests()).hasSize(1);
+        assertThat(jdbc.queryForObject("select provider_error_code from whatsapp_deliveries", String.class))
+                .isEqualTo("STATE_404");
+        assertThat(meta.requests()).isEmpty();
         assertThat(settings.view(A).whatsapp().suspension().reason()).isEqualTo("PROVIDER_REJECTED");
     }
 
@@ -1055,18 +1069,6 @@ class WhatsAppDeliveryPostgresIT {
     private List<String> attemptOutcomes(UUID summaryId) {
         return jdbc.queryForList("select a.outcome from whatsapp_attempts a join whatsapp_deliveries d on "
                 + "d.id = a.delivery_id where d.summary_id = ? order by a.attempt_number", String.class, summaryId);
-    }
-
-    private static String reference(String body) {
-        return JSON.readTree(body).path("biz_opaque_callback_data").asString();
-    }
-
-    static byte[] statusesWithReference(String id, String status, long timestamp, String reference) {
-        return """
-                {"object":"whatsapp_business_account","entry":[{"id":"WABA","changes":[{"field":"messages","value":{
-                 "messaging_product":"whatsapp","metadata":{"phone_number_id":"%s"},"statuses":[{"id":"%s",
-                 "status":"%s","timestamp":"%d","recipient_id":"5511987654321","biz_opaque_callback_data":"%s"}]}}]}]}
-                """.formatted(PHONE_ID, id, status, timestamp, reference).getBytes(StandardCharsets.UTF_8);
     }
 
     private void correct(UUID id, String amount, LocalDate due) {
@@ -1085,7 +1087,7 @@ class WhatsAppDeliveryPostgresIT {
         return summaryId(FIRST);
     }
 
-    private void build(MetaWhatsAppProperties properties) {
+    private void build(EvolutionWhatsAppProperties properties) {
         context = new AuthenticatedUserContextService(contextRepository());
         var members = new JdbcFinancialMemberAccess(jdbc);
         var categories = new JdbcCategoryRepository(jdbc);
@@ -1093,7 +1095,7 @@ class WhatsAppDeliveryPostgresIT {
                 categories);
         var materializer = new JdbcRecurringExpenseMaterializer(jdbc, tx);
         var generation = new JdbcRecurrenceGenerationJob(jdbc, tx, materializer, clock, Duration.ofMinutes(2), 25);
-        var provider = new MetaWhatsAppProvider(properties);
+        var provider = new EvolutionWhatsAppProvider(properties);
         sender = provider;
         settingsService = new ReminderSettingsService(new JdbcReminderSettingsRepository(jdbc), context, members,
                 provider, clock, UUID::randomUUID);
@@ -1110,45 +1112,46 @@ class WhatsAppDeliveryPostgresIT {
                 summaries, provider, context, clock, UUID::randomUUID);
         job = new WhatsAppDeliveryJob(deliveries, provider, tx);
         tracking = new TransactionalWhatsAppDeliveryUseCase(deliveries, provider, tx);
-        webhook = new MetaWhatsAppWebhook(properties, deliveries, tx);
+        webhook = new EvolutionWhatsAppWebhook(properties, deliveries, tx);
         inbox = new TransactionalMemberNotificationUseCase(new MemberNotificationService(notifications, context,
                 clock, "https://contas.malyah.tech"), tx);
         memberships = IdentityTestFixtures.memberships(jdbc, tx, clock, List.of(),
                 List.of(settingsService::afterAdministrationTransferred));
     }
 
-    static MetaWhatsAppProperties properties(String baseUrl, boolean enabled, String testTemplate) {
-        return new MetaWhatsAppProperties(enabled, baseUrl, "v23.0", PHONE_ID, TOKEN, APP_SECRET, VERIFY,
-                "resumo_contas", "pt_BR", testTemplate, "pt_BR", Duration.ofSeconds(2), Duration.ofSeconds(1));
+    static EvolutionWhatsAppProperties properties(String baseUrl, boolean enabled) {
+        return new EvolutionWhatsAppProperties(enabled, baseUrl, TOKEN, INSTANCE, HOOK_TOKEN, Duration.ofSeconds(2),
+                Duration.ofSeconds(1));
     }
 
-    private MetaWhatsAppWebhook.Reply post(byte[] body) {
-        return webhook.receive(body, WebhookSignature.header(APP_SECRET, body));
+    private EvolutionWhatsAppWebhook.Reply post(byte[] body) {
+        return webhook.receive(body, HOOK_TOKEN);
     }
 
+    /** A {@code messages.update} event as the Evolution API v2 posts it (status names of the Baileys acks). */
     static byte[] statuses(String id, String status, long timestamp) {
+        var evolution = switch (status) {
+            case "sent" -> "SERVER_ACK";
+            case "delivered" -> "DELIVERY_ACK";
+            case "read" -> "READ";
+            default -> status;
+        };
+        var at = Instant.ofEpochSecond(timestamp).atOffset(ZoneOffset.ofHours(-3)).toString();
         return """
-                {"object":"whatsapp_business_account","entry":[{"id":"WABA","changes":[{"field":"messages","value":{
-                 "messaging_product":"whatsapp","metadata":{"display_phone_number":"551100000000",
-                 "phone_number_id":"%s"},"statuses":[{"id":"%s","status":"%s","timestamp":"%d",
-                 "recipient_id":"5511987654321"}]}}]}]}
-                """.formatted(PHONE_ID, id, status, timestamp).getBytes(StandardCharsets.UTF_8);
+                {"event":"messages.update","instance":"%s","data":{"messageId":"cm-1","keyId":"%s",
+                 "remoteJid":"5511987654321@s.whatsapp.net","fromMe":true,"participant":null,"status":"%s",
+                 "instanceId":"i-1"},"destination":"http://backend:8080/api/v1/integrations/whatsapp/webhook",
+                 "date_time":"%s","sender":"551100000000@s.whatsapp.net","server_url":"http://evolution-api:8080",
+                 "apikey":"instance-token"}
+                """.formatted(INSTANCE, id, evolution, at).getBytes(StandardCharsets.UTF_8);
     }
 
-    static byte[] failed(String id, int code) {
-        return """
-                {"object":"whatsapp_business_account","entry":[{"id":"WABA","changes":[{"field":"messages","value":{
-                 "messaging_product":"whatsapp","metadata":{"phone_number_id":"%s"},"statuses":[{"id":"%s",
-                 "status":"failed","timestamp":"1791202000","recipient_id":"5511987654321",
-                 "errors":[{"code":%d,"title":"Message undeliverable"}]}]}}]}]}
-                """.formatted(PHONE_ID, id, code).getBytes(StandardCharsets.UTF_8);
+    static byte[] failed(String id) {
+        return statuses(id, "ERROR", 1_791_202_000L);
     }
 
-    private static List<String> parameters(JsonNode body) {
-        var list = new java.util.ArrayList<String>();
-        for (var parameter : body.path("template").path("components").path(0).path("parameters"))
-            list.add(parameter.path("text").asString());
-        return list;
+    private static List<String> lines(JsonNode body) {
+        return body.path("text").asString().lines().toList();
     }
 
     private void summaryAt(Instant instant) {

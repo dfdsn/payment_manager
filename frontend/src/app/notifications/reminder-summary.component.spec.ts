@@ -62,7 +62,7 @@ describe('Reminder summaries (H08.2)', () => {
     expect(byTestId(fixture, 'summary-remaining')!.textContent).toContain('e mais 2 contas');
     expect(byTestId(fixture, 'summary-items')!.querySelectorAll('li').length).toBe(7);
     expect(text(fixture)).toContain('Oculta B');
-    expect(byTestId(fixture, 'summary-channels')!.textContent).toContain('não será enviado (envio pela Meta desligado ou incompleto no servidor)');
+    expect(byTestId(fixture, 'summary-channels')!.textContent).toContain('não será enviado (envio pela Evolution API desligado ou incompleto no servidor)');
     expect(byTestId(fixture, 'summary-channels')!.textContent).toContain('No aplicativo (os dois membros): previsto');
     expect(text(fixture)).not.toContain('Abrir conta');
   });
@@ -150,9 +150,9 @@ describe('Reminder summaries (H08.2)', () => {
     expect(byTestId(fixture, 'whatsapp-delivery')!.dataset['state']).toBe('DELIVERED');
     expect(byTestId(fixture, 'whatsapp-delivery-state')!.textContent).toContain('Entregue no WhatsApp do administrador.');
     const steps = byTestId(fixture, 'whatsapp-delivery-steps')!.querySelectorAll('li');
-    expect(Array.from(steps).map(li => li.textContent!.split(':')[0])).toEqual(['Tentativa', 'Aceito pela Meta', 'Enviado', 'Entregue']);
+    expect(Array.from(steps).map(li => li.textContent!.split(':')[0])).toEqual(['Tentativa', 'Aceito pela Evolution API', 'Enviado', 'Entregue']);
     expect(text(fixture)).toContain('+55 ** *****-4321 · 7 contas enviadas');
-    expect(text(fixture)).toContain('Aceito pela Meta não significa entregue');
+    expect(text(fixture)).toContain('Aceito pela Evolution API não significa entregue');
   });
 
   it('shows nothing about WhatsApp to the guest and a notice when it cannot be read (H08.4)', async () => {
@@ -170,7 +170,7 @@ describe('Reminder summaries (H08.2)', () => {
 
   it('shows a waiting retry of the same summary and a later reconciliation (H08.5)', async () => {
     api.summary.mockReturnValue(of(seven('s1')));
-    api.whatsapp.mockReturnValue(of({ state: 'RETRY_WAITING', stateMessage: 'A Meta não recebeu a última tentativa. Uma nova tentativa do mesmo resumo está programada.',
+    api.whatsapp.mockReturnValue(of({ state: 'RETRY_WAITING', stateMessage: 'A Evolution API não recebeu a última tentativa. Uma nova tentativa do mesmo resumo está programada.',
       kind: 'SUMMARY', reason: 'PROVIDER_UNAVAILABLE', reasonMessage: 'O envio pelo WhatsApp não está disponível no momento.',
       recipientMasked: '+55 ** *****-4321', itemCount: 7, createdAt: '2026-10-05T12:00:10Z', attemptedAt: '2026-10-05T12:01:10Z',
       acceptedAt: null, sentAt: null, deliveredAt: null, readAt: null, failedAt: null,
@@ -185,7 +185,7 @@ describe('Reminder summaries (H08.2)', () => {
     const attempts = Array.from(byTestId(fixture, 'whatsapp-attempts')!.querySelectorAll('li')).map(li => li.textContent!);
     expect(attempts).toHaveLength(2);
     expect(attempts[1]).toContain('Tentativa 2');
-    expect(attempts[1]).toContain('não recebida pela Meta');
+    expect(attempts[1]).toContain('não recebida pela Evolution API');
     expect(text(fixture)).toContain('resultado incerto nunca é reenviado');
 
     api.whatsapp.mockReturnValue(of({ state: 'DELIVERED', stateMessage: 'Entregue no WhatsApp do administrador.', kind: 'SUMMARY',

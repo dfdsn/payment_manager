@@ -9,10 +9,10 @@ import java.util.Optional;
  * does, and it never touches the number or the consent.
  */
 public enum WhatsAppSuspensionReason {
-    RECIPIENT_INVALID("A Meta informou que o número cadastrado não pode receber mensagens. Confira o número; se ele "
+    RECIPIENT_INVALID("O WhatsApp informou que o número cadastrado não pode receber mensagens. Confira o número; se ele "
             + "estiver certo, reative o canal. Se mudou de número, salve o novo e autorize de novo."),
-    PROVIDER_REJECTED("A Meta recusou as mensagens por um problema permanente do remetente, do modelo aprovado ou "
-            + "das credenciais do servidor. Depois que a configuração do servidor for corrigida, reative o canal.");
+    PROVIDER_REJECTED("A Evolution API recusou as mensagens por um problema permanente da instância (inexistente "
+            + "ou com outro nome) ou da chave de acesso configurada no servidor. Depois que a configuração do servidor for corrigida, reative o canal.");
 
     private final String guidance;
 

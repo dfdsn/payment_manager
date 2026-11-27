@@ -128,8 +128,9 @@ class WhatsAppRetryServiceTest {
         assertThat(ready.summaryId()).isEqualTo(SUMMARY);
         assertThat(ready.consentId()).isEqualTo(CONSENT);
         assertThat(ready.message().reference()).isEqualTo(ATTEMPT.toString());
-        assertThat(ready.message().parameters()).containsExactly("05/10/2026, 09:00", "1 conta, total R$ 150,00",
-                "05/10 Luz R$ 150,00", "https://contas.example/lembretes/resumos/" + SUMMARY);
+        assertThat(ready.message().text().lines().toList()).containsExactly("Contas a pagar em 05/10/2026, 09:00.",
+                "1 conta, total R$ 150,00", "• 05/10 Luz R$ 150,00",
+                "Lista completa: https://contas.example/lembretes/resumos/" + SUMMARY);
         verify(deliveries).startRetry(DELIVERY, CONSENT, "4321", 1, NEXT);
         verify(deliveries).insertAttempt(ATTEMPT, DELIVERY, 2, NEXT);
         verify(notifications, never()).recordWhatsAppFailure(any(), any(), any(), any());
@@ -394,7 +395,7 @@ class WhatsAppRetryServiceTest {
 
     private Ready ready(int attempt) {
         return new Ready(DELIVERY, ATTEMPT, SPACE, SUMMARY, new WhatsAppSender.Message(WhatsAppSender.Kind.SUMMARY,
-                NUMBER.e164(), List.of(), ATTEMPT.toString()), attempt, CONSENT, PLANNED);
+                NUMBER.e164(), "x", ATTEMPT.toString()), attempt, CONSENT, PLANNED);
     }
 
     private static StoredConsent consent(UUID user, WhatsAppRecipient recipient) {
