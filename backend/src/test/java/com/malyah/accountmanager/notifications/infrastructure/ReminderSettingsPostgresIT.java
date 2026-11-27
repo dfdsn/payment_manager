@@ -93,7 +93,7 @@ class ReminderSettingsPostgresIT {
                 Timestamp.from(NOW));
         contexts = IdentityTestFixtures.contexts(jdbc);
         handler = new ReminderSettingsService(new JdbcReminderSettingsRepository(jdbc), contexts,
-                new JdbcFinancialMemberAccess(jdbc), new MetaWhatsAppProvider(MetaWhatsAppProperties.disabled()), Clock.fixed(NOW, ZoneOffset.UTC),
+                new JdbcFinancialMemberAccess(jdbc), new EvolutionWhatsAppProvider(EvolutionWhatsAppProperties.disabled()), Clock.fixed(NOW, ZoneOffset.UTC),
                 UUID::randomUUID);
         settings = new TransactionalReminderSettingsUseCase(handler, tx);
     }

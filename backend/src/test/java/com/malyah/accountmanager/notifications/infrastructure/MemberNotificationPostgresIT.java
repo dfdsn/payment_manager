@@ -137,7 +137,7 @@ class MemberNotificationPostgresIT {
         var materializer = new JdbcRecurringExpenseMaterializer(jdbc, tx);
         var generation = new JdbcRecurrenceGenerationJob(jdbc, tx, materializer, clock, Duration.ofMinutes(2), 25);
         // The real adapter of this version: the provider is not implemented, so an enabled channel cannot send.
-        WhatsAppProviderStatus provider = new MetaWhatsAppProvider(MetaWhatsAppProperties.disabled());
+        WhatsAppProviderStatus provider = new EvolutionWhatsAppProvider(EvolutionWhatsAppProperties.disabled());
         settingsService = new ReminderSettingsService(new JdbcReminderSettingsRepository(jdbc), context, members,
                 provider, clock, UUID::randomUUID);
         settings = new TransactionalReminderSettingsUseCase(settingsService, tx);

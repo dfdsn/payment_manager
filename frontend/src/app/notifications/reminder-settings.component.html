@@ -99,14 +99,14 @@
           </div>
           @if (s.whatsapp.consent.active && s.whatsapp.provider.available) {
             <div class="test-panel" data-testid="whatsapp-test">
-              <p>Envie uma mensagem de teste, sem dados de contas, para {{ s.whatsapp.recipientFormatted }}. Ela usa o modelo de teste configurado no servidor.</p>
+              <p>Envie uma mensagem de teste, sem dados de contas, para {{ s.whatsapp.recipientFormatted }}. É um texto fixo enviado pela Evolution API, sem valores nem links.</p>
               <div class="actions"><button matButton="outlined" type="button" (click)="sendTest()" [disabled]="testing() || busy() !== null" data-testid="send-test">{{ testing() ? 'Enviando teste…' : 'Enviar mensagem de teste' }}</button></div>
               @if (testResult(); as t) {
                 <p role="status" data-testid="test-result" [attr.data-state]="t.state"><strong>{{ t.stateMessage }}</strong>@if (t.reasonMessage) { {{ t.reasonMessage }} } Número: {{ t.recipientMasked }}.</p>
               }
             </div>
           }
-          <p class="hint">Se a Meta não receber um resumo por indisponibilidade, ele é tentado de novo com intervalos crescentes, no máximo até uma hora depois do horário (ou até o próximo horário). Resultado incerto nunca é reenviado. Recusa permanente do número ou do remetente suspende o canal até você reativá-lo. Credenciais da Meta ficam somente na configuração do servidor; esta tela não as exibe. Ao transferir a administração, o número e o consentimento deixam de valer e o novo administrador precisa cadastrar os seus.</p>
+          <p class="hint">Se a Evolution API não receber um resumo por indisponibilidade (inclusive quando a instância estiver desconectada do WhatsApp), ele é tentado de novo com intervalos crescentes, no máximo até uma hora depois do horário (ou até o próximo horário). Resultado incerto nunca é reenviado. Número sem WhatsApp, instância inexistente ou chave recusada suspendem o canal até você reativá-lo. A chave da Evolution API fica somente na configuração do servidor; esta tela não as exibe. Ao transferir a administração, o número e o consentimento deixam de valer e o novo administrador precisa cadastrar os seus.</p>
         } @else {
           <p data-testid="guest-whatsapp">@if (s.whatsapp.hasRecipient) { O administrador cadastrou um número terminado em {{ s.whatsapp.recipientLastDigits }}. } @else { O administrador ainda não cadastrou um número. }
             Você recebe os avisos somente no aplicativo; não é possível habilitar o WhatsApp para o convidado.</p>

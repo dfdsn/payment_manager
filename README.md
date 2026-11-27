@@ -339,10 +339,10 @@ npm run e2e
 
 - Email local: Mailpit, identificável e sem entrega externa. O backend usa SMTP em `SMTP_HOST`/`SMTP_PORT` e `SMTP_FROM`.
 - Email real: configure `SMTP_HOST=smtp.gmail.com`, porta 587, autenticação e STARTTLS; injete usuário por variável e senha de app pelo secret `smtp_password`. Não use a senha normal da conta nem registre o valor. P04 comprovou entrega real de confirmação, recuperação e convite; Mailpit continua sendo apenas a captura local reproduzível.
-- WhatsApp: adapter real da Meta Cloud API (H08.4), **desligado por padrão** (`META_WHATSAPP_ENABLED=false`, provedor `PROVIDER_DISABLED`). Não existe adapter falso no código de produção; os testes usam um servidor HTTP local identificado como simulado (`FakeMetaServer`), que só existe no classpath de teste. Configuração e validação real: seção “Enviar e acompanhar pelo WhatsApp (H08.4)”.
+- WhatsApp: adapter real da Evolution API (H08.4, provedor trocado na T36), **desligado por padrão** (`EVOLUTION_API_ENABLED=false`, provedor `PROVIDER_DISABLED`). Não existe adapter falso no código de produção; os testes usam um servidor HTTP local identificado como simulado (`FakeEvolutionServer`), que só existe no classpath de teste. Configuração e validação real: seção “Enviar e acompanhar pelo WhatsApp (H08.4, Evolution API desde T36)”.
 - IA: nenhum adapter falso foi criado; fica indisponível até o E10.
 - Produção: `APP_ENVIRONMENT=production` rejeita `APP_INTEGRATIONS_MODE` diferente de `real`.
-- Gmail real foi validado em P04; Meta e Groq reais continuam dependentes de P03/P05 e de credenciais fornecidas fora do Git.
+- Gmail real foi validado em P04; WhatsApp (Evolution API) e Groq reais continuam dependentes de P03/P05 e de credenciais fornecidas fora do Git.
 
 Nunca versione `.env`, arquivos em `deploy/secrets/`, banco, backups, anexos, tokens ou imagens pessoais.
 
@@ -408,7 +408,7 @@ docker system df
 
 - Migration falha: preserve logs, não inicie backend novo e não edite migration aplicada.
 - Banco indisponível: confira healthcheck, URL e espaço em disco; não exponha 5432 na internet.
-- SMTP/Groq/Meta indisponível: mantenha cadastro manual e demais fluxos; não ative provider pago automaticamente.
+- SMTP/Groq/Evolution API indisponível: mantenha cadastro manual e demais fluxos; não ative provider pago automaticamente.
 - Certificado: valide DNS, cadeia, renovação e reload antes de uso real.
 - npm/Maven TLS: corrija trust store; nunca desative validação de certificado.
 
@@ -974,7 +974,7 @@ Testes: `MonthClosingVersionsPostgresIT` (matriz V1–V13 em PostgreSQL real, co
 
 ## Lembretes e WhatsApp (E08)
 
-O E08 está em andamento: H08.1, H08.2 e H08.3 estão entregues; H08.4 (envio real pelo WhatsApp) está implementada e **em validação** (falta a P03 e um envio real autorizado); H08.5 (retentativas, reconciliação e retomada) não existe nesta versão.
+O E08 está em andamento: H08.1, H08.2 e H08.3 estão entregues; H08.4 (envio real pelo WhatsApp) e H08.5 (novas tentativas, suspensão e retomada) estão implementadas e **em validação** (falta a P03 e um envio real autorizado). Desde a T36 (27/11/2026) o provedor do WhatsApp é a Evolution API, hospedada pelo Diego.
 
 ### Configurar canal, consentimento e horários (H08.1)
 
@@ -985,7 +985,7 @@ Tela **Lembretes e WhatsApp** (`/lembretes`, link em **Membros e acesso** e na b
 - **Número:** celular brasileiro; a entrada aceita espaços, parênteses, hífen e `+55` opcional e é guardada em E.164 (`+5511987654321`). Trocar o número revoga o consentimento anterior e desativa o canal.
 - **Consentimento:** explícito. O administrador lê o texto (versão `WHATSAPP-RESUMOS-V1`), confirma o número e marca o aceite; o servidor grava autor, número, versão do texto e instante UTC. Informar número ou ativar nunca cria consentimento. A revogação desativa o canal na mesma operação e o histórico fica guardado.
 - **Ativar:** exige número e consentimento ativo do administrador atual. Desativar mantém número e consentimento.
-- **Canal x provedor:** a tela mostra separadamente o que foi configurado e a disponibilidade do envio. Enquanto a Meta não estiver configurada no servidor, o provedor responde `PROVIDER_DISABLED` ou `PROVIDER_NOT_CONFIGURED` e o estado efetivo de um canal ativo é `PROVIDER_UNAVAILABLE`. Não existe tela nem campo de token; as credenciais da Meta ficam só na configuração do backend (H08.4).
+- **Canal x provedor:** a tela mostra separadamente o que foi configurado e a disponibilidade do envio. Enquanto a Evolution API não estiver configurada no servidor, o provedor responde `PROVIDER_DISABLED` ou `PROVIDER_NOT_CONFIGURED` e o estado efetivo de um canal ativo é `PROVIDER_UNAVAILABLE`. Não existe tela nem campo de chave; a chave da Evolution API fica só na configuração do backend (H08.4/T36).
 - **Transferência de administração:** na mesma transação da transferência, o consentimento é revogado (`ADMINISTRATION_TRANSFERRED`), o número é apagado e o canal desativado; os horários ficam. O novo administrador informa o próprio número e consente.
 - **Concorrência, repetição e auditoria:** toda alteração leva `expectedVersion` e `Idempotency-Key`; versão diferente dá `409 NOTIFICATION_SETTINGS_VERSION_CONFLICT` e a tela recarrega. Os eventos (horários, número mascarado, consentimento, ativação) aparecem para o administrador em “Alterações recentes”. Logs não contêm número.
 
@@ -1043,7 +1043,7 @@ GET /api/v1/notifications/reminders/summaries/{id}                      → 200 
 
 Erros: `400 REMINDER_QUERY_INVALID` (data fora de hoje…+60 dias, formato, horário), `404 REMINDER_SUMMARY_NOT_FOUND`, `401` e `403`.
 
-**Contratos preparados para as próximas histórias (não implementadas):** H08.3 lê `reminder_summaries`/`reminder_summary_items` e o canal `IN_APP` para listar os avisos; H08.4 envia os registros `WHATSAPP` com `PLANNED` usando `ReminderSummaryText` (mensagem única), revalida consentimento e conteúdo antes de cada tentativa e substitui `UnavailableWhatsAppProvider` pelo adapter da Meta (feito na H08.4: `MetaWhatsAppProvider`, com a mensagem em `WhatsAppSummaryTemplate`); H08.5 usa a identidade espaço + data + horário + canal e a janela de `ReminderWindow` para não acumular tentativas. Nenhuma tabela de tentativa, aceite ou entrega foi criada.
+**Contratos preparados para as próximas histórias (não implementadas):** H08.3 lê `reminder_summaries`/`reminder_summary_items` e o canal `IN_APP` para listar os avisos; H08.4 envia os registros `WHATSAPP` com `PLANNED` usando `ReminderSummaryText` (mensagem única), revalida consentimento e conteúdo antes de cada tentativa e substitui `UnavailableWhatsAppProvider` pelo adapter real (feito na H08.4 com a Meta e trocado pela Evolution API na T36: `EvolutionWhatsAppProvider`, com a mensagem em `WhatsAppSummaryMessage`); H08.5 usa a identidade espaço + data + horário + canal e a janela de `ReminderWindow` para não acumular tentativas. Nenhuma tabela de tentativa, aceite ou entrega foi criada.
 
 Teste manual com datas controladas (não depende do relógio do servidor):
 
@@ -1086,68 +1086,92 @@ Teste manual:
 
 Testes: `MemberNotificationPostgresIT` (matriz N1–N14 em PostgreSQL real, com relógio controlado, concorrência, remoção e transferência), `MemberNotificationServiceTest`, `MemberNotificationHttpTest`, `ReminderSummaryServiceTest`, `notification-inbox.component.spec.ts`, `reminder-summary.component.spec.ts`, smoke E2E e E2E full-stack (job real gerando o aviso). O E2E full-stack usa o segundo horário de hoje e precisa rodar antes das 17:55 de São Paulo. Evidência: `docs/evidencias/H08.3.md`.
 
-### Enviar e acompanhar pelo WhatsApp (H08.4)
+### Enviar e acompanhar pelo WhatsApp (H08.4, Evolution API desde T36)
 
-**Estado: em validação.** O envio, o acompanhamento e o webhook estão implementados e testados contra uma Meta **simulada**. Nenhuma mensagem real foi enviada: faltam a P03 (número dedicado, credenciais, template aprovado, webhook HTTPS público e custo conhecido) e a autorização do Diego para o primeiro envio. Evidência: `docs/evidencias/H08.4.md`.
+**Estado: em validação.** O envio, o acompanhamento e o webhook estão implementados e testados contra uma Evolution API **simulada**. Desde 27/11/2026 (T36) o provedor é a **Evolution API**, hospedada pelo Diego no servidor, no lugar da Meta Cloud API. Nenhuma mensagem real foi enviada: falta a P03 (Evolution API no ar, instância conectada ao WhatsApp do número remetente, chave e segredo do webhook no servidor) e a autorização do Diego para o primeiro envio. Evidências: `docs/evidencias/H08.4.md` (comportamento) e `docs/evidencias/T36-evolution.md` (troca de provedor).
 
 **Como funciona**
 
 - Só o **administrador ativo** recebe, no número cadastrado e com o consentimento dele para esse número (H08.1). O convidado nunca recebe WhatsApp, nem como teste.
-- O job `WhatsAppDeliveryJob` roda a cada 30 s (`app.jobs.whatsapp.fixed-delay-ms`, desligável com `app.jobs.whatsapp.enabled=false`) e pega os resumos com canal `WHATSAPP` previsto. Para cada um: (1) numa transação curta, bloqueia a configuração do espaço e **revalida** administrador, consentimento, número, ativação, provedor, janela do horário e o conteúdo (as contas do resumo que continuam pendentes e elegíveis; nada novo entra); (2) chama a Meta **fora de transação**; (3) grava o resultado noutra transação curta.
+- O job `WhatsAppDeliveryJob` roda a cada 30 s (`app.jobs.whatsapp.fixed-delay-ms`, desligável com `app.jobs.whatsapp.enabled=false`) e pega os resumos com canal `WHATSAPP` previsto. Para cada um: (1) numa transação curta, bloqueia a configuração do espaço e **revalida** administrador, consentimento, número, ativação, provedor, janela do horário e o conteúdo (as contas do resumo que continuam pendentes e elegíveis; nada novo entra); (2) chama a Evolution API **fora de transação**; (3) grava o resultado noutra transação curta.
+- **Duas chamadas por envio**, ambas com o cabeçalho `apikey`: `GET /instance/connectionState/<instância>` e, só se a instância estiver `open`, `POST /message/sendText/<instância>` com `{"number": "5511987654321", "text": "…", "linkPreview": false}`. Instância desconectada (`close`, `connecting`, aguardando QR code) não recebe nada: a tentativa conta como indisponível e a H08.5 tenta de novo dentro da janela.
 - **Uma entrega lógica por resumo** (espaço + data + horário + canal): índice único em `whatsapp_deliveries.summary_id`. Tentativas ficam em `whatsapp_attempts`; confirmações do webhook em `whatsapp_status_events` (uma por mensagem e situação).
-- **Aceite não é entrega.** Situações: `ATTEMPTING` (tentativa gravada), `ACCEPTED` (Meta aceitou e devolveu o id; **ainda não entregue**), `SENT`, `DELIVERED`, `READ` (confirmações do webhook), `RETRY_WAITING` (H08.5: a última tentativa certamente não chegou à Meta e a próxima está marcada dentro da janela), `FAILED`, `REJECTED`, `UNCERTAIN` (sem prova de aceite nem de recusa) e `SKIPPED` (bloqueado na revalidação, com o motivo).
-- **Só é tentado de novo o que certamente não chegou à Meta** (H08.5, detalhes abaixo). Timeout depois de enviar, erro 5xx sem código, resposta 200 sem id e tentativa interrompida (mais de 10 min em `ATTEMPTING`) viram `UNCERTAIN`, com aviso ao administrador, e **nunca são reenviados**. Não prometemos entrega exatamente uma vez.
-- Falhas viram aviso interno só para o administrador (H08.3): `PROVIDER_REJECTED`, `RECIPIENT_INVALID`, `PROVIDER_UNAVAILABLE`, `DELIVERY_FAILED`, `RESULT_UNCERTAIN`, `NOT_SENT_IN_WINDOW`. O aviso interno do resumo continua para os dois membros e o resto do aplicativo não depende da Meta.
-- Pagar é só no aplicativo: o webhook nunca altera despesas; mensagens recebidas (texto do usuário) são ignoradas e não são gravadas.
+- **Aceite não é entrega.** Situações: `ATTEMPTING` (tentativa gravada), `ACCEPTED` (a Evolution API aceitou e devolveu `key.id`; **ainda não entregue**), `SENT`, `DELIVERED`, `READ` (confirmações do webhook), `RETRY_WAITING` (H08.5), `FAILED`, `REJECTED`, `UNCERTAIN` (sem prova de aceite nem de recusa) e `SKIPPED` (bloqueado na revalidação, com o motivo).
+- **Só é tentado de novo o que certamente não chegou à Evolution API** (H08.5). Timeout depois de enviar, 5xx, resposta 2xx sem `key.id` e tentativa interrompida (mais de 10 min em `ATTEMPTING`) viram `UNCERTAIN`, com aviso ao administrador, e **nunca são reenviados**. Não prometemos entrega exatamente uma vez.
+- Falhas viram aviso interno só para o administrador (H08.3): `PROVIDER_REJECTED`, `RECIPIENT_INVALID`, `PROVIDER_UNAVAILABLE`, `DELIVERY_FAILED`, `RESULT_UNCERTAIN`, `NOT_SENT_IN_WINDOW`. O aviso interno do resumo continua para os dois membros e o resto do aplicativo não depende do WhatsApp.
 - **Acompanhamento:** a página do resumo (`/lembretes/resumos/{id}`) mostra ao administrador a situação, o número mascarado, a quantidade enviada e os instantes de tentativa, aceite, envio, entrega, leitura ou falha (`GET /api/v1/notifications/reminders/summaries/{id}/whatsapp`; o convidado recebe `403`).
-- **Mensagem de teste:** em **Lembretes e WhatsApp**, com consentimento ativo e provedor configurado, o administrador pode enviar o template de teste (sem dados de contas) ao próprio número (`POST /api/v1/notifications/settings/whatsapp/test-message` com `Idempotency-Key`; repetir a chave não reenvia; um teste por minuto).
+- **Mensagem de teste:** em **Lembretes e WhatsApp**, com consentimento ativo e provedor configurado, o administrador pode enviar um texto fixo, sem dados de contas, ao próprio número (`POST /api/v1/notifications/settings/whatsapp/test-message` com `Idempotency-Key`; repetir a chave não reenvia; um teste por minuto). Não há mais template de teste.
 
-**Classificação da resposta da Meta** (códigos a conferir na P03): 2xx com `messages[0].id` → `ACCEPTED`; 2xx sem id → `UNCERTAIN`; conexão recusada, DNS ou timeout de conexão → `FAILED` (`PROVIDER_UNAVAILABLE`); timeout depois de enviar ou 5xx → `UNCERTAIN`; 429 ou `130429`/`131048`/`131056`/`80007`/`133016`, e 503 com `131016` → recusa temporária (`PROVIDER_UNAVAILABLE`; na H08.5 vira `RETRY_WAITING` se couber na janela, senão `FAILED`); 5xx sem esses códigos → `UNCERTAIN`; 4xx com `131026`/`131030` → `REJECTED` (`RECIPIENT_INVALID`, suspende o canal); outro 4xx → `REJECTED` (`PROVIDER_REJECTED`, suspende o canal). Só o código numérico é gravado; o texto da Meta nunca.
+**Mensagem do resumo.** A Evolution API envia texto livre, então não há template a aprovar. O texto mantém o conteúdo que o template proposto tinha, uma conta por linha (até cinco, descrições cortadas em 40 caracteres, e “e mais X contas”):
 
-**Configuração** (backend; nada disso vai para o banco ou para o Git)
+```
+Contas a pagar em 05/10/2026, 09:00.
+3 contas, total R$ 1.234,50, 1 atrasada (1 estimada: R$ 90,00)
+• ATRASADA 03/10 Aluguel R$ 1.000,00
+• 05/10 Luz R$ 144,50
+• 06/10 Gás R$ 90,00 (estimada)
+Lista completa: https://contas.malyah.tech/lembretes/resumos/<id>
+```
+
+**Classificação das respostas** (formato da Evolution API v2, a conferir na versão instalada na P03):
+
+| Resposta | Resultado |
+|---|---|
+| Estado da instância `open` | segue para o envio |
+| Estado `close`, `connecting` ou outro; falha ao consultar o estado (conexão, timeout, 5xx) | `FAILED` com `PROVIDER_UNAVAILABLE` (código `CONN_CLOSE`, `CONN_CONNECTING`, `CONN_UNKNOWN` ou `STATE_5xx`); vira `RETRY_WAITING` se couber na janela. Nada foi enviado. |
+| Estado `401`, `403` ou `404` (chave recusada, instância inexistente) | `REJECTED` (`PROVIDER_REJECTED`, código `STATE_401/403/404`), suspende o canal |
+| Envio 2xx com `key.id` | `ACCEPTED` |
+| Envio 2xx sem `key.id` | `UNCERTAIN` |
+| Conexão recusada, DNS ou timeout de conexão no envio | `FAILED` (`PROVIDER_UNAVAILABLE`), nova tentativa na janela |
+| 429 | `FAILED` (`PROVIDER_UNAVAILABLE`), respeitando `Retry-After` em segundos |
+| 400 com `response.message[].exists = false` | `REJECTED` (`RECIPIENT_INVALID`, código `NOT_ON_WHATSAPP`): o número não tem WhatsApp; suspende o canal |
+| Outro 4xx | `REJECTED` (`PROVIDER_REJECTED`, código HTTP), suspende o canal |
+| Timeout depois de enviar, 5xx ou qualquer outra resposta | `UNCERTAIN`, nunca reenviado |
+
+Só o código curto é gravado; o texto da resposta nunca.
+
+**Configuração** (somente variáveis de ambiente e arquivos de segredo; nunca banco, Git ou tela):
 
 | Variável | Uso | Padrão |
 |---|---|---|
-| `META_WHATSAPP_ENABLED` | Liga o provedor. Só envia com todos os valores abaixo. | `false` |
-| `META_WHATSAPP_API_BASE_URL` | Graph API. Em produção precisa ser HTTPS. | `https://graph.facebook.com` |
-| `META_WHATSAPP_API_VERSION` | Versão da Graph API (`vNN.N`). Conferir a versão suportada na P03; a documentação consultada usa `v23.0` como exemplo. | vazio |
-| `META_WHATSAPP_PHONE_NUMBER_ID` | ID do número dedicado remetente. | vazio |
-| `META_WHATSAPP_SUMMARY_TEMPLATE` / `META_WHATSAPP_TEMPLATE_LANGUAGE` | Nome e idioma do template aprovado do resumo. | vazio / `pt_BR` |
-| `META_WHATSAPP_TEST_TEMPLATE` / `META_WHATSAPP_TEST_TEMPLATE_LANGUAGE` | Template de teste sem dados financeiros (opcional). | vazio / `pt_BR` |
-| `META_WHATSAPP_TOKEN` (`META_WHATSAPP_TOKEN_FILE`) | Token de acesso. **Segredo.** | vazio |
-| `META_WHATSAPP_APP_SECRET` (`META_WHATSAPP_APP_SECRET_FILE`) | App secret, usado só para validar a assinatura do webhook. **Segredo.** | vazio |
-| `META_WHATSAPP_VERIFY_TOKEN` (`META_WHATSAPP_VERIFY_TOKEN_FILE`) | Token que você define e informa no painel da Meta ao cadastrar o webhook. **Segredo.** | vazio |
+| `EVOLUTION_API_ENABLED` | Liga o provedor. Só envia com todos os valores abaixo. | `false` |
+| `EVOLUTION_API_BASE_URL` | Endereço da Evolution API, sem barra final obrigatória. Em produção precisa ser HTTPS, salvo endereço interno do servidor: `localhost`, `127.0.0.1` ou nome de serviço da rede Docker (por exemplo `http://evolution-api:8080`). | vazio |
+| `EVOLUTION_API_INSTANCE` | Nome da instância conectada ao número remetente (letras, números, `.`, `_`, `-`; até 64). | vazio |
+| `EVOLUTION_API_KEY` (`EVOLUTION_API_KEY_FILE`) | Chave enviada no cabeçalho `apikey` (a global `AUTHENTICATION_API_KEY` ou a da instância). **Segredo.** | vazio |
+| `EVOLUTION_WEBHOOK_TOKEN` (`EVOLUTION_WEBHOOK_TOKEN_FILE`) | Segredo que você gera (mínimo 16 caracteres; por exemplo `openssl rand -hex 32`) e configura no webhook da instância como cabeçalho `X-Webhook-Token`. **Segredo.** | vazio |
 
-Em produção os três segredos ficam em `deploy/secrets/meta_whatsapp_token.txt`, `meta_whatsapp_app_secret.txt` e `meta_whatsapp_verify_token.txt` (Docker secrets montados em `/run/secrets/…`; o `docker-entrypoint.sh` os exporta). Os três arquivos precisam existir para o Compose subir; podem ficar vazios enquanto `META_WHATSAPP_ENABLED=false`. Com o provedor ligado e algum valor faltando, o log mostra `whatsapp_provider_incomplete missing=[…]` (só nomes, nunca valores) e nada é enviado.
+Em produção os dois segredos ficam em `deploy/secrets/evolution_api_key.txt` e `deploy/secrets/evolution_webhook_token.txt` (Docker secrets montados em `/run/secrets/…`; o `docker-entrypoint.sh` os exporta). Os dois arquivos precisam existir para o Compose subir; podem ficar vazios enquanto `EVOLUTION_API_ENABLED=false`. Com o provedor ligado e algum valor faltando, o log mostra `whatsapp_provider_incomplete missing=[…]` (só nomes, nunca valores) e nada é enviado. As antigas variáveis `META_WHATSAPP_*` e os arquivos `meta_whatsapp_*.txt` não são mais lidos e podem ser apagados do servidor.
 
-**Template do resumo proposto** (categoria utilidade, `pt_BR`; **precisa da aprovação do Diego e da Meta**, e o custo por mensagem depende da categoria e do mercado): corpo com quatro parâmetros de uma linha cada:
+**Webhook:** `POST /api/v1/integrations/whatsapp/webhook`. A Evolution API não assina os eventos, então o backend exige o cabeçalho `X-Webhook-Token` com o segredo configurado, comparado em tempo constante **antes** de ler o corpo: sem ele ou errado → `401` e nada gravado; integração desligada → `404`; corpo acima de 3 MB → `413`. Só eventos `messages.update` da instância configurada, de mensagens enviadas por nós (`fromMe`), são aplicados: `SERVER_ACK` → `SENT`, `DELIVERY_ACK` → `DELIVERED`, `READ`/`PLAYED` → `READ`, `ERROR` → `FAILED` (sem suspender, porque o evento não diz o motivo). Mensagens recebidas, eventos de conexão e qualquer outro campo são ignorados e nunca gravados. Cada situação vale uma vez e nunca volta atrás. Se chegar a situação de uma mensagem cujo id ainda não foi gravado enquanto há uma tentativa em andamento, a resposta é `503` para a Evolution API reenviar; erro de banco → `500` (reenvio deduplicado). É o único caminho sem sessão e sem CSRF, e só para `POST`; todas as outras mutações continuam exigindo CSRF.
+
+Configuração do webhook na instância (exemplo; confira o formato na versão instalada):
 
 ```
-Contas a pagar em {{1}}.
-{{2}}
-{{3}}
-Lista completa: {{4}}
+POST <EVOLUTION_API_BASE_URL>/webhook/set/<instância>
+apikey: <chave>
+{"webhook": {"enabled": true,
+  "url": "http://backend:8080/api/v1/integrations/whatsapp/webhook",
+  "headers": {"X-Webhook-Token": "<segredo do webhook>"},
+  "byEvents": false, "base64": false, "events": ["MESSAGES_UPDATE"]}}
 ```
 
-`{{1}}` data e horário (`05/10/2026, 09:00`); `{{2}}` quantidade, total, atrasadas e estimadas (`3 contas, total R$ 1.234,50, 1 atrasada (1 estimada: R$ 90,00)`); `{{3}}` até cinco contas separadas por `; `, descrições cortadas em 40 caracteres, e “e mais X contas”; `{{4}}` o link autenticado do resumo. Uma mensagem por resumo.
+Se a Evolution API estiver na mesma rede Docker do Compose de produção, use o endereço interno do backend (`http://backend:8080/api/v1/...`) e o webhook não precisa ficar público. Se ela estiver fora dessa rede, use `https://contas.malyah.tech/api/v1/integrations/whatsapp/webhook`.
 
-**Webhook:** `https://contas.malyah.tech/api/v1/integrations/whatsapp/webhook` (campo `messages`). `GET` responde ao desafio (`hub.mode=subscribe`, `hub.verify_token`, `hub.challenge`) com o token certo, `403` com o errado e `404` com a integração desligada. `POST` valida `X-Hub-Signature-256` (HMAC-SHA256 do corpo bruto com o app secret) **antes** de ler qualquer coisa: sem assinatura válida → `401` e nada gravado. Só situações de mensagens conhecidas do número configurado são aplicadas, uma vez cada, sem voltar atrás (lido não volta para entregue; falha depois de entregue não rebaixa). Se chegar a situação de uma mensagem cujo id ainda não foi gravado enquanto há uma tentativa em andamento, a resposta é `503` para a Meta reenviar; erro de banco → `500` (reenvio deduplicado). É o único caminho sem sessão e sem CSRF; todas as outras mutações continuam exigindo CSRF.
-
-**Testes locais** (sem Meta real): `WhatsAppDeliveryPostgresIT` (matriz W1–W21 em PostgreSQL real com a Meta simulada por `FakeMetaServer`), `WhatsAppDeliveryServiceTest`, `WhatsAppDeliveryDomainTest`, `MetaWhatsAppProviderTest`, `WhatsAppHttpTest`, `WebhookSecurityHttpTest`, `reminder-summary.component.spec.ts`, `reminder-settings.component.spec.ts`, smoke E2E e E2E full-stack (webhook desligado responde `404` sem sessão/CSRF; acompanhamento `403` para o convidado). Nada disso comprova entrega real.
+**Testes locais** (sem Evolution API real): `WhatsAppDeliveryPostgresIT` (matrizes W1–W21 e R1–R19 em PostgreSQL real com a Evolution API simulada por `FakeEvolutionServer`), `EvolutionWhatsAppProviderTest`, `WhatsAppDeliveryServiceTest`, `WhatsAppDeliveryDomainTest`, `WhatsAppHttpTest`, `WebhookSecurityHttpTest`, `reminder-summary.component.spec.ts`, `reminder-settings.component.spec.ts`, smoke E2E e E2E full-stack (webhook desligado responde `404` sem sessão/CSRF; acompanhamento `403` para o convidado). Nada disso comprova entrega real.
 
 **Validação real (pendente; somente com autorização do Diego)**
 
-1. P03 concluída: conta WhatsApp Business e número dedicado habilitados, versão da API definida, template do resumo e de teste aprovados, custo conhecido.
-2. Gravar os três segredos em `deploy/secrets/` (permissão `600`) e as variáveis no `.env` do servidor; `META_WHATSAPP_ENABLED=true`. Subir a versão e conferir no log que não há `whatsapp_provider_incomplete`.
-3. No painel da Meta, cadastrar o webhook acima com o mesmo verify token e assinar o campo `messages`. Esperado: verificação aceita (o backend respondeu o desafio).
-4. Em **Lembretes e WhatsApp**, como administrador com consentimento, **Enviar mensagem de teste**. Esperado: “Aceito pela Meta. A entrega ainda não foi confirmada.” e, depois do webhook, a entrega na página (ou a mensagem no celular). Registrar em `docs/evidencias/H08.4.md` só horário, situação e final do número; nunca token, id completo da mensagem ou número inteiro.
+1. Subir a Evolution API no servidor, criar a instância e conectá-la ao WhatsApp do número remetente (QR code). Conferir `GET /instance/connectionState/<instância>` → `open`.
+2. Gravar a chave e o segredo do webhook em `deploy/secrets/` (permissão `600`) e as variáveis no `.env` do servidor; `EVOLUTION_API_ENABLED=true`. Subir a versão e conferir no log que não há `whatsapp_provider_incomplete`.
+3. Configurar o webhook da instância como acima. Esperado: um `POST` sem o cabeçalho responde `401`; com o cabeçalho, `200`.
+4. Em **Lembretes e WhatsApp**, como administrador com consentimento, **Enviar mensagem de teste**. Esperado: “Aceito pela Evolution API. A entrega ainda não foi confirmada.” e, depois do webhook, a entrega na página (ou a mensagem no celular). Registrar em `docs/evidencias/T36-evolution.md` só horário, situação e final do número; nunca chave, segredo, id completo da mensagem ou número inteiro.
 5. Ativar o canal e aguardar um horário com contas de teste (sem dados financeiros reais). Conferir na página do resumo: `ACCEPTED` → `SENT` → `DELIVERED` (ou `READ`). Conferir que o convidado não recebeu nada.
 
-Diagnóstico: `docker compose logs backend | grep whatsapp_` mostra `whatsapp_delivery summaryId=… status=… errorCode=…`, `whatsapp_webhook applied=… duplicated=… stale=… ignored=…` e `whatsapp_webhook_rejected reason=signature`. Sem entrega confirmada: verifique o webhook no painel da Meta e o `401` por assinatura (app secret errado). `REJECTED` com `132001`: template inexistente ou idioma errado. `PROVIDER_UNAVAILABLE` repetido: Meta fora do ar ou limite; o aplicativo segue funcionando e os avisos internos continuam.
+Diagnóstico: `docker compose logs backend | grep whatsapp_` mostra `whatsapp_delivery summaryId=… status=… errorCode=…`, `whatsapp_webhook applied=… duplicated=… stale=… ignored=…` e `whatsapp_webhook_rejected reason=token`. `errorCode=CONN_CLOSE` repetido: a instância perdeu a conexão com o WhatsApp; leia o QR code de novo no painel da Evolution API. `REJECTED` com `STATE_401`: chave errada; com `STATE_404`: nome da instância errado. Sem entrega confirmada: verifique o webhook da instância e o `401` por segredo errado. O aplicativo segue funcionando e os avisos internos continuam.
 
 ### Revalidar, tentar de novo e encerrar sem acúmulo (H08.5)
 
-**Estado: em validação** junto com a H08.4: tudo foi testado contra a Meta **simulada**; nenhuma mensagem real foi enviada. Evidência: `docs/evidencias/H08.5.md`; decisão T35 em `docs/decisoes-pendentes.md`.
+**Estado: em validação** junto com a H08.4: tudo foi testado contra o provedor **simulado** (a Meta até T36, a Evolution API desde então); nenhuma mensagem real foi enviada. Evidência: `docs/evidencias/H08.5.md`; decisão T35 em `docs/decisoes-pendentes.md`.
 
 **Revalidação antes de cada tentativa** (a primeira e cada nova tentativa), numa transação curta com a configuração do espaço bloqueada: administrador atual igual ao do resumo, consentimento ativo e o mesmo, número igual ao consentido, canal não suspenso, canal ativado, provedor configurado, janela do horário ainda aberta (calculada com o fuso e os horários **atuais**) e conteúdo. O conteúdo é recalculado a partir das contas do resumo: pagas, canceladas, excluídas ou que deixaram de ser elegíveis saem, o total e as contagens são refeitos e **sem conta nenhuma a mensagem não é enviada** (`SKIPPED`/`EMPTY`). Contas novas nunca entram. O que falhar encerra a entrega como `SKIPPED` com o motivo (`ADMINISTRATOR_CHANGED`, `CONSENT_REVOKED`, `RECIPIENT_CHANGED`, `SUSPENDED`, `DISABLED`, `PROVIDER_UNAVAILABLE`, `EMPTY`) ou como `FAILED`/`NOT_SENT_IN_WINDOW` quando a janela fechou. O aviso interno do resumo (H08.3) não depende de nada disso.
 
@@ -1155,23 +1179,23 @@ Diagnóstico: `docker compose logs backend | grep whatsapp_` mostra `whatsapp_de
 
 | Parâmetro | Valor |
 |---|---|
-| Quando se tenta de novo | Só depois de recusa certa: conexão recusada/DNS/timeout de conexão, 429, `130429`, `131048`, `131056`, `80007`, `133016`, 503 com `131016`. Nunca depois de `UNCERTAIN`, `REJECTED` ou `RECIPIENT_INVALID`. Mensagem de teste nunca é repetida. |
+| Quando se tenta de novo | Só depois de recusa certa: conexão recusada/DNS/timeout de conexão, 429, instância da Evolution API desconectada (`close`, `connecting`) ou consulta de estado sem resposta (T36). Nunca depois de `UNCERTAIN`, `REJECTED` ou `RECIPIENT_INVALID`. Mensagem de teste nunca é repetida. |
 | Espera entre tentativas | 1, 5, 15 e 30 min depois da falha anterior |
 | Máximo de tentativas por resumo | 5 (a primeira e mais 4) |
-| Espera pedida pela Meta | `Retry-After` em segundos, se vier, é respeitado quando maior que a espera padrão (teto 1 h). A Meta não documenta esse cabeçalho; sem ele vale a tabela. |
+| Espera pedida pelo provedor | `Retry-After` em segundos, se vier num 429, é respeitado quando maior que a espera padrão (teto 1 h). Sem ele vale a tabela. |
 | Fim da janela | o menor entre 1 h depois do horário original e o próximo horário da configuração atual. Nunca é estendido por falha, reinício ou nova tentativa. |
 | Verificação das esperas | a cada execução do `WhatsAppDeliveryJob` (30 s) |
 
 Uma nova tentativa **não é um novo resumo**: continua sendo a mesma entrega (`whatsapp_deliveries`) com mais uma linha em `whatsapp_attempts`, e o limite de dois resumos por dia não muda. Se a próxima espera não couber na janela, a entrega termina como `FAILED`/`NOT_SENT_IN_WINDOW` e o administrador recebe o aviso; mensagens antigas nunca acumulam.
 
-**Resultado incerto e reconciliação.** Cada envio leva o id da tentativa em `biz_opaque_callback_data`, que a Meta devolve nas situações do webhook. Se a situação de uma entrega `UNCERTAIN` chegar com essa referência, a entrega passa a ter o id da Meta, a situação confirmada (`SENT`, `DELIVERED`, `READ` ou `FAILED`) e `reconciledAt`. Não existe consulta de situação na API da Meta; sem webhook, a incerteza fica registrada e visível, sem reenvio.
+**Resultado incerto.** Uma entrega `UNCERTAIN` nunca é reenviada e a incerteza fica registrada e visível. Com a Meta (até T36), o id da tentativa ia em `biz_opaque_callback_data` e voltava no webhook, o que permitia reconciliar. A Evolution API não devolve nenhuma referência nossa nos eventos, então, desde a T36, uma situação que chega depois para uma mensagem cujo id não foi gravado é ignorada e a entrega continua `UNCERTAIN`. O código de reconciliação continua no serviço e volta a funcionar se um provedor futuro devolver a referência.
 
-**Suspensão.** `REJECTED` (`PROVIDER_REJECTED`), `RECIPIENT_INVALID` e falha informada pelo webhook com código de destinatário (`RECIPIENT_UNREACHABLE`) desativam o canal com o motivo e o instante (evento `CHANNEL_SUSPENDED`, autor “Sistema”). O número e o consentimento continuam valendo; indisponibilidade da Meta nunca suspende. Só suspende se o número e o consentimento em vigor forem os da tentativa que falhou. Para retomar: corrija a causa (número ou template/configuração do servidor) e clique **Reativar canal** em **Lembretes e WhatsApp**, ou salve outro número.
+**Suspensão.** `REJECTED` (`PROVIDER_REJECTED`: chave recusada, instância inexistente ou outro 4xx) e `RECIPIENT_INVALID` (número sem WhatsApp) desativam o canal com o motivo e o instante (evento `CHANNEL_SUSPENDED`, autor “Sistema”). O número e o consentimento continuam valendo; indisponibilidade da Evolution API ou instância desconectada nunca suspende. Uma falha informada depois pelo webhook (`ERROR`) não diz o motivo, então nunca suspende (T36). Só suspende se o número e o consentimento em vigor forem os da tentativa que falhou. Para retomar: corrija a causa (número, chave ou nome da instância na configuração do servidor) e clique **Reativar canal** em **Lembretes e WhatsApp**, ou salve outro número.
 
-**Concorrência e reinício.** A tentativa é reservada no banco (`ATTEMPTING`) antes da chamada, que acontece fora de transação. Se o processo cair entre a chamada e a gravação do resultado, a tentativa fica `ATTEMPTING` e, depois de 10 min, vira `UNCERTAIN` (log `whatsapp_attempts_uncertain`), nunca reenviada, porque a Meta pode ter recebido. Depois de reiniciar, esperas ainda válidas seguem normalmente; as vencidas são encerradas como `NOT_SENT_IN_WINDOW` (log `whatsapp_retry_closed deliveryId=… reason=…`). Duas instâncias não pegam a mesma espera: a configuração e a entrega são bloqueadas sempre na mesma ordem.
+**Concorrência e reinício.** A tentativa é reservada no banco (`ATTEMPTING`) antes da chamada, que acontece fora de transação. Se o processo cair entre a chamada e a gravação do resultado, a tentativa fica `ATTEMPTING` e, depois de 10 min, vira `UNCERTAIN` (log `whatsapp_attempts_uncertain`), nunca reenviada, porque a Evolution API pode ter recebido. Depois de reiniciar, esperas ainda válidas seguem normalmente; as vencidas são encerradas como `NOT_SENT_IN_WINDOW` (log `whatsapp_retry_closed deliveryId=… reason=…`). Duas instâncias não pegam a mesma espera: a configuração e a entrega são bloqueadas sempre na mesma ordem.
 
 **O que o administrador vê:** em **Lembretes e WhatsApp**, a situação “Suspenso”, o motivo e o que fazer; na página do resumo, cada tentativa com o resultado, a próxima tentativa marcada, a expiração e a confirmação tardia pelo webhook. Não há reenvio manual nem canal alternativo.
 
-Diagnóstico H08.5: `whatsapp_delivery … attempt=N status=RETRY_WAITING`, `whatsapp_retry_failed deliveryId=…`, `whatsapp_retry_closed deliveryId=… reason=…` e `whatsapp_webhook … reconciled=N`. Os logs usam ids internos e nunca número, token ou texto da Meta.
+Diagnóstico H08.5: `whatsapp_delivery … attempt=N status=RETRY_WAITING`, `whatsapp_retry_failed deliveryId=…`, `whatsapp_retry_closed deliveryId=… reason=…` e `whatsapp_webhook … reconciled=N`. Os logs usam ids internos e nunca número, chave ou texto do provedor.
 
-Testes: `WhatsAppRetryDomainTest`, `WhatsAppRetryServiceTest`, `MetaWhatsAppProviderTest` e os cenários R1–R14 de `WhatsAppDeliveryPostgresIT` (PostgreSQL real, relógio controlado, falhas **simuladas** pelo `FakeMetaServer`).
+Testes: `WhatsAppRetryDomainTest`, `WhatsAppRetryServiceTest`, `EvolutionWhatsAppProviderTest` e os cenários R1–R14 de `WhatsAppDeliveryPostgresIT` (PostgreSQL real, relógio controlado, falhas **simuladas** pelo `FakeEvolutionServer`).

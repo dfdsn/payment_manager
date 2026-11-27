@@ -30,11 +30,10 @@ public class SecurityConfiguration {
         var production = "production".equalsIgnoreCase(environment.getProperty("APP_ENVIRONMENT", "local"));
         csrfRepository.setCookieCustomizer(cookie -> cookie.path("/").sameSite("Lax").secure(production));
 
-        // H08.4: the Meta webhook is the one exception to session and CSRF; it authenticates by the verify token
-        // (GET) and by the HMAC signature of the body (POST). Every other mutation keeps CSRF.
+        // T36: the Evolution API webhook (POST only) is the one exception to session and CSRF; it authenticates by
+        // the shared secret header checked by the notifications module. Every other mutation keeps CSRF.
         http
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(HttpMethod.GET, WHATSAPP_WEBHOOK).permitAll()
                         .requestMatchers(HttpMethod.POST, WHATSAPP_WEBHOOK).permitAll()
                         .requestMatchers(HttpMethod.GET,
                                 "/setup/status", "/actuator/health", "/auth/csrf", "/invitations/preview").permitAll()

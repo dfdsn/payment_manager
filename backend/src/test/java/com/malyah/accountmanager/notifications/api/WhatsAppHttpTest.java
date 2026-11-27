@@ -30,7 +30,7 @@ import com.malyah.accountmanager.notifications.application.WhatsAppDeliveryView;
 import com.malyah.accountmanager.notifications.application.WhatsAppTestUnavailableException;
 import com.malyah.accountmanager.notifications.application.WhatsAppWebhookUseCase;
 
-/** H08.4 HTTP contract of the tracking, the test and the webhook (security chain: WebhookSecurityHttpTest). */
+/** H08.4/T36 HTTP contract of the tracking, the test and the webhook (security chain: WebhookSecurityHttpTest). */
 class WhatsAppHttpTest {
     static final Principal ADMIN = () -> "admin@example.com";
     static final UUID ID = UUID.fromString("00000000-0000-0000-0000-0000000000b1");
@@ -48,7 +48,7 @@ class WhatsAppHttpTest {
     }
 
     static WhatsAppDeliveryView view(String state) {
-        return new WhatsAppDeliveryView(state, "Aceito pela Meta. A entrega ainda não foi confirmada.", "SUMMARY",
+        return new WhatsAppDeliveryView(state, "Aceito pela Evolution API. A entrega ainda não foi confirmada.", "SUMMARY",
                 null, null, "+55 ** *****-4321", 2, Instant.parse("2026-10-05T12:00:10Z"),
                 Instant.parse("2026-10-05T12:00:10Z"), Instant.parse("2026-10-05T12:00:11Z"), null, null, null, null,
                 List.of(new WhatsAppDeliveryView.Attempt(1, Instant.parse("2026-10-05T12:00:10Z"),
@@ -99,20 +99,20 @@ class WhatsAppHttpTest {
     }
 
     @Test
-    void webhookPassesTheRawBodyAndTheSignatureAndReturnsPlainText() throws Exception {
-        when(webhook.verify("subscribe", "v", "123")).thenReturn(new WhatsAppWebhookUseCase.Reply(200, "123"));
-        mvc.perform(get("/integrations/whatsapp/webhook").param("hub.mode", "subscribe")
-                .param("hub.verify_token", "v").param("hub.challenge", "123"))
-                .andExpect(status().isOk()).andExpect(content().string("123"))
+    void webhookPassesTheRawBodyAndTheTokenHeaderAndReturnsPlainText() throws Exception {
+        var body = "{\"event\":\"messages.update\"}".getBytes(StandardCharsets.UTF_8);
+        when(webhook.receive(body, "segredo")).thenReturn(new WhatsAppWebhookUseCase.Reply(200, ""));
+        mvc.perform(post("/integrations/whatsapp/webhook").content(body).contentType("application/json")
+                .header("x-webhook-token", "segredo")).andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith("text/plain"));
-        var body = "{\"object\":\"whatsapp_business_account\"}".getBytes(StandardCharsets.UTF_8);
-        when(webhook.receive(body, "sha256=ab")).thenReturn(new WhatsAppWebhookUseCase.Reply(401, ""));
+        when(webhook.receive(body, null)).thenReturn(new WhatsAppWebhookUseCase.Reply(401, ""));
+        mvc.perform(post("/integrations/whatsapp/webhook").content(body).contentType("application/json"))
+                .andExpect(status().isUnauthorized());
+        when(webhook.receive(any(), eq("cd"))).thenThrow(new IllegalStateException("database down"));
         mvc.perform(post("/integrations/whatsapp/webhook").content(body).contentType("application/json")
-                .header("X-Hub-Signature-256", "sha256=ab")).andExpect(status().isUnauthorized());
-        when(webhook.receive(any(), eq("sha256=cd"))).thenThrow(new IllegalStateException("database down"));
-        mvc.perform(post("/integrations/whatsapp/webhook").content(body).contentType("application/json")
-                .header("X-Hub-Signature-256", "sha256=cd")).andExpect(status().isInternalServerError())
+                .header("X-Webhook-Token", "cd")).andExpect(status().isInternalServerError())
                 .andExpect(content().string(""));
+        mvc.perform(get("/integrations/whatsapp/webhook")).andExpect(status().isMethodNotAllowed());
         verifyNoInteractions(deliveries);
     }
 }

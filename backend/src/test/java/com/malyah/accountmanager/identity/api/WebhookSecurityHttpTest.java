@@ -28,8 +28,8 @@ import com.malyah.accountmanager.identity.application.MembershipManagementUseCas
 import com.malyah.accountmanager.identity.application.port.SessionRevoker;
 
 /**
- * H08.4 security chain: only the webhook path is reachable without session and, for POST, without CSRF; any other
- * path and method keeps the rules. The endpoint here is a stand-in route on the same path (the real controller
+ * H08.4 security chain, as changed by T36: only POST on the webhook path is reachable without session and without
+ * CSRF (the Evolution API webhook has no GET handshake); any other path and method keeps the rules. The endpoint here is a stand-in route on the same path (the real controller
  * needs the database); its authenticity checks are covered by WhatsAppDeliveryPostgresIT.
  */
 @SpringBootTest(properties = {
@@ -71,8 +71,7 @@ class WebhookSecurityHttpTest {
 
     @Test
     void onlyTheWebhookSkipsSessionAndCsrf() throws Exception {
-        mockMvc.perform(get("/integrations/whatsapp/webhook")).andExpect(status().isOk())
-                .andExpect(content().string("verify"));
+        mockMvc.perform(get("/integrations/whatsapp/webhook")).andExpect(status().isUnauthorized());
         mockMvc.perform(post("/integrations/whatsapp/webhook").content("{}")).andExpect(status().isOk())
                 .andExpect(content().string("received"));
         mockMvc.perform(put("/integrations/whatsapp/webhook").content("{}")).andExpect(status().isForbidden());

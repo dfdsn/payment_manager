@@ -35,7 +35,7 @@ import com.malyah.accountmanager.notifications.domain.WhatsAppDeliveryStatus;
 import com.malyah.accountmanager.notifications.domain.WhatsAppFailureReason;
 import com.malyah.accountmanager.notifications.domain.WhatsAppRetryPolicy;
 import com.malyah.accountmanager.notifications.domain.WhatsAppSkipReason;
-import com.malyah.accountmanager.notifications.domain.WhatsAppSummaryTemplate;
+import com.malyah.accountmanager.notifications.domain.WhatsAppSummaryMessage;
 import com.malyah.accountmanager.notifications.domain.WhatsAppSuspensionReason;
 
 /**
@@ -66,7 +66,7 @@ public final class WhatsAppDeliveryService {
             WhatsAppSkipReason.RECIPIENT_CHANGED.name(), "O número foi alterado antes do envio.",
             WhatsAppSkipReason.DISABLED.name(), "O canal foi desativado antes do envio.",
             WhatsAppSkipReason.SUSPENDED.name(), "O canal estava suspenso por uma falha permanente; nada foi enviado.",
-            WhatsAppSkipReason.PROVIDER_UNAVAILABLE.name(), "O envio pela Meta estava indisponível.",
+            WhatsAppSkipReason.PROVIDER_UNAVAILABLE.name(), "O envio pela Evolution API estava indisponível.",
             WhatsAppSkipReason.WINDOW_CLOSED.name(), "O horário terminou antes do envio; nada é enviado depois.",
             WhatsAppSkipReason.EMPTY.name(),
             "As contas do resumo já estavam pagas, canceladas ou fora do período; nada foi enviado.");
@@ -75,22 +75,22 @@ public final class WhatsAppDeliveryService {
             "CONSENT_REQUIRED", "Sem consentimento do administrador quando o resumo foi gerado.",
             "DISABLED", "Canal desativado quando o resumo foi gerado.",
             "SUSPENDED", "Canal suspenso por uma falha permanente quando o resumo foi gerado.",
-            "PROVIDER_UNAVAILABLE", "Envio pela Meta indisponível quando o resumo foi gerado.");
+            "PROVIDER_UNAVAILABLE", "Envio pela Evolution API indisponível quando o resumo foi gerado.");
     static final Map<String, String> STATE_MESSAGES = Map.ofEntries(
             Map.entry("NOT_PLANNED", "Este resumo não foi planejado para o WhatsApp."),
             Map.entry("WAITING", "Aguardando o envio pelo WhatsApp."),
-            Map.entry(WhatsAppDeliveryStatus.ATTEMPTING.name(), "Enviando para a Meta."),
+            Map.entry(WhatsAppDeliveryStatus.ATTEMPTING.name(), "Enviando para a Evolution API."),
             Map.entry(WhatsAppDeliveryStatus.RETRY_WAITING.name(),
-                    "A Meta não recebeu a última tentativa. Uma nova tentativa do mesmo resumo está programada, "
+                    "A Evolution API não recebeu a última tentativa. Uma nova tentativa do mesmo resumo está programada, "
                             + "no máximo até uma hora depois do horário original."),
-            Map.entry(WhatsAppDeliveryStatus.ACCEPTED.name(), "Aceito pela Meta. A entrega ainda não foi confirmada."),
-            Map.entry(WhatsAppDeliveryStatus.SENT.name(), "Enviado pela Meta. A entrega ainda não foi confirmada."),
+            Map.entry(WhatsAppDeliveryStatus.ACCEPTED.name(), "Aceito pela Evolution API. A entrega ainda não foi confirmada."),
+            Map.entry(WhatsAppDeliveryStatus.SENT.name(), "Enviado ao WhatsApp. A entrega ainda não foi confirmada."),
             Map.entry(WhatsAppDeliveryStatus.DELIVERED.name(), "Entregue no WhatsApp do administrador."),
             Map.entry(WhatsAppDeliveryStatus.READ.name(), "Entregue e lido no WhatsApp do administrador."),
             Map.entry(WhatsAppDeliveryStatus.FAILED.name(), "Não entregue."),
-            Map.entry(WhatsAppDeliveryStatus.REJECTED.name(), "Recusado pela Meta."),
+            Map.entry(WhatsAppDeliveryStatus.REJECTED.name(), "Recusado pela Evolution API."),
             Map.entry(WhatsAppDeliveryStatus.UNCERTAIN.name(),
-                    "Resultado incerto: não há confirmação de que a Meta recebeu. Nada foi reenviado."),
+                    "Resultado incerto: não há confirmação de que a Evolution API recebeu. Nada foi reenviado."),
             Map.entry(WhatsAppDeliveryStatus.SKIPPED.name(), "Não enviado."));
 
     private final WhatsAppDeliveryRepository deliveries;
@@ -227,7 +227,7 @@ public final class WhatsAppDeliveryService {
     private Ready ready(UUID deliveryId, UUID attemptId, int number, StoredConsent consent, PlannedSummary summary,
             ReminderSummary content) {
         return new Ready(deliveryId, attemptId, summary.spaceId(), summary.summaryId(), new WhatsAppSender.Message(
-                Kind.SUMMARY, consent.recipient().e164(), WhatsAppSummaryTemplate.parameters(content,
+                Kind.SUMMARY, consent.recipient().e164(), WhatsAppSummaryMessage.text(content,
                         summary.scheduledTime(), composer.link(summary.summaryId())), attemptId.toString()),
                 number, consent.id(), summary);
     }
@@ -453,8 +453,8 @@ public final class WhatsAppDeliveryService {
     public record ExistingTest(WhatsAppDeliveryView view) implements TestPreparation { }
 
     /**
-     * RF-ALT-04: a test to the administrator's consented number with the configured test template (no financial
-     * data). Idempotent by key; at most one per {@link #TEST_INTERVAL}. The channel does not need to be enabled.
+     * RF-ALT-04: a test to the administrator's consented number with a fixed text
+     * ({@link WhatsAppSummaryMessage#TEST}, no financial data). Idempotent by key; at most one per {@link #TEST_INTERVAL}. The channel does not need to be enabled.
      */
     public TestPreparation prepareTest(String actorEmail, UUID key, Instant now) {
         var actor = administrator(actorEmail);
@@ -471,9 +471,6 @@ public final class WhatsAppDeliveryService {
         var availability = provider.availability();
         if (!availability.available())
             throw new WhatsAppTestUnavailableException(availability.code(), availability.message());
-        if (!provider.testTemplateConfigured())
-            throw new WhatsAppTestUnavailableException("WHATSAPP_TEST_TEMPLATE_MISSING",
-                    "Nenhum modelo de teste está configurado no servidor.");
         var last = deliveries.lastTestAt(actor.spaceId());
         if (last.isPresent() && last.get().plus(TEST_INTERVAL).isAfter(now))
             throw new WhatsAppTestUnavailableException("WHATSAPP_TEST_TOO_SOON",
@@ -485,7 +482,7 @@ public final class WhatsAppDeliveryService {
         var attemptId = identifiers.get();
         deliveries.insertAttempt(attemptId, deliveryId, 1, now);
         return new Ready(deliveryId, attemptId, actor.spaceId(), null,
-                new WhatsAppSender.Message(Kind.TEST, recipient.e164(), List.of()));
+                new WhatsAppSender.Message(Kind.TEST, recipient.e164(), WhatsAppSummaryMessage.TEST));
     }
 
     public WhatsAppDeliveryView testView(UUID spaceId, UUID key) {

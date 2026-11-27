@@ -64,7 +64,7 @@ export class ReminderSettingsService {
       { expectedVersion, enabled }, { headers }));
   }
 
-  /** H08.4: test template to the consented number; the same key never sends twice. */
+  /** H08.4/T36: fixed test text to the consented number; the same key never sends twice. */
   sendTest(key: string) {
     return this.http.get('/api/v1/auth/csrf').pipe(switchMap(() => this.http.post<WhatsAppDelivery>(
       `${this.endpoint}/whatsapp/test-message`, null, { headers: new HttpHeaders({ 'Idempotency-Key': key }) })));
@@ -80,8 +80,8 @@ export const WHATSAPP_STATE_LABELS: Record<WhatsAppState, string> = {
   CONSENT_REQUIRED: 'Número cadastrado, falta o consentimento: nenhum resumo vai para o WhatsApp.',
   SUSPENDED: 'Canal suspenso por uma falha permanente: nenhum resumo vai para o WhatsApp até você corrigir e reativar.',
   DISABLED: 'Consentimento registrado, canal desativado: nenhum resumo vai para o WhatsApp.',
-  PROVIDER_UNAVAILABLE: 'Canal configurado e ativo, mas o envio pela Meta está desligado ou incompleto no servidor: nenhum resumo é enviado.',
-  READY: 'Canal ativo: os resumos serão enviados ao número cadastrado. Aceite da Meta não é entrega; acompanhe cada resumo na página dele.',
+  PROVIDER_UNAVAILABLE: 'Canal configurado e ativo, mas o envio pela Evolution API está desligado ou incompleto no servidor: nenhum resumo é enviado.',
+  READY: 'Canal ativo: os resumos serão enviados ao número cadastrado. Aceite da Evolution API não é entrega; acompanhe cada resumo na página dele.',
 };
 
 export const SETTINGS_EVENT_LABELS: Record<string, string> = {

@@ -41,7 +41,7 @@ export const CHANNEL_REASON_LABELS: Record<string, string> = {
   CONSENT_REQUIRED: 'sem consentimento do administrador atual',
   DISABLED: 'canal desativado',
   SUSPENDED: 'canal suspenso por uma falha permanente',
-  PROVIDER_UNAVAILABLE: 'envio pela Meta desligado ou incompleto no servidor',
+  PROVIDER_UNAVAILABLE: 'envio pela Evolution API desligado ou incompleto no servidor',
 };
 
 @Injectable({ providedIn: 'root' })

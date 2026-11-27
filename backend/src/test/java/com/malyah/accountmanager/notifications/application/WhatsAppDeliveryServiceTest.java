@@ -56,6 +56,7 @@ import com.malyah.accountmanager.notifications.domain.WhatsAppDeliveryStatus;
 import com.malyah.accountmanager.notifications.domain.WhatsAppFailureReason;
 import com.malyah.accountmanager.notifications.domain.WhatsAppRecipient;
 import com.malyah.accountmanager.notifications.domain.WhatsAppSkipReason;
+import com.malyah.accountmanager.notifications.domain.WhatsAppSummaryMessage;
 
 /** H08.4 orchestration with mocked ports; the PostgreSQL and HTTP behavior is in WhatsAppDeliveryPostgresIT. */
 class WhatsAppDeliveryServiceTest {
@@ -103,7 +104,6 @@ class WhatsAppDeliveryServiceTest {
         when(summaries.activeAdministrator(SPACE)).thenReturn(Optional.of(ADMIN));
         when(settings.activeConsent(SPACE)).thenReturn(Optional.of(consent(ADMIN, NUMBER)));
         when(provider.availability()).thenReturn(new WhatsAppProviderStatus.Availability(true, "PROVIDER_READY", "ok"));
-        when(provider.testTemplateConfigured()).thenReturn(true);
         when(summaries.find(SPACE, SUMMARY)).thenReturn(Optional.of(stored(LUZ, AGUA)));
         when(composer.compose(SPACE, TODAY, ReminderSlot.FIRST)).thenReturn(ReminderSummary.compose(TODAY,
                 ReminderSlot.FIRST, List.of(LUZ, AGUA)));
@@ -118,8 +118,12 @@ class WhatsAppDeliveryServiceTest {
         var ready = (Ready) service.prepare(SUMMARY, NOW);
         assertThat(ready.message().recipientE164()).isEqualTo("+5511987654321");
         assertThat(ready.message().kind()).isEqualTo(WhatsAppSender.Kind.SUMMARY);
-        assertThat(ready.message().parameters()).containsExactly("05/10/2026, 09:00", "2 contas, total R$ 200,00",
-                "05/10 Luz R$ 120,00; 05/10 Água R$ 80,00", "https://contas.example/lembretes/resumos/" + SUMMARY);
+        assertThat(ready.message().text()).isEqualTo("""
+                Contas a pagar em 05/10/2026, 09:00.
+                2 contas, total R$ 200,00
+                • 05/10 Luz R$ 120,00
+                • 05/10 Água R$ 80,00
+                Lista completa: https://contas.example/lembretes/resumos/%s""".formatted(SUMMARY));
         var inserted = ArgumentCaptor.forClass(NewDelivery.class);
         verify(deliveries).insert(inserted.capture());
         assertThat(inserted.getValue().status()).isEqualTo(WhatsAppDeliveryStatus.ATTEMPTING);
@@ -137,7 +141,7 @@ class WhatsAppDeliveryServiceTest {
         when(composer.compose(SPACE, TODAY, ReminderSlot.FIRST)).thenReturn(ReminderSummary.compose(TODAY,
                 ReminderSlot.FIRST, List.of(AGUA, nova)));
         var ready = (Ready) service.prepare(SUMMARY, NOW);
-        assertThat(ready.message().parameters().get(1)).isEqualTo("1 conta, total R$ 80,00");
+        assertThat(ready.message().text().lines().toList().get(1)).isEqualTo("1 conta, total R$ 80,00");
     }
 
     @Test
@@ -231,7 +235,7 @@ class WhatsAppDeliveryServiceTest {
                         WhatsAppFailureReason.RESULT_UNCERTAIN, null))) {
             setUp();
             var ready = new Ready(DELIVERY, UUID.randomUUID(), SPACE, SUMMARY,
-                    new WhatsAppSender.Message(WhatsAppSender.Kind.SUMMARY, NUMBER.e164(), List.of()));
+                    new WhatsAppSender.Message(WhatsAppSender.Kind.SUMMARY, NUMBER.e164(), "x"));
             when(deliveries.finish(any(), any(), any(), any(), any(), any(), any())).thenReturn(true);
             assertThat(service.record(ready, c.result(), NOW)).isEqualTo(c.status());
             verify(deliveries).finish(DELIVERY, ready.attemptId(), c.status(), c.id(), c.result().errorCode(),
@@ -244,7 +248,7 @@ class WhatsAppDeliveryServiceTest {
     @Test
     void aResultAlreadyRecordedOrOfATestNotifiesNobody() {
         var ready = new Ready(DELIVERY, UUID.randomUUID(), SPACE, SUMMARY,
-                new WhatsAppSender.Message(WhatsAppSender.Kind.SUMMARY, NUMBER.e164(), List.of()));
+                new WhatsAppSender.Message(WhatsAppSender.Kind.SUMMARY, NUMBER.e164(), "x"));
         when(deliveries.finish(any(), any(), any(), any(), any(), any(), any())).thenReturn(false);
         service.record(ready, SendResult.of(Outcome.REJECTED, "1"), NOW);
         when(deliveries.finish(any(), any(), any(), any(), any(), any(), any())).thenReturn(true);
@@ -359,7 +363,7 @@ class WhatsAppDeliveryServiceTest {
         var ready = (Ready) service.prepareTest("admin@example.com", key, NOW);
         assertThat(ready.summaryId()).isNull();
         assertThat(ready.message().kind()).isEqualTo(WhatsAppSender.Kind.TEST);
-        assertThat(ready.message().parameters()).isEmpty();
+        assertThat(ready.message().text()).isEqualTo(WhatsAppSummaryMessage.TEST);
         var inserted = ArgumentCaptor.forClass(NewDelivery.class);
         verify(deliveries).insert(inserted.capture());
         assertThat(inserted.getValue().testKey()).isEqualTo(key);
@@ -380,8 +384,6 @@ class WhatsAppDeliveryServiceTest {
         assertTestRefused("WHATSAPP_TEST_TOO_SOON");
         when(deliveries.lastTestAt(SPACE)).thenReturn(Optional.of(NOW.minusSeconds(60)));
         assertThat(service.prepareTest("admin@example.com", UUID.randomUUID(), NOW)).isInstanceOf(Ready.class);
-        when(provider.testTemplateConfigured()).thenReturn(false);
-        assertTestRefused("WHATSAPP_TEST_TEMPLATE_MISSING");
         when(provider.availability()).thenReturn(new WhatsAppProviderStatus.Availability(false, "PROVIDER_DISABLED",
                 "desligado"));
         assertTestRefused("PROVIDER_DISABLED");

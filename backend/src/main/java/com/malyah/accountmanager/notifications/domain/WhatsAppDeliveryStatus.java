@@ -37,7 +37,10 @@ public enum WhatsAppDeliveryStatus {
         return this == SENT || this == DELIVERED || this == READ || this == FAILED;
     }
 
-    /** The Meta status names ({@code sent}, {@code delivered}, {@code read}, {@code failed}); others are ignored. */
+    /**
+     * The provider-neutral status names ({@code sent}, {@code delivered}, {@code read}, {@code failed}) the adapter
+     * translates the provider's statuses into; others are ignored.
+     */
     public static Optional<WhatsAppDeliveryStatus> fromWebhook(String status) {
         if (status == null) return Optional.empty();
         return switch (status) {

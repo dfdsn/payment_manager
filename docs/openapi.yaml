@@ -2019,10 +2019,11 @@ paths:
       summary: Acompanha o envio do resumo pelo WhatsApp (H08.4, somente administrador)
       description: >-
         Situação da entrega lógica do resumo (uma por resumo), com número mascarado, quantidade de contas enviadas e os
-        instantes de tentativa, aceite, envio, entrega, leitura ou falha. Aceite da Meta (ACCEPTED) não é entrega.
+        instantes de tentativa, aceite, envio, entrega, leitura ou falha. Aceite da Evolution API (ACCEPTED) não é entrega.
         NOT_PLANNED quando o canal não estava pronto na geração; WAITING quando previsto e ainda não tentado.
-        H08.5: RETRY_WAITING com nextAttemptAt, uma linha por tentativa em attempts e reconciledAt quando um resultado
-        incerto foi confirmado pelo webhook. Não há reenvio manual.
+        H08.5: RETRY_WAITING com nextAttemptAt e uma linha por tentativa em attempts. reconciledAt só é preenchido
+        quando o provedor devolve a referência da tentativa (a Evolution API não devolve; desde T36 fica nulo). Não há
+        reenvio manual.
       security:
         - sessionCookie: []
       parameters:
@@ -2038,7 +2039,7 @@ paths:
       operationId: sendWhatsAppTestMessage
       summary: Envia a mensagem de teste ao número consentido do administrador (H08.4)
       description: >-
-        Usa o template de teste configurado no servidor (sem dados financeiros). Exige consentimento ativo do
+        Envia um texto fixo pela Evolution API, sem dados financeiros (T36). Exige consentimento ativo do
         administrador atual para o número atual e provedor configurado; o canal não precisa estar ativado. Repetir a
         mesma chave devolve o primeiro resultado sem reenviar; no máximo um teste por minuto por espaço.
       security:
@@ -2050,44 +2051,32 @@ paths:
         "400": { description: WHATSAPP_REQUEST_INVALID (chave ausente ou mal formada)., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { description: NOTIFICATION_ADMINISTRATOR_REQUIRED, ACTIVE_SPACE_ACCESS_NOT_FOUND ou sem token CSRF., content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "409": { description: "WHATSAPP_CONSENT_REQUIRED, PROVIDER_DISABLED, PROVIDER_NOT_CONFIGURED, WHATSAPP_TEST_TEMPLATE_MISSING ou WHATSAPP_TEST_TOO_SOON.", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: "WHATSAPP_CONSENT_REQUIRED, PROVIDER_DISABLED, PROVIDER_NOT_CONFIGURED ou WHATSAPP_TEST_TOO_SOON.", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /integrations/whatsapp/webhook:
-    get:
-      operationId: verifyWhatsAppWebhook
-      summary: Verificação do webhook pela Meta (H08.4)
-      description: Sem sessão. Responde o desafio em texto somente com hub.mode=subscribe e o verify token configurado.
-      security: []
-      parameters:
-        - { name: hub.mode, in: query, schema: { type: string, example: subscribe } }
-        - { name: hub.verify_token, in: query, schema: { type: string } }
-        - { name: hub.challenge, in: query, schema: { type: string } }
-      responses:
-        "200": { description: O próprio hub.challenge., content: { text/plain: { schema: { type: string } } } }
-        "403": { description: Modo, token ou desafio inválidos. }
-        "404": { description: Integração desligada ou incompleta. }
     post:
       operationId: receiveWhatsAppWebhook
-      summary: Eventos da Meta (H08.4)
+      summary: Eventos da Evolution API (H08.4, T36)
       description: >-
-        Único caminho sem sessão e sem CSRF. A assinatura X-Hub-Signature-256 (HMAC-SHA256 do corpo bruto com o app
-        secret) é validada antes de qualquer leitura. Aplica somente statuses (sent, delivered, read, failed) de
-        mensagens conhecidas do número configurado, uma vez cada e sem regressão; ignora mensagens recebidas. Nunca altera
-        despesas ou pagamentos.
+        Único caminho sem sessão e sem CSRF, e só para POST (não há verificação por GET). A Evolution API não assina os
+        eventos: o cabeçalho X-Webhook-Token, configurado no webhook da instância, é comparado em tempo constante antes
+        de qualquer leitura. Aplica somente eventos messages.update da instância configurada sobre mensagens enviadas
+        pelo sistema (fromMe): SERVER_ACK (enviada), DELIVERY_ACK (entregue), READ/PLAYED (lida) e ERROR (falha), uma
+        vez cada e sem regressão; ignora mensagens recebidas e eventos de conexão. Nunca altera despesas ou pagamentos.
       security: []
       parameters:
-        - { name: X-Hub-Signature-256, in: header, required: true, schema: { type: string, example: "sha256=<hex>" } }
+        - { name: X-Webhook-Token, in: header, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, description: Payload de webhook do WhatsApp Business (object whatsapp_business_account). }
+            schema: { type: object, description: "Evento de webhook da Evolution API v2 (event, instance, data, date_time)." }
       responses:
         "200": { description: Recebido (inclusive quando nada se aplicava). }
-        "401": { description: Assinatura ausente ou inválida; nada aplicado. }
+        "401": { description: Segredo ausente ou errado; nada aplicado. }
         "404": { description: Integração desligada ou incompleta. }
         "413": { description: Corpo acima de 3 MB. }
-        "500": { description: Falha interna; a Meta reenvia e o reenvio é deduplicado. }
-        "503": { description: Situação de mensagem cujo id ainda não foi gravado enquanto há tentativa em andamento; a Meta reenvia. }
+        "500": { description: Falha interna; a Evolution API reenvia e o reenvio é deduplicado. }
+        "503": { description: Situação de mensagem cujo id ainda não foi gravado enquanto há tentativa em andamento; a Evolution API reenvia. }
 components:
   securitySchemes:
     sessionCookie:
@@ -3177,7 +3166,7 @@ components:
               required: [available, code, message]
               properties:
                 available: { type: boolean }
-                code: { type: string, enum: [PROVIDER_DISABLED, PROVIDER_NOT_CONFIGURED, PROVIDER_READY], description: 'H08.4: adapter da Meta; desligado por padrão.' }
+                code: { type: string, enum: [PROVIDER_DISABLED, PROVIDER_NOT_CONFIGURED, PROVIDER_READY], description: 'H08.4/T36: adapter da Evolution API; desligado por padrão.' }
                 message: { type: string }
             state: { type: string, enum: [RECIPIENT_REQUIRED, CONSENT_REQUIRED, DISABLED, SUSPENDED, PROVIDER_UNAVAILABLE, READY], description: 'H08.5: SUSPENDED quando uma falha permanente desativou o canal; número e consentimento continuam valendo.' }
             suspension:
@@ -3253,11 +3242,11 @@ components:
             message: { type: string, description: Mensagem do catálogo. }
     WhatsAppDelivery:
       type: object
-      description: H08.4. Número sempre mascarado; nenhum id da Meta, token ou texto do provedor.
+      description: H08.4. Número sempre mascarado; nenhum id do provedor, chave ou texto do provedor.
       required: [state, stateMessage, kind, attempts]
       properties:
         state: { type: string, description: 'H08.5: RETRY_WAITING enquanto uma nova tentativa do mesmo resumo espera, dentro da janela.', enum: [NOT_PLANNED, WAITING, ATTEMPTING, RETRY_WAITING, ACCEPTED, SENT, DELIVERED, READ, FAILED, REJECTED, UNCERTAIN, SKIPPED] }
-        stateMessage: { type: string, example: Aceito pela Meta. A entrega ainda não foi confirmada. }
+        stateMessage: { type: string, example: Aceito pela Evolution API. A entrega ainda não foi confirmada. }
         kind: { type: string, enum: [SUMMARY, TEST] }
         reason:
           type: [string, 'null']

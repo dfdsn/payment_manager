@@ -39,27 +39,20 @@ class NotificationsConfiguration {
     private static final Logger LOG = LoggerFactory.getLogger(NotificationsConfiguration.class);
 
     /**
-     * H08.4: the Meta settings. Secrets come from {@code META_WHATSAPP_*} variables, which the container entrypoint
-     * fills from the {@code *_FILE} secrets; nothing is sent unless {@code META_WHATSAPP_ENABLED=true} and every
-     * value is present.
+     * T36: the Evolution API settings. The key and the webhook secret come from {@code EVOLUTION_*} variables, which
+     * the container entrypoint fills from the {@code *_FILE} secrets; nothing is sent unless
+     * {@code EVOLUTION_API_ENABLED=true} and every value is present.
      */
     @Bean
-    MetaWhatsAppProperties metaWhatsAppProperties(Environment environment,
+    EvolutionWhatsAppProperties evolutionWhatsAppProperties(Environment environment,
             @Value("${app.whatsapp.enabled:false}") boolean enabled,
-            @Value("${app.whatsapp.api-base-url:https://graph.facebook.com}") String apiBaseUrl,
-            @Value("${app.whatsapp.api-version:}") String apiVersion,
-            @Value("${app.whatsapp.phone-number-id:}") String phoneNumberId,
-            @Value("${app.whatsapp.access-token:}") String accessToken,
-            @Value("${app.whatsapp.app-secret:}") String appSecret,
-            @Value("${app.whatsapp.verify-token:}") String verifyToken,
-            @Value("${app.whatsapp.summary-template:}") String summaryTemplate,
-            @Value("${app.whatsapp.template-language:pt_BR}") String templateLanguage,
-            @Value("${app.whatsapp.test-template:}") String testTemplate,
-            @Value("${app.whatsapp.test-template-language:pt_BR}") String testTemplateLanguage,
+            @Value("${app.whatsapp.api-base-url:}") String apiBaseUrl,
+            @Value("${app.whatsapp.api-key:}") String apiKey,
+            @Value("${app.whatsapp.instance:}") String instance,
+            @Value("${app.whatsapp.webhook-token:}") String webhookToken,
             @Value("${app.whatsapp.connect-timeout:5s}") Duration connectTimeout,
             @Value("${app.whatsapp.request-timeout:15s}") Duration requestTimeout) {
-        var properties = new MetaWhatsAppProperties(enabled, apiBaseUrl, apiVersion, phoneNumberId, accessToken,
-                appSecret, verifyToken, summaryTemplate, templateLanguage, testTemplate, testTemplateLanguage,
+        var properties = new EvolutionWhatsAppProperties(enabled, apiBaseUrl, apiKey, instance, webhookToken,
                 connectTimeout, requestTimeout);
         properties.requireSecureIn("production".equalsIgnoreCase(environment.getProperty("APP_ENVIRONMENT", "local")));
         if (enabled && !properties.configured())
@@ -68,8 +61,8 @@ class NotificationsConfiguration {
     }
 
     @Bean
-    MetaWhatsAppProvider whatsAppProvider(MetaWhatsAppProperties properties) {
-        return new MetaWhatsAppProvider(properties);
+    EvolutionWhatsAppProvider whatsAppProvider(EvolutionWhatsAppProperties properties) {
+        return new EvolutionWhatsAppProvider(properties);
     }
 
     /** Only the transactional use case is a bean of this type, so injection by type stays unambiguous. */
@@ -128,21 +121,21 @@ class NotificationsConfiguration {
     @Bean
     WhatsAppDeliveryUseCase whatsAppDeliveryUseCase(JdbcTemplate jdbcTemplate, ExpenseReminderQueries expenses,
             RecurrenceForecastQueries forecasts, ObjectProvider<UpcomingOccurrenceGeneration> generation,
-            MetaWhatsAppProvider provider, AuthenticatedUserContextQuery contexts, Clock applicationClock,
+            EvolutionWhatsAppProvider provider, AuthenticatedUserContextQuery contexts, Clock applicationClock,
             @Value("${app.public-base-url}") String publicBaseUrl, PlatformTransactionManager transactionManager) {
         return new TransactionalWhatsAppDeliveryUseCase(deliveries(jdbcTemplate, expenses, forecasts, generation,
                 provider, contexts, applicationClock, publicBaseUrl), provider,
                 new TransactionTemplate(transactionManager));
     }
 
-    /** H08.4: the Meta webhook (signature checked before anything is read). */
+    /** T36: the Evolution API webhook (shared secret checked before anything is read). */
     @Bean
     WhatsAppWebhookUseCase whatsAppWebhookUseCase(JdbcTemplate jdbcTemplate, ExpenseReminderQueries expenses,
             RecurrenceForecastQueries forecasts, ObjectProvider<UpcomingOccurrenceGeneration> generation,
-            MetaWhatsAppProvider provider, MetaWhatsAppProperties properties, AuthenticatedUserContextQuery contexts,
+            EvolutionWhatsAppProvider provider, EvolutionWhatsAppProperties properties, AuthenticatedUserContextQuery contexts,
             Clock applicationClock, @Value("${app.public-base-url}") String publicBaseUrl,
             PlatformTransactionManager transactionManager) {
-        return new MetaWhatsAppWebhook(properties, deliveries(jdbcTemplate, expenses, forecasts, generation, provider,
+        return new EvolutionWhatsAppWebhook(properties, deliveries(jdbcTemplate, expenses, forecasts, generation, provider,
                 contexts, applicationClock, publicBaseUrl), new TransactionTemplate(transactionManager));
     }
 
@@ -150,7 +143,7 @@ class NotificationsConfiguration {
     @ConditionalOnProperty(name = "app.jobs.whatsapp.enabled", matchIfMissing = true)
     WhatsAppDeliveryJob whatsAppDeliveryJob(JdbcTemplate jdbcTemplate, ExpenseReminderQueries expenses,
             RecurrenceForecastQueries forecasts, ObjectProvider<UpcomingOccurrenceGeneration> generation,
-            MetaWhatsAppProvider provider, AuthenticatedUserContextQuery contexts, Clock applicationClock,
+            EvolutionWhatsAppProvider provider, AuthenticatedUserContextQuery contexts, Clock applicationClock,
             @Value("${app.public-base-url}") String publicBaseUrl, PlatformTransactionManager transactionManager) {
         return new WhatsAppDeliveryJob(deliveries(jdbcTemplate, expenses, forecasts, generation, provider, contexts,
                 applicationClock, publicBaseUrl), provider, new TransactionTemplate(transactionManager));
