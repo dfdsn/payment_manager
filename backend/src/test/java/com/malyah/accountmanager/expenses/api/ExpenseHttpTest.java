@@ -24,6 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -52,6 +53,8 @@ import com.malyah.accountmanager.identity.infrastructure.security.SessionLifetim
         "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration"
 })
 @AutoConfigureMockMvc
+// csrf() swaps the CSRF repository inside the cached context; discard it so other HTTP tests keep the cookie repository.
+@DirtiesContext
 class ExpenseHttpTest {
     private static final UUID EXPENSE = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID KEY = UUID.fromString("00000000-0000-0000-0000-000000000004");

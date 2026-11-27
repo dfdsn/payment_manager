@@ -65,7 +65,9 @@ As matrizes W1–W21 (H08.4) e R1–R21 (H08.5) continuam valendo. Os cenários 
 | JaCoCo domínio/aplicação (≥80%/≥70%) | linhas 3778/3835 (98,51%), branches 2127/2260 (94,12%) |
 | PIT (≥70%, `-Pmutation verify -DskipITs`) | 1689/1849 (91%), força 95%; limites mantidos, sem exclusões novas |
 | Vitest / build Angular | 149/149 / aprovado |
-| Smoke E2E | 16/18. As 2 falhas (H07.1 e H07.3, fechamento do mês) também falham em `main` sem esta mudança; não tocam o WhatsApp. |
+| Smoke E2E | 18/18. H07.1 e H07.3 falhavam também em `main`, porque o fechamento simulado é de setembro e a página abre no mês corrente; o relógio do navegador foi fixado em 29/09/2026 nesses testes. |
+| `npm audit --audit-level=moderate` | 0 vulnerabilidades. Avisos publicados depois do último CI de `main` (vite, zod, undici, piscina, glob, minimatch) foram resolvidos com Angular 21.2.26 / `@angular/build` e `@angular/cli` 21.2.31, Vitest 4.1.12 e `overrides` de `glob` 14.0.6 e `minimatch` 11.0.9 (dependências do próprio CLI); o lockfile foi regenerado. |
+| Ordem dos testes HTTP | No CI, `AuthenticationHttpTest` reaproveitava o contexto de `InvitationHttpTest`, cujo `csrf()` troca o repositório de CSRF do contexto. `InvitationHttpTest`, `MembershipHttpTest` e `ExpenseHttpTest` agora usam `@DirtiesContext`; conferido nas ordens alfabética e inversa. |
 | E2E full-stack | **Não executado.** O cenário só roda antes das 17:55 de São Paulo e a sessão estava depois desse horário; o deslocamento de relógio por dias (`E2E_CLOCK_OFFSET_DAYS`) só existe no PR da H09.1, ainda não integrado. O trecho do webhook foi ajustado (`POST` desligado → `404`, `GET` → `401`). |
 
 ## Riscos e limitações

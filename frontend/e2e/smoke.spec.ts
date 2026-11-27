@@ -598,6 +598,8 @@ test('H07.1 closes a month with pending entries only after the warning is confir
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
+  // The mocked closing is September 2026; pin the browser clock so the page selects that month on any run date.
+  await page.clock.setFixedTime(new Date('2026-09-29T12:00:00-03:00'));
   await page.goto('/fechamento');
   await expect(page.getByRole('heading', { name: 'Fechamento do mês' })).toBeVisible();
   await expect(page.getByTestId('closing-status')).toContainText('Mês não fechado');
@@ -660,6 +662,8 @@ test('H07.2 distinguishes the saved snapshot from current data changed after the
       fields: ['SITUATION', 'PAID_AMOUNT'], saved: snapshot.lines[0], current: paid }] })));
 
   await page.setViewportSize({ width: 390, height: 844 });
+  // The mocked closing is September 2026; pin the browser clock so the page selects that month on any run date.
+  await page.clock.setFixedTime(new Date('2026-09-29T12:00:00-03:00'));
   await page.goto('/fechamento');
   await expect(page.getByTestId('closing-outdated')).toContainText('1 diferença(s)');
   await expect(page.getByTestId('closing-changes')).toContainText('Situação: Pendente → Paga');
@@ -728,6 +732,8 @@ test('H07.3 generates a new version and still shows the first one as it was save
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
+  // The mocked closing is September 2026; pin the browser clock so the page selects that month on any run date.
+  await page.clock.setFixedTime(new Date('2026-09-29T12:00:00-03:00'));
   await page.goto('/fechamento');
   await expect(page.getByTestId('closing-outdated')).toBeVisible();
   await page.getByRole('button', { name: 'Gerar nova versão…' }).click();
